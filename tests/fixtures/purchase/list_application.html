@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><title>软通智慧科技专业服务系统</title></head>
+<body>
+<div id="main_content">
+  <form id="formPurchaseRequisitionIndex" method="post" action="/WebTP/PurchaseRequisition">
+    <input name="PR_PrjNo" value="" />
+    <input name="PR_RequisitionNo" value="" />
+  </form>
+  <table class="data-grid">
+    <thead>
+      <tr>
+        <th>操作</th>
+        <th>申请单编号</th>
+        <th>项目编号</th>
+        <th>项目名称</th>
+        <th>申请人</th>
+        <th>申请时间</th>
+        <th>单据状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          <a href="javascript:;" class="Edit" ajax-data="10001">编辑</a>
+          <a href="javascript:;" class="Delete" ajax-data="10001">删除</a>
+        </td>
+        <td><span title="XQ-REDACTED-001">XQ-REDACTED-001</span></td>
+        <td class="l-left"><span title="PRJ-REDACTED-A">PRJ-REDACTED-A</span></td>
+        <td class="l-left"><span title="REDACTED PROJECT ALPHA">REDACTED PROJECT ALPHA</span></td>
+        <td>USER_A</td>
+        <td>2026-07-01</td>
+        <td>已保存</td>
+      </tr>
+      <tr>
+        <td>
+          <a href="javascript:;" class="Edit" ajax-data="10002">编辑</a>
+          <a href="javascript:;" class="Delete" ajax-data="10002">删除</a>
+        </td>
+        <td><span title="XQ-REDACTED-002">XQ-REDACTED-002</span></td>
+        <td class="l-left"><span title="PRJ-REDACTED-B">PRJ-REDACTED-B</span></td>
+        <td class="l-left"><span title="REDACTED PROJECT BETA">REDACTED PROJECT BETA</span></td>
+        <td>USER_B</td>
+        <td>2026-06-15</td>
+        <td>审批中</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pager">共2条</div>
+</div>
+</body>
+</html>

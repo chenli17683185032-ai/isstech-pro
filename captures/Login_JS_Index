@@ -1,0 +1,179 @@
+//----------------------------------------------------------
+// http://passport.isstech.com/Login/JS/Index
+// 脚本生成时间: 2026/7/14 1:10:22
+// Copyright © 2001-2026 软通动力信息技术（集团）有限公司 版权所有
+//----------------------------------------------------------
+var login = {
+    pageload: function () {
+
+        $("#ReturnUrl").val("");
+        $("#loading").hide();
+        var ctp = $("#ctip").val();
+        var etp = $("#etip").val();
+        var $DomainName = $("#DomainName input");
+        var $Password = $("#Password input");
+        var $form = $("#g_loginform form");
+        $(".error").removeClass("error");
+        if ($("#uname").val() != "") {
+            $("#RemeberMe").attr("checked", true);
+        }
+        if ($("#flag").val() == "0") {
+            $("#Special").val(ctp);
+            $("#Submit").addClass("error");
+        }
+        $("#DomainName input").focus();
+
+        $("input").keydown(function (e) {
+            var $this = $(this);
+            $(".error").removeClass("error");
+            if (e.keyCode == 13) {
+                if ($this.attr("name") == "emp_Password") {
+                    $("#BtnLogin").trigger("click");
+                }
+            }
+        });
+
+        $("#bgLogin").click(function (e) {
+            $("#ReturnUrl").val("Special");
+            $("#BtnLogin").trigger("click");
+        });
+
+        $("#Special").click(function (e) {
+            $("#ReturnUrl").val("Special");
+            $("#BtnLogin").trigger("click");
+        });
+
+        $("#BtnQS").click(function (e) {
+            $("#ReturnUrl").val("QS");
+            $("#BtnLogin").trigger("click");
+        });
+        $("#BtnHIPO").click(function (e) {
+            $("#ReturnUrl").val("HIPO");
+            $("#BtnLogin").trigger("click");
+        });
+
+        $("#BtnLogin").click(function (e) {
+            e.preventDefault();
+            //		    $("#ReturnUrl").val("360");
+            var $this = $(this);
+            var goHome = true;
+            $(".error").removeClass("error");
+
+            if ($DomainName.val().length == 0) {
+                $DomainName.parent().addClass("error");
+                goHome = false;
+            }
+            if ($Password.val().length == 0) {
+                $Password.parent().addClass("error");
+                goHome = false;
+            }
+
+            if (goHome) {
+                e.preventDefault();
+                $this.val(etp);
+                $("#loading").show();
+                $form.submit();
+
+            }
+        });
+
+        $("#BtnQ12").click(function (e) {
+            $("#ReturnUrl").val("Q12");
+            e.preventDefault();
+            var $this = $(this);
+            var goHome = true;
+            $(".error").removeClass("error");
+
+            if ($DomainName.val().length == 0) {
+                $DomainName.parent().addClass("error");
+                goHome = false;
+            }
+            if ($Password.val().length == 0) {
+                $Password.parent().addClass("error");
+                goHome = false;
+            }
+
+            if (goHome) {
+                e.preventDefault();
+                $this.val(etp);
+                $("#loading").show();
+                $form.submit();
+            }
+        });
+
+        $("#BtnLink").click(function (e) {
+            $("#ReturnUrl").val("Special");
+            e.preventDefault();
+            var $this = $(this);
+            var goHome = true;
+            $(".error").removeClass("error");
+
+            if ($DomainName.val().length == 0) {
+                $DomainName.parent().addClass("error");
+                goHome = false;
+            }
+            if ($Password.val().length == 0) {
+                $Password.parent().addClass("error");
+                goHome = false;
+            }
+
+            if (goHome) {
+                e.preventDefault();
+                $this.val(etp);
+                $("#loading").show();
+                $form.submit();
+
+            }
+        });
+        login.initlang();
+        var imgarr = $("#bgstr").val().split(",");
+        $("#g_loginform").bgswitcher({
+            images: imgarr,
+            shuffle: false
+        });
+        $("#bgslideol li").click(function (e) {
+            $("#g_loginform").bgswitcher("select", $(this).attr("ajax-id"));
+        });
+    },
+    /*=================================================================*/
+    initlang: function () {
+        var _sCurrentLanguage = $("html").attr("lang");
+        var _$Language = $("#g_language");
+        var _SupportedLanguages = [{ name: "zh-CN", display: "简体中文" }, { name: "en-US", display: "English"}];
+        if (_sCurrentLanguage == "") {
+            _sCurrentLanguage = "zh-CN";
+        }
+        _$Language.html("");
+        _$Language.append("<a href=\"#\" class=\"dropdown-toggle\" data-toggle=\"dropdown\"></a>");
+        _$Language.append("<ul class=\"dropdown-menu\"></ul>");
+
+        var _$Current = _$Language.children("a");
+        var _$List = _$Language.children("ul");
+
+        $.each(_SupportedLanguages, function (index, value) {
+            if (value.name === _sCurrentLanguage) {
+
+                _$Current.attr("title", value.display).html(value.display + '<b class="caret"></b>');
+            }
+            else {
+                _$List.append("<li><a href=\"#\" title=\"" + value.display + "\" lang=\"" + value.name + "\"><i class=\"icon-flags " + value.name + "\"></i>" + value.display + "</a></li>");
+            }
+        });
+
+        _$List.find("li a").bind("click", function (e) {
+            e.preventDefault();
+            login.setlan($(this).attr("lang"));
+        });
+    },
+    setlan: function (lang) {
+        $.ajax('/Login/lang/' + lang + "?r=" + Math.random(), {
+            success: function (e) {
+                if (e == "ok") {
+                    window.location.href = '/Login/Index/';
+                }
+            }
+        })
+
+        return true;
+    }
+};

@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "project": "isstech-replay",
+  "generatedAt": "2026-07-14T08:31:40Z",
+  "notes": [
+    "Hashes are SHA-256 of on-disk bytes at inventory time.",
+    "Raw and login-fail artifacts are gitignored; hashes still pin them for operators with local copies.",
+    "Never store password, cookie, or ticket values in this file."
+  ],
+  "artifacts": [
+    {
+      "path": "captures/playwright/unauth.har",
+      "sha256": "ff1addaee5ab75a31c160c83c90a90999711e6715b602013dc749a88e5c47e73",
+      "source": "Playwright 1.61 unauthenticated navigation to /WebTP/PurchaseRequisition",
+      "capturedAt": "2026-07-13T17:55:05Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "description": "Anonymous redirect chain: business host 302 → passport login page + static assets"
+    },
+    {
+      "path": "captures/playwright/unauth.png",
+      "sha256": "a1fbbe393c3b2b74c2c418f82b99afb5992fb6d93a793f8ff7adef4c7d05b252",
+      "source": "Playwright screenshot of unauthenticated login page",
+      "capturedAt": "2026-07-13T17:55:05Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "ignored",
+      "description": "Visual confirmation of passport login UI"
+    },
+    {
+      "path": "captures/login_fail_response.html",
+      "sha256": "1215e7423697337b85ed9ed8ac34c87d8f91d353f12ab270b99c2ebbd1afd836",
+      "source": "httpx failed login POST (no follow)",
+      "capturedAt": "2026-07-13T17:53:00Z",
+      "sensitivity": "medium",
+      "status": "superseded",
+      "git": "ignored",
+      "description": "302 Object moved to / after bad credentials; superseded for success-login protocol"
+    },
+    {
+      "path": "captures/login_fail_followed.html",
+      "sha256": "f605b7b923a416dd7a4707b8025a83cb63be3678afc4c0985e58f7f0364f7ae7",
+      "source": "httpx failed login POST with redirect follow",
+      "capturedAt": "2026-07-13T17:53:00Z",
+      "sensitivity": "medium",
+      "status": "superseded",
+      "git": "ignored",
+      "description": "Re-rendered login form with flag=0 and Chinese error text; not a success path"
+    },
+    {
+      "path": "captures/Login_JS_Index",
+      "sha256": "7641e98b7676fba4007fe85d05f94d50948c2c01544bdfc9043d304093b88bc9",
+      "source": "GET https://passport.isstech.com/Login/JS/Index",
+      "capturedAt": "2026-07-13T17:52:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked-at-repo-root-captures",
+      "description": "Passport login page client script (field UX, flag handling)"
+    },
+    {
+      "path": "captures/Scripts_MicrosoftAjax.js",
+      "sha256": "178f6f402b99384d4998958562118afad5817013c5706a586db7aa0f63a2bcd7",
+      "source": "passport/iPSA shared MicrosoftAjax",
+      "capturedAt": "2026-07-13T17:52:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked-at-repo-root-captures",
+      "description": "ASP.NET AJAX library copy for offline analysis"
+    },
+    {
+      "path": "captures/Scripts_jquery.form.min.js",
+      "sha256": "15ebb2e218eaddd752ab20722485f44adc4645500f8732cf3ad670e5b863c600",
+      "source": "iPSA jquery.form",
+      "capturedAt": "2026-07-13T17:52:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked-at-repo-root-captures",
+      "description": "ajaxSubmit used by PR Index filter/pager"
+    },
+    {
+      "path": "captures/raw/auth_purchase_requisition.html",
+      "sha256": "479639cab1a92766ccb1640ceb208d555157ba131509a271fbddb360bcde0e33",
+      "source": "Authenticated Chrome GET /WebTP/PurchaseRequisition",
+      "capturedAt": "2026-07-13T18:37:00Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "description": "Authenticated application shell HTML including nav, filter form, pager templates"
+    },
+    {
+      "path": "captures/raw/purchase_requisition_index.js",
+      "sha256": "a9977c671cd9f69876731d58e256f8a6b00e3f72a1fa2c320dbeea74b49e93d2",
+      "source": "GET /WebTP/PurchaseRequisition/JS/Index",
+      "capturedAt": "2026-07-13T18:37:00Z",
+      "sensitivity": "medium",
+      "status": "active",
+      "git": "ignored",
+      "description": "New/Edit/Delete/pager client handlers; Delete uses GET AJAX"
+    },
+    {
+      "path": "captures/raw/attachment_upload.js",
+      "sha256": "594848f39888a70db4cdc23085557f5413b6e673c175314b1a16cc5797f72d79",
+      "source": "GET /WebTP/Attachment/js/Upload (or equivalent upload script)",
+      "capturedAt": "2026-07-13T18:37:00Z",
+      "sensitivity": "medium",
+      "status": "active",
+      "git": "ignored",
+      "description": "Upload/Delete/Download path templates for attachments"
+    },
+    {
+      "path": "captures/raw/ipsa_elle.min.js",
+      "sha256": "3d2af53fb2e338b67b577d748d9d19a57ee5a7821a224defc7361b8da684844a",
+      "source": "GET /WebTP/Scripts/iPSA_elle.min.js",
+      "capturedAt": "2026-07-13T18:37:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "ignored",
+      "description": "iPSA shell helpers; appPath=/WebTP; GoToUrl navigation"
+    },
+    {
+      "path": "captures/redacted/auth_cookie_metadata.json",
+      "sha256": "6518015b9d0bafb555f767fb139c63d2987557e5e75c37181a8bae619929b784",
+      "source": "Derived from authenticated browser cookie jar (values stripped)",
+      "capturedAt": "2026-07-13T18:37:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Cookie names, domains, paths, flags only"
+    },
+    {
+      "path": "captures/redacted/auth-cookie-probe.json",
+      "sha256": "e2927a5442e310f93b48d70cea6a0936f1e344effc9e2b1cc0d620c4703a3b5b",
+      "source": "Normalized cookie metadata plus direct HTTP exclusion-probe results (values removed)",
+      "capturedAt": "2026-07-14T02:10:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Cookie metadata, browser-ticket HTTP replay, and evidence that .iPSA is necessary within the observed set"
+    },
+    {
+      "path": "captures/redacted/purchase_requisition_initial_network.json",
+      "sha256": "ece1b195d4f8cff8316888d2c906635cff26c5d90231433e96ba1a7c2112de85",
+      "source": "Chrome Network export for authenticated PR page load (URLs/status only)",
+      "capturedAt": "2026-07-13T18:37:40Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Initial document/CSS/JS request list without bodies or cookies"
+    },
+    {
+      "path": "portal_login.html",
+      "sha256": "97f76222bb2523832734ae9d6b0328662143d32be2b494c479c83198117e4ca2",
+      "source": "Passport login HTML with DomainUrl→Portal",
+      "capturedAt": "2026-07-13T17:52:00Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Login form field inventory for Portal return path"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "login-success-har",
+      "neededPath": "captures/raw/YYYYMMDD-login-success.har",
+      "redactedPath": "captures/redacted/login-success-protocol.json",
+      "reason": "No successful credential POST + redirect + .iPSA set-cookie chain captured yet"
+    },
+    {
+      "id": "five-view-deep-capture",
+      "neededPath": "captures/redacted/purchase-*.json",
+      "reason": "Approval/Adjust/Revocation/Search views only known from nav links"
+    }
+  ]
+}

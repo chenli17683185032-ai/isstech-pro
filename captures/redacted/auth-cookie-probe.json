@@ -1,0 +1,135 @@
+{
+  "description": "Cookie name/attribute probe only. Values never stored.",
+  "capturedFrom": "authenticated browser session + unauth HAR Set-Cookie",
+  "capturedAt": "2026-07-13T18:37:00Z",
+  "protocolNotes": [
+    "Anonymous GET /WebTP/PurchaseRequisition returns 302 Location to passport with DomainUrl and ReturnUrl query params.",
+    "Passport login page sets ASP.NET_SessionId (HttpOnly, SameSite=Lax, host-only passport).",
+    "An authenticated Chrome session contained .iPSA on .isstech.com (HttpOnly, SameSite=Lax, session).",
+    "A direct non-browser GET using the observed cookie set returned the authenticated Purchase Requisition page.",
+    "Removing .iPSA caused a 302 login redirect; removing idsrv or the business ASP.NET_SessionId individually still returned the authenticated page.",
+    "Local API must map sessions to upstream jars and never return .iPSA to API clients."
+  ],
+  "redirectProbe": {
+    "anonymousEntry": {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/PurchaseRequisition",
+      "expectedStatus": 302,
+      "locationTemplate": "https://passport.isstech.com/?DomainUrl=http://ipsapro.isstech.com&ReturnUrl=%2fWebTP%2fPurchaseRequisition"
+    },
+    "loginForm": {
+      "method": "POST",
+      "actionTemplate": "https://passport.isstech.com/?DomainUrl={domainUrl}&ReturnUrl={returnUrl}",
+      "fields": [
+        "emp_DomainName",
+        "emp_Password",
+        "DomainUrl",
+        "ReturnUrl",
+        "RemeberMe (only when checked)"
+      ],
+      "pageOnlyFieldsOutsideForm": ["flag", "uname", "ctip", "etip", "bgstr"],
+      "failedLoginSignals": {
+        "bodyContains": "用户名或密码错误，请重新登陆！",
+        "flagValue": "0",
+        "redirectBodySnippet": "Object moved to <a href=\"/\">here</a>"
+      },
+      "successLoginSignals": {
+        "status": "pending-capture",
+        "expectedCookieNames": [".iPSA", "DomainName", "UserName"],
+        "note": "Exact 30x chain and Set-Cookie order require captures/raw/YYYYMMDD-login-success.har"
+      }
+    }
+  },
+  "cookieNecessityProbe": {
+    "conclusion": ".iPSA is necessary within the observed cookie set; .iPSA-alone sufficiency is not yet proven.",
+    "results": [
+      {"case": "all-target-cookies", "status": 200, "authenticatedPage": true},
+      {"case": "without-.iPSA", "status": 302, "authenticatedPage": false},
+      {"case": "without-idsrv", "status": 200, "authenticatedPage": true},
+      {"case": "without-business-ASP.NET_SessionId", "status": 200, "authenticatedPage": true},
+      {"case": "without-.iPSA-and-idsrv", "status": 302, "authenticatedPage": false}
+    ]
+  },
+  "cookies": [
+    {
+      "name": "idsrv",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": null,
+      "session": true,
+      "role": "identity-related"
+    },
+    {
+      "name": "DomainName",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": null,
+      "session": true,
+      "role": "display-username"
+    },
+    {
+      "name": "SESSION_THEME_KEY",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": null,
+      "session": false,
+      "role": "ui-theme"
+    },
+    {
+      "name": "ASP.NET_SessionId",
+      "domain": "passport.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "role": "passport-session"
+    },
+    {
+      "name": "UserName",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": null,
+      "session": true,
+      "role": "display-username"
+    },
+    {
+      "name": "uname",
+      "domain": "passport.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": null,
+      "session": false,
+      "role": "remembered-username"
+    },
+    {
+      "name": ".iPSA",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "role": "business-auth"
+    },
+    {
+      "name": "ASP.NET_SessionId",
+      "domain": "ipsapro.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "role": "business-session"
+    }
+  ]
+}

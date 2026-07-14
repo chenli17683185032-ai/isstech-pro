@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <title>软通智慧科技专业服务系统</title>
+  <script src="/WebTP/PurchaseRequisition/JS/Index"></script>
+</head>
+<body>
+<div id="main_content">
+  <a href="/WebTP/PurchaseRequisition/Index">申请</a>
+  <a href="/WebTP/PurchaseRequisition/ApprovalIndex">审批</a>
+  <a href="/WebTP/PurchaseRequisition/AdjustIndex">调整</a>
+  <a href="/WebTP/PurchaseRequisition/RevocationIndex">撤销</a>
+  <a href="/WebTP/PurchaseRequisition/SearchIndex">查询</a>
+  <form action="/WebTP/PurchaseRequisition" data-ajax="true" data-ajax-method="Post"
+        id="formPurchaseRequisitionIndex" method="post">
+    <input name="PR_PrjNo" id="PR_PrjNo" type="text" value="" />
+    <input name="PR_RequisitionNo" id="PR_RequisitionNo" type="text" value="" />
+    <input name="btnSearch" id="btnSearch" type="submit" value="查询" />
+  </form>
+  <table class="data-grid">
+    <thead>
+      <tr><th>项目</th><th>申请单编号</th><th>操作</th><th>单据状态</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>REDACTED</td>
+        <td>REDACTED</td>
+        <td>
+          <a class="Edit" ajax-data="REDACTED_ID" href="#">编辑</a>
+          <a class="Delete" ajax-data="REDACTED_ID" href="#">删除</a>
+        </td>
+        <td>REDACTED</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pager">
+    <a href="/WebTP/PurchaseRequisition/Index/0/1/False/1/15">15</a>
+  </div>
+</div>
+</body>
+</html>

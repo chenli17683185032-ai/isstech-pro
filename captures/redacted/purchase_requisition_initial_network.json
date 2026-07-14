@@ -1,0 +1,299 @@
+{
+  "capturedAt": "2026-07-13T18:37:40.352Z",
+  "requests": [
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/shared/images/favicon.ico",
+      "type": "Other",
+      "status": 200,
+      "mimeType": "image/x-icon"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/PurchaseRequisition",
+      "type": "Document",
+      "status": 200,
+      "mimeType": "text/html"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/css/style.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/css/color_blue.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/shared/style.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.all.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/PurchaseRequisition/JS/Index",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "text/html"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/Globalization/zh.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/shared/images/loading.gif",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/gif"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/MicrosoftAjax.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.theme.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.base.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.accordion.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.selectable.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.button.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.core.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/jquery-1.5.2.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/iPSA_elle.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.resizable.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.autocomplete.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.dialog.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.slider.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.tabs.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.progressbar.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/redmond/jquery.ui.datepicker.css",
+      "type": "Stylesheet",
+      "status": 200,
+      "mimeType": "text/css"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/jquery.unobtrusive-ajax.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/jquery.validate.unobtrusive.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/jquery.validate.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/jquery.form.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/homeBg.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/blue/homeBgR.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/line.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/blue/menuBg.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/blue/listTitBg.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/shared/images/split.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/blue/footerL.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/blue/footerR.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Attachment/js/Upload",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "text/html"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/plugin/jquery-ui/jquery-ui.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Scripts/ajaxcontroltoolkit.min.js",
+      "type": "Script",
+      "status": 200,
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebTP/Content/themes/elle/images/menuHover.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    {
+      "method": "GET",
+      "url": "chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/images/cursor-chat.png",
+      "type": "Image",
+      "status": 200,
+      "mimeType": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><title>软通智慧科技专业服务系统 - 编辑</title></head>
+<body>
+<div id="main_content">
+  <form id="formEdit" method="post" action="/WebTP/PurchaseRequisition/Edit/10001">
+    <input type="hidden" name="PR_ID" value="10001" />
+    <input type="text" name="PR_RequisitionNo" value="XQ-REDACTED-001" />
+    <input type="text" name="PR_PrjNo" value="PRJ-REDACTED-A" />
+    <input type="text" name="PR_PrjName" value="REDACTED PROJECT ALPHA" />
+    <input type="text" name="PR_Status" value="已保存" />
+    <textarea name="PR_Description">A &amp; B</textarea>
+    <select name="PR_Category">
+      <option value="hardware">硬件</option>
+      <option value="service" selected>服务</option>
+    </select>
+    <input type="checkbox" name="PR_Urgent" value="true" checked />
+    <input type="checkbox" name="PR_Unchecked" value="true" />
+    <input type="submit" name="btnSave" value="保存" />
+  </form>
+  <input type="text" name="OUTSIDE_FORM" value="must-not-appear" />
+  <table class="data-grid">
+    <tr id="9001" status="1" class="attachment">
+      <td class="l-center">
+        <a href="javascript:;" onclick="attachementUpload.download(9001, this);">下载</a>
+        <a href="javascript:;" onclick="attachementUpload.removeDoc(9001, this);">删除</a>
+      </td>
+      <td>spec-redacted.pdf</td>
+      <td class="l-center">USER_A</td>
+      <td class="l-center">2026-07-01</td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>

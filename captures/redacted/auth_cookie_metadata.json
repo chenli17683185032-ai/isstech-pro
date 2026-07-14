@@ -1,0 +1,79 @@
+{
+  "cookies": [
+    {
+      "name": "idsrv",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "session": true,
+      "expires": "<session>"
+    },
+    {
+      "name": "DomainName",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "session": true,
+      "expires": "<session>"
+    },
+    {
+      "name": "SESSION_THEME_KEY",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "session": false,
+      "expires": "<persistent>"
+    },
+    {
+      "name": "ASP.NET_SessionId",
+      "domain": "passport.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "expires": "<session>"
+    },
+    {
+      "name": "UserName",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "session": true,
+      "expires": "<session>"
+    },
+    {
+      "name": "uname",
+      "domain": "passport.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "session": false,
+      "expires": "<persistent>"
+    },
+    {
+      "name": ".iPSA",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "expires": "<session>"
+    },
+    {
+      "name": "ASP.NET_SessionId",
+      "domain": "ipsapro.isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true,
+      "expires": "<session>"
+    }
+  ]
+}
