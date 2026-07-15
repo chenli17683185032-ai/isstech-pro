@@ -20,3 +20,7 @@ captures/login_fail_*.html
 
 # Local workflow state and business-data exports are runtime-only.
 data/
+
+# Generated design concepts and visual QA references are local-only.
+outputs/
+web/node_modules/

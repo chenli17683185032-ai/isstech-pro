@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from isstech_replay.errors import upstream_error
+from isstech_replay.errors import local_storage_error, upstream_error
 from isstech_replay.routes.deps import get_session
 from isstech_replay.routes.work_items import WorkItemOut
 from isstech_replay.session_store import SessionRecord
@@ -44,6 +44,65 @@ class SyncRunOut(BaseModel):
     database_path: str | None = None
     events: list[SyncEventOut] = Field(default_factory=list)
     work_items: list[WorkItemOut] = Field(default_factory=list)
+
+
+class SyncRunSummaryOut(BaseModel):
+    run_id: str
+    adapter: str
+    status: str
+    started_at: str
+    observed_at: str | None = None
+    finished_at: str | None = None
+    observed_count: int
+    actionable_count: int
+    event_count: int
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+@router.get("/sync/runs", response_model=list[SyncRunSummaryOut])
+def list_sync_runs(
+    _session: Annotated[SessionRecord, Depends(get_session)],
+    limit: int = Query(default=10, ge=1, le=100),
+) -> list[SyncRunSummaryOut]:
+    try:
+        records = WorkflowStorage(default_database_path()).list_runs(limit=limit)
+        return [
+            SyncRunSummaryOut(
+                run_id=str(record["run_id"]),
+                adapter=str(record["adapter"]),
+                status=str(record["status"]),
+                started_at=str(record["started_at"]),
+                observed_at=(
+                    str(record["observed_at"])
+                    if record.get("observed_at") is not None
+                    else None
+                ),
+                finished_at=(
+                    str(record["finished_at"])
+                    if record.get("finished_at") is not None
+                    else None
+                ),
+                observed_count=int(record["observed_count"]),
+                actionable_count=int(record["actionable_count"]),
+                event_count=int(record["event_count"]),
+                error_type=(
+                    str(record["error_type"])
+                    if record.get("error_type") is not None
+                    else None
+                ),
+                error_message=(
+                    str(record["error_message"])
+                    if record.get("error_message") is not None
+                    else None
+                ),
+            )
+            for record in records
+        ]
+    except Exception as exc:
+        raise local_storage_error(
+            f"sync run list failed: {type(exc).__name__}"
+        ) from exc
 
 
 @router.post("/sync/work-items", response_model=SyncRunOut)

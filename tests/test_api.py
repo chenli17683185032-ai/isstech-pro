@@ -12,6 +12,7 @@ from isstech_replay.api import create_app
 from isstech_replay.auth import login
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.config import Settings
+from isstech_replay.models.work_items import WorkflowKind
 from isstech_replay.session_store import SessionStore
 from isstech_replay.storage import WorkflowStorage
 
@@ -132,8 +133,12 @@ def test_session_required() -> None:
             ("GET", "/v1/work-items"),
             ("POST", "/v1/sync/work-items"),
             ("POST", "/v1/materials"),
+            ("GET", "/v1/extractions"),
             ("GET", "/v1/extractions/missing"),
+            ("GET", "/v1/drafts"),
             ("GET", "/v1/drafts/missing"),
+            ("GET", "/v1/work-items/current"),
+            ("GET", "/v1/sync/runs"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
@@ -262,6 +267,8 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     with client:
         first = client.post("/v1/sync/work-items", headers=headers)
         second = client.post("/v1/sync/work-items", headers=headers)
+        current = client.get("/v1/work-items/current", headers=headers)
+        runs = client.get("/v1/sync/runs", headers=headers)
 
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
@@ -270,10 +277,53 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert first.json()["event_count"] == 2
     assert second.status_code == 200
     assert second.json()["event_count"] == 0
+    assert current.status_code == 200
+    assert current.json()["source"] == "sqlite_current"
+    assert current.json()["total_count"] == 1
+    assert current.json()["items"][0]["current_approver"] == "USER_APPROVER"
+    assert runs.status_code == 200
+    assert len(runs.json()) == 2
+    assert runs.json()[0]["status"] == "succeeded"
     storage = WorkflowStorage(database)
     assert storage.table_count("sync_runs") == 2
     assert storage.table_count("workflow_current") == 2
     assert storage.table_count("workflow_events") == 2
+
+
+def test_current_work_items_keeps_freshness_when_successful_sync_is_empty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    storage = WorkflowStorage(database)
+    observed_at = "2026-07-15T01:00:00+00:00"
+    storage.start_run(
+        run_id="empty-run",
+        adapter=WorkflowKind.PURCHASE_REQUISITION,
+        started_at=observed_at,
+        max_pages=20,
+    )
+    storage.complete_run(
+        run_id="empty-run",
+        observed_at=observed_at,
+        finished_at=observed_at,
+        source_total_count=0,
+        snapshots=(),
+        actionable_count=0,
+    )
+    client, token = _authed_client()
+
+    with client:
+        response = client.get(
+            "/v1/work-items/current",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    assert response.json()["total_count"] == 0
+    assert response.json()["synced_at"] == observed_at
 
 
 def test_manual_sync_dry_run_does_not_create_database(
@@ -529,6 +579,11 @@ def test_draft_review_api_reaches_ready_with_audited_session_identity(
             json={"expected_version": validated.json()["version"]},
         )
         fetched = client.get(f"/v1/drafts/{draft_id}", headers=headers)
+        extraction_list = client.get(
+            f"/v1/extractions?material_id={material_id}",
+            headers=headers,
+        )
+        draft_list = client.get("/v1/drafts", headers=headers)
 
     assert created.status_code == 201
     assert created.json()["created"] is True
@@ -553,6 +608,12 @@ def test_draft_review_api_reaches_ready_with_audited_session_identity(
     assert ready.json()["state"] == "ready"
     assert fetched.json() == ready.json()
     assert {event["actor"] for event in ready.json()["audit_events"]} == {"alice"}
+    assert extraction_list.status_code == 200
+    assert [item["extraction_id"] for item in extraction_list.json()] == [extraction_id]
+    assert draft_list.status_code == 200
+    assert draft_list.json()[0]["draft_id"] == draft_id
+    assert draft_list.json()[0]["state"] == "ready"
+    assert draft_list.json()[0]["title"] == "REDACTED PROJECT"
 
 
 def test_preview_delete_not_sendable() -> None:
@@ -612,13 +673,17 @@ def test_openapi_available() -> None:
     assert "/v1/sessions" in paths
     assert "/v1/purchase-requisitions" in paths
     assert "/v1/work-items" in paths
+    assert "/v1/work-items/current" in paths
     assert "/v1/sync/work-items" in paths
+    assert "/v1/sync/runs" in paths
     assert "/v1/materials" in paths
     assert "/v1/materials/{material_id}/content" in paths
     assert "/v1/materials/{material_id}/extractions" in paths
+    assert "/v1/extractions" in paths
     assert "/v1/extractions/{extraction_id}" in paths
     assert "/v1/extractions/{extraction_id}/drafts" in paths
     assert "/v1/drafts/{draft_id}" in paths
+    assert "/v1/drafts" in paths
     assert "/v1/drafts/{draft_id}/fields/{field_name}" in paths
     assert "/v1/drafts/{draft_id}/validate" in paths
     assert "/v1/drafts/{draft_id}/ready" in paths

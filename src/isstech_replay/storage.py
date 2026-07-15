@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+import fcntl
 import hashlib
 import json
 import math
@@ -10,6 +12,8 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import threading
+import time
 
 from .models.drafts import (
     DraftAuditEvent,
@@ -58,6 +62,9 @@ _MIGRATIONS = {
     2: "migration_003_extraction.sql",
     3: "migration_004_review.sql",
 }
+_INITIALIZATION_THREAD_LOCK = threading.Lock()
+_INITIALIZATION_LOCK_TIMEOUT_SECONDS = 10.0
+_INITIALIZATION_LOCK_POLL_SECONDS = 0.05
 
 
 class StorageError(RuntimeError):
@@ -90,6 +97,32 @@ class StorageApplyResult:
     events: tuple[ChangeEvent, ...]
 
 
+@contextmanager
+def _schema_initialization_lock(path: Path):
+    lock_path = path.with_suffix(path.suffix + ".initialize.lock")
+    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    os.chmod(lock_path, 0o600)
+    deadline = time.monotonic() + _INITIALIZATION_LOCK_TIMEOUT_SECONDS
+    acquired = False
+    try:
+        while not acquired:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except BlockingIOError as exc:
+                if time.monotonic() >= deadline:
+                    raise StorageError(
+                        f"database schema initialization lock timed out: {path}"
+                    ) from exc
+                time.sleep(_INITIALIZATION_LOCK_POLL_SECONDS)
+        yield
+    finally:
+        if acquired:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def default_data_dir() -> Path:
     return Path(os.getenv("ISSTECH_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
 
@@ -118,6 +151,11 @@ class WorkflowStorage:
         return connection
 
     def initialize(self) -> None:
+        with _INITIALIZATION_THREAD_LOCK:
+            with _schema_initialization_lock(self.path):
+                self._initialize_locked()
+
+    def _initialize_locked(self) -> None:
         connection = self._connect()
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
@@ -556,6 +594,19 @@ class WorkflowStorage:
                 (limit,),
             ).fetchall()
             return tuple(dict(row) for row in rows)
+        finally:
+            connection.close()
+
+    def latest_successful_observed_at(self) -> str | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT observed_at FROM sync_runs "
+                "WHERE status = 'succeeded' AND observed_at IS NOT NULL "
+                "ORDER BY started_at DESC, run_id DESC LIMIT 1"
+            ).fetchone()
+            return str(row["observed_at"]) if row is not None else None
         finally:
             connection.close()
 
@@ -1012,6 +1063,38 @@ class WorkflowStorage:
         finally:
             connection.close()
 
+    def list_extractions(
+        self,
+        *,
+        material_id: str | None = None,
+        status: ExtractionStatus | None = None,
+        limit: int = 100,
+    ) -> tuple[dict[str, object], ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if material_id is not None:
+            clauses.append("material_id = ?")
+            parameters.append(material_id)
+        if status is not None:
+            clauses.append("status = ?")
+            parameters.append(status.value)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit)
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM extraction_runs"
+                + where
+                + " ORDER BY started_at DESC, extraction_id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+            return tuple(dict(row) for row in rows)
+        finally:
+            connection.close()
+
     def create_workflow_draft(
         self,
         *,
@@ -1157,6 +1240,51 @@ class WorkflowStorage:
             if row is None:
                 return None
             return self._load_workflow_draft(connection, str(row["draft_id"]))
+        finally:
+            connection.close()
+
+    def list_workflow_draft_summaries(
+        self,
+        *,
+        state: DraftState | None = None,
+        limit: int = 100,
+    ) -> tuple[dict[str, object], ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        parameters: list[object] = []
+        where = ""
+        if state is not None:
+            where = " WHERE d.state = ?"
+            parameters.append(state.value)
+        parameters.append(limit)
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT d.*, r.material_id, r.status AS extraction_status, "
+                "SUM(CASE WHEN df.review_decision = 'pending' THEN 1 ELSE 0 END) "
+                "AS pending_count, "
+                "SUM(CASE WHEN df.required = 1 AND df.review_decision != 'confirmed' "
+                "THEN 1 ELSE 0 END) AS unresolved_required_count, "
+                "MAX(CASE WHEN df.field_name = 'PR_PrjName' "
+                "THEN COALESCE(df.confirmed_value, ef.proposed_value) END) AS title "
+                "FROM workflow_drafts d "
+                "JOIN extraction_runs r USING (extraction_id) "
+                "LEFT JOIN draft_fields df USING (draft_id) "
+                "LEFT JOIN extracted_fields ef ON ef.field_id = df.source_field_id"
+                + where
+                + " GROUP BY d.draft_id "
+                "ORDER BY d.updated_at DESC, d.draft_id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+            summaries: list[dict[str, object]] = []
+            for row in rows:
+                summary = dict(row)
+                summary["validation_issue_count"] = len(
+                    self._issues_from_json(row["validation_issues_json"])
+                )
+                summaries.append(summary)
+            return tuple(summaries)
         finally:
             connection.close()
 

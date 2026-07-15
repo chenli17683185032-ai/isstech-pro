@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, NoReturn
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from isstech_replay.errors import (
@@ -18,6 +18,7 @@ from isstech_replay.extraction import DEFAULT_MAX_UNIT_CHARS, DocumentExtraction
 from isstech_replay.materials import MaterialService
 from isstech_replay.models.drafts import (
     DraftField,
+    DraftState,
     ReviewDecision,
     WorkflowDraft,
 )
@@ -107,6 +108,25 @@ class DraftOut(BaseModel):
 class DraftCreateOut(BaseModel):
     created: bool
     draft: DraftOut
+
+
+class DraftSummaryOut(BaseModel):
+    draft_id: str
+    extraction_id: str
+    material_id: str
+    workflow: str
+    profile: str
+    title: str
+    state: str
+    version: int
+    pending_count: int
+    unresolved_required_count: int
+    validation_issue_count: int
+    created_by: str
+    created_at: str
+    updated_at: str
+    validated_at: str | None = None
+    ready_at: str | None = None
 
 
 class ReviewEvidenceIn(BaseModel):
@@ -258,6 +278,54 @@ def get_draft(
 ) -> DraftOut:
     try:
         return _draft_out(_service(material_service).get_draft(draft_id))
+    except Exception as error:
+        _raise_api_error(error)
+
+
+@router.get("/drafts", response_model=list[DraftSummaryOut])
+def list_drafts(
+    _session: Annotated[SessionRecord, Depends(get_session)],
+    material_service: Annotated[MaterialService, Depends(_material_service)],
+    draft_state: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> list[DraftSummaryOut]:
+    try:
+        state = DraftState(draft_state) if draft_state is not None else None
+        records = material_service.storage.list_workflow_draft_summaries(
+            state=state,
+            limit=limit,
+        )
+        return [
+            DraftSummaryOut(
+                draft_id=str(record["draft_id"]),
+                extraction_id=str(record["extraction_id"]),
+                material_id=str(record["material_id"]),
+                workflow=str(record["workflow"]),
+                profile=str(record["profile"]),
+                title=str(record["title"] or "未命名草稿"),
+                state=str(record["state"]),
+                version=int(record["version"]),
+                pending_count=int(record["pending_count"]),
+                unresolved_required_count=int(record["unresolved_required_count"]),
+                validation_issue_count=int(record["validation_issue_count"]),
+                created_by=str(record["created_by"]),
+                created_at=str(record["created_at"]),
+                updated_at=str(record["updated_at"]),
+                validated_at=(
+                    str(record["validated_at"])
+                    if record.get("validated_at") is not None
+                    else None
+                ),
+                ready_at=(
+                    str(record["ready_at"])
+                    if record.get("ready_at") is not None
+                    else None
+                ),
+            )
+            for record in records
+        ]
+    except ValueError as error:
+        raise bad_request(str(error)) from error
     except Exception as error:
         _raise_api_error(error)
 

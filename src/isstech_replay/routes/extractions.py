@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 
 from isstech_replay.ai.provider import ProviderResponseError, provider_from_env
@@ -90,6 +90,23 @@ class ExtractionOut(BaseModel):
     error_type: str | None = None
     error_message: str | None = None
     fields: list[ExtractedFieldOut] = Field(default_factory=list)
+
+
+class ExtractionSummaryOut(BaseModel):
+    extraction_id: str
+    material_id: str
+    profile: str
+    provider: str
+    model: str
+    status: str
+    confidence_threshold: float
+    can_advance: bool
+    started_at: str
+    finished_at: str | None = None
+    field_count: int
+    issue_count: int
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 def _material_service(request: Request) -> MaterialService:
@@ -245,6 +262,55 @@ def create_extraction(
         raise local_storage_error(
             f"extraction failed: {type(exc).__name__}",
             details={"extraction_id": extraction_id},
+        ) from exc
+
+
+@router.get("/extractions", response_model=list[ExtractionSummaryOut])
+def list_extractions(
+    _session: Annotated[SessionRecord, Depends(get_session)],
+    material_service: Annotated[MaterialService, Depends(_material_service)],
+    material_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> list[ExtractionSummaryOut]:
+    try:
+        records = material_service.storage.list_extractions(
+            material_id=material_id,
+            limit=limit,
+        )
+        return [
+            ExtractionSummaryOut(
+                extraction_id=str(record["extraction_id"]),
+                material_id=str(record["material_id"]),
+                profile=str(record["profile"]),
+                provider=str(record["provider"]),
+                model=str(record["model"]),
+                status=str(record["status"]),
+                confidence_threshold=float(record["confidence_threshold"]),
+                can_advance=bool(record["can_advance"]),
+                started_at=str(record["started_at"]),
+                finished_at=(
+                    str(record["finished_at"])
+                    if record.get("finished_at") is not None
+                    else None
+                ),
+                field_count=int(record["field_count"]),
+                issue_count=int(record["issue_count"]),
+                error_type=(
+                    str(record["error_type"])
+                    if record.get("error_type") is not None
+                    else None
+                ),
+                error_message=(
+                    str(record["error_message"])
+                    if record.get("error_message") is not None
+                    else None
+                ),
+            )
+            for record in records
+        ]
+    except Exception as exc:
+        raise local_storage_error(
+            f"extraction list failed: {type(exc).__name__}"
         ) from exc
 
 

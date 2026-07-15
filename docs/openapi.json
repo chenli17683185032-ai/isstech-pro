@@ -48,6 +48,43 @@
         "title": "Body_ingest_material_v1_materials_post",
         "type": "object"
       },
+      "CurrentWorkItemListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "source": {
+            "default": "sqlite_current",
+            "title": "Source",
+            "type": "string"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total_count"
+        ],
+        "title": "CurrentWorkItemListOut",
+        "type": "object"
+      },
       "DraftAuditEventOut": {
         "properties": {
           "actor": {
@@ -341,6 +378,106 @@
         "title": "DraftOut",
         "type": "object"
       },
+      "DraftSummaryOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "extraction_id": {
+            "title": "Extraction Id",
+            "type": "string"
+          },
+          "material_id": {
+            "title": "Material Id",
+            "type": "string"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unresolved_required_count": {
+            "title": "Unresolved Required Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "validation_issue_count": {
+            "title": "Validation Issue Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "workflow": {
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id",
+          "extraction_id",
+          "material_id",
+          "workflow",
+          "profile",
+          "title",
+          "state",
+          "version",
+          "pending_count",
+          "unresolved_required_count",
+          "validation_issue_count",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DraftSummaryOut",
+        "type": "object"
+      },
       "ExtractedFieldOut": {
         "properties": {
           "confidence": {
@@ -558,6 +695,102 @@
           "issue_count"
         ],
         "title": "ExtractionOut",
+        "type": "object"
+      },
+      "ExtractionSummaryOut": {
+        "properties": {
+          "can_advance": {
+            "title": "Can Advance",
+            "type": "boolean"
+          },
+          "confidence_threshold": {
+            "title": "Confidence Threshold",
+            "type": "number"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "extraction_id": {
+            "title": "Extraction Id",
+            "type": "string"
+          },
+          "field_count": {
+            "title": "Field Count",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "issue_count": {
+            "title": "Issue Count",
+            "type": "integer"
+          },
+          "material_id": {
+            "title": "Material Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction_id",
+          "material_id",
+          "profile",
+          "provider",
+          "model",
+          "status",
+          "confidence_threshold",
+          "can_advance",
+          "started_at",
+          "field_count",
+          "issue_count"
+        ],
+        "title": "ExtractionSummaryOut",
         "type": "object"
       },
       "FieldEvidenceOut": {
@@ -1225,6 +1458,93 @@
         "title": "SyncRunOut",
         "type": "object"
       },
+      "SyncRunSummaryOut": {
+        "properties": {
+          "actionable_count": {
+            "title": "Actionable Count",
+            "type": "integer"
+          },
+          "adapter": {
+            "title": "Adapter",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "event_count": {
+            "title": "Event Count",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "observed_count": {
+            "title": "Observed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "adapter",
+          "status",
+          "started_at",
+          "observed_count",
+          "actionable_count",
+          "event_count"
+        ],
+        "title": "SyncRunSummaryOut",
+        "type": "object"
+      },
       "UploadBody": {
         "properties": {
           "cid": {
@@ -1444,7 +1764,7 @@
   },
   "info": {
     "description": "Browser-independent read-only facade for the authorized CTF target. Write operations are preview-only and never sent upstream. Local Bearer tokens never include upstream .iPSA cookie values.",
-    "title": "iSStech Purchase Requisition Replay API",
+    "title": "iSStech Unified Workflow Center API",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
@@ -1537,6 +1857,87 @@
         "summary": "Download Attachment",
         "tags": [
           "attachments"
+        ]
+      }
+    },
+    "/v1/drafts": {
+      "get": {
+        "operationId": "list_drafts_v1_drafts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "draft_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Draft State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DraftSummaryOut"
+                  },
+                  "title": "Response List Drafts V1 Drafts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Drafts",
+        "tags": [
+          "drafts"
         ]
       }
     },
@@ -1808,6 +2209,87 @@
         "summary": "Validate Draft",
         "tags": [
           "drafts"
+        ]
+      }
+    },
+    "/v1/extractions": {
+      "get": {
+        "operationId": "list_extractions_v1_extractions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "material_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Material Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExtractionSummaryOut"
+                  },
+                  "title": "Response List Extractions V1 Extractions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Extractions",
+        "tags": [
+          "extractions"
         ]
       }
     },
@@ -3196,6 +3678,71 @@
         ]
       }
     },
+    "/v1/sync/runs": {
+      "get": {
+        "operationId": "list_sync_runs_v1_sync_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncRunSummaryOut"
+                  },
+                  "title": "Response List Sync Runs V1 Sync Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sync Runs",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
     "/v1/sync/work-items": {
       "post": {
         "operationId": "sync_work_items_v1_sync_work_items_post",
@@ -3323,6 +3870,55 @@
           }
         },
         "summary": "List Work Items",
+        "tags": [
+          "work-items"
+        ]
+      }
+    },
+    "/v1/work-items/current": {
+      "get": {
+        "operationId": "list_current_work_items_v1_work_items_current_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentWorkItemListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Current Work Items",
         "tags": [
           "work-items"
         ]

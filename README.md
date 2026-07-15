@@ -1,10 +1,11 @@
-# iSStech Purchase Requisition protocol replay
+# iSStech Unified Workflow Center
 
-Browser-independent protocol documentation and a **read-only-first** HTTP facade
-for the authorized CTF target:
+Local-first AI-assisted material review, workflow status, and follow-up center,
+backed by a **read-only-first** HTTP facade for the authorized CTF target:
 
 - Business: `http://ipsapro.isstech.com/WebTP/PurchaseRequisition`
 - Passport: `https://passport.isstech.com/`
+- Local workspace: `http://127.0.0.1:8000/`
 - Local API: `http://127.0.0.1:8000` (`/docs`, `/openapi.json`)
 
 ## What works today
@@ -24,6 +25,7 @@ for the authorized CTF target:
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
+| Local Web workspace | Yes; login, overview, materials, evidence review, ready, sync, and follow-up views |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -47,7 +49,39 @@ uv sync --extra dev
 uv run pytest -q
 uv run ruff check src tests
 uv run isstech-api
+# Open http://127.0.0.1:8000/
 ```
+
+### Local Web workspace
+
+The root URL is the operational workspace, not a landing page. Its four views
+cover the minimum closed loop:
+
+```text
+local material -> local_rules extraction -> evidence review
+-> validated -> ready -> read-only status sync -> follow-up list
+```
+
+The browser stores only the short-lived local Bearer handle in
+`sessionStorage`; it never receives the upstream `.iPSA` value. Refresh restores
+materials, extraction runs, drafts, current actionable snapshots, and sync runs
+from SQLite. Stale draft writes return `409 CONFLICT`, after which the UI reloads
+the newer version instead of overwriting it.
+
+`web/` contains the React/Vite source. `src/isstech_replay/web_dist/` is the
+checked-in production build served by FastAPI and included in the wheel, so
+Node is not required at runtime. Rebuild only after frontend changes:
+
+```bash
+cd /Users/ethan/Documents/isstech/web
+npm ci
+npm run build
+```
+
+The material picker uploads only to the local `/v1/materials` endpoint. The UI
+contains no iPSA create, save, submit, approve, delete, or upload action. Manual
+and scheduled workflow synchronization use only the already policy-gated
+SearchIndex read path.
 
 ### Durable manual sync
 
@@ -267,7 +301,8 @@ src/isstech_replay/
   request_builders.py session_store.py storage.py sync.py materials.py extraction.py
   field_mapping.py workflow_state.py schema.sql migration_002_materials.sql
   migration_003_extraction.sql migration_004_review.sql
-  ai/ models/ parsers/ routes/
+  ai/ models/ parsers/ routes/ web_dist/
+web/                   # React/Vite source; build-time only
 tests/                 # unit + API tests (redacted fixtures only)
 captures/raw/          # gitignored originals
 captures/redacted/     # commit-safe fixtures

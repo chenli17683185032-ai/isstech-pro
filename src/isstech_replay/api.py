@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from . import __version__
@@ -24,13 +26,16 @@ from .routes import (
 from .session_store import SessionStore, session_ttl_from_settings
 
 
+WEB_DIST = Path(__file__).with_name("web_dist")
+
+
 def create_app(
     *,
     session_store: SessionStore | None = None,
     client_factory: Callable[[], IsstechClient] | None = None,
 ) -> FastAPI:
     application = FastAPI(
-        title="iSStech Purchase Requisition Replay API",
+        title="iSStech Unified Workflow Center API",
         version=__version__,
         description=(
             "Browser-independent read-only facade for the authorized CTF target. "
@@ -62,6 +67,13 @@ def create_app(
     @application.get("/v1/health", tags=["system"])
     def health_v1() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
+
+    if WEB_DIST.is_dir():
+        application.mount(
+            "/",
+            StaticFiles(directory=WEB_DIST, html=True),
+            name="workflow-center-web",
+        )
 
     return application
 

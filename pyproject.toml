@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "isstech-replay"
 version = "0.1.0"
-description = "Browser-independent protocol replay for the iPSA CTF target"
+description = "Local AI-assisted workflow center with policy-gated iPSA reads"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

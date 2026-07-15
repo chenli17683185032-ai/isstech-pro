@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import threading
 
 import pytest
 
@@ -98,6 +100,29 @@ def test_schema_initializes_once_with_restrictive_permissions(tmp_path: Path) ->
     assert storage.schema_version() == SCHEMA_VERSION
 
 
+def test_fresh_workspace_readers_initialize_schema_concurrently(tmp_path: Path) -> None:
+    database = tmp_path / "state" / "workflow.sqlite3"
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def read_empty_workspace(index: int) -> tuple[object, ...]:
+        storage = WorkflowStorage(database)
+        barrier.wait(timeout=5)
+        readers = (
+            storage.list_runs,
+            storage.current_snapshots,
+            storage.list_extractions,
+            storage.list_workflow_draft_summaries,
+        )
+        return readers[index % len(readers)]()
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = tuple(executor.map(read_empty_workspace, range(workers)))
+
+    assert results == ((),) * workers
+    assert WorkflowStorage(database).schema_version() == SCHEMA_VERSION
+
+
 def test_new_snapshot_then_unchanged_replay_has_no_duplicate_event(tmp_path: Path) -> None:
     storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
     first = _apply(storage, "run-1", T1, (_snapshot(T1),))
@@ -109,6 +134,14 @@ def test_new_snapshot_then_unchanged_replay_has_no_duplicate_event(tmp_path: Pat
     assert storage.table_count("workflow_snapshots") == 2
     assert storage.table_count("workflow_current") == 1
     assert storage.table_count("workflow_events") == 1
+
+
+def test_successful_empty_measurement_preserves_sync_freshness(tmp_path: Path) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    _apply(storage, "run-empty", T1, ())
+
+    assert storage.current_snapshots(actionable_only=True) == ()
+    assert storage.latest_successful_observed_at() == T1
 
 
 def test_exact_observation_replay_reuses_history_without_events(tmp_path: Path) -> None:

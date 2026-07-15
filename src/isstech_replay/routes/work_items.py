@@ -8,10 +8,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from isstech_replay.errors import upstream_error
+from isstech_replay.errors import local_storage_error, upstream_error
 from isstech_replay.models.purchase import PurchaseListQuery, PurchaseView
+from isstech_replay.models.work_items import WorkflowSnapshot
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
+from isstech_replay.storage import WorkflowStorage, default_database_path
 from isstech_replay.work_items import purchase_follow_up_items
 
 router = APIRouter(tags=["work-items"])
@@ -36,6 +38,51 @@ class WorkItemListOut(BaseModel):
     items: list[WorkItemOut]
     total_count: int
     synced_at: str
+
+
+class CurrentWorkItemListOut(BaseModel):
+    items: list[WorkItemOut]
+    total_count: int
+    synced_at: str | None = None
+    source: str = "sqlite_current"
+
+
+def _snapshot_out(snapshot: WorkflowSnapshot) -> WorkItemOut:
+    return WorkItemOut(
+        key=f"{snapshot.adapter.value}:{snapshot.external_id}",
+        workflow=snapshot.adapter.value,
+        external_id=snapshot.external_id,
+        reference_no=snapshot.reference_no,
+        project_no=snapshot.project_no,
+        title=snapshot.title,
+        applicant=snapshot.applicant,
+        submitted_at=snapshot.submitted_at,
+        status=snapshot.status,
+        current_approver=snapshot.current_approver,
+        waiting_days=snapshot.waiting_days,
+        source_url=snapshot.source_url,
+    )
+
+
+@router.get("/work-items/current", response_model=CurrentWorkItemListOut)
+def list_current_work_items(
+    _session: Annotated[SessionRecord, Depends(get_session)],
+) -> CurrentWorkItemListOut:
+    try:
+        storage = WorkflowStorage(default_database_path())
+        snapshots = storage.current_snapshots(
+            actionable_only=True
+        )
+        synced_at = storage.latest_successful_observed_at()
+    except Exception as exc:
+        raise local_storage_error(
+            f"current work-item lookup failed: {type(exc).__name__}"
+        ) from exc
+    return CurrentWorkItemListOut(
+        items=[_snapshot_out(snapshot) for snapshot in snapshots],
+        total_count=len(snapshots),
+        synced_at=synced_at,
+    )
 
 
 @router.get("/work-items", response_model=WorkItemListOut)

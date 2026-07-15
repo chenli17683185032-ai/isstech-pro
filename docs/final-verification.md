@@ -20,11 +20,11 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P8 facility gate on `2026-07-15`: **226 passed**, Ruff clean, OpenAPI
-matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, scheduler timeout/redaction/rollback contracts passed, repository and
-rendered plists passed `plutil`, and `git diff --check` passed. Runtime Keychain
-provisioning and LaunchAgent bootstrap remain an account-holder gate.
+Last complete P9 code gate on `2026-07-15`: **231 passed**, Ruff clean, OpenAPI
+matched runtime, the React production build completed with 1,592 modules, and
+`git diff --check` passed. The P8 scheduler timeout/redaction/rollback and plist
+contracts remain in the suite. Runtime Keychain provisioning and LaunchAgent
+bootstrap remain an account-holder gate.
 
 ## Operator evidence check
 
@@ -170,6 +170,44 @@ through `validated` to `ready`; event sequence is contiguous with draft version;
 the AI proposal/source columns remain unchanged; stale versions and direct ready
 attempts return conflicts. These checks are local and send no iPSA request.
 
+## Local Web workspace (offline/mocked upstream)
+
+```bash
+cd /Users/ethan/Documents/isstech/web
+npm ci
+npm run build
+cd ..
+
+.venv/bin/pytest -q tests/test_ui.py tests/test_api.py tests/test_storage.py
+.venv/bin/uvicorn isstech_replay.api:app --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/`. The verified local-only browser path was:
+
+```text
+mock login -> material in local store -> local_rules extraction -> draft
+-> three required evidence-backed confirmations -> validated -> ready
+-> mock read-only SearchIndex sync -> one SQLite follow-up item
+-> refresh recovery -> stale-version 409 refresh without overwrite
+```
+
+Browser QA used `1440x900` and `390x844`. The desktop overview and mobile
+overview/material/draft/follow-up views had no page-level horizontal overflow,
+blank primary view, or console warning/error. Wide operational tables scroll
+inside their own container on mobile. Local ignored screenshots are kept under
+`outputs/p9-*.png`; they are QA artifacts, not wheel contents.
+
+The built root, hashed JS, and hashed CSS must return 200 from FastAPI. Common
+icon buttons retain accessible names on mobile, the material button label remains
+white on the primary background, and clipboard copy returns success or a bounded
+failure within three seconds.
+
+The in-app Browser cannot set local files. The local multipart upload route was
+therefore exercised by API and automated tests before continuing the UI flow.
+Chrome's native picker could select the QA file, but extension-driven upload
+requires "Allow access to file URLs" and that browser permission was not enabled.
+This is a browser-automation gate; no live iPSA upload endpoint was used.
+
 ## Scheduled sync facility (offline)
 
 ```bash
@@ -282,12 +320,12 @@ bash tools/first-commit.sh
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
-| FastAPI `/v1` | Yes; runtime OpenAPI exported | Credentialed session smoke |
+| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | Credentialed session smoke |
 | SQLite snapshot/diff | Yes; transactional and version-gated | Credentialed live sync |
 | Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
-| Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples; P6 human review |
-| Human review and draft state | Yes; version lock, corrected evidence, immutable proposal, audit, ready | Local UI; P7 remains write-blocked |
+| Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
+| Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | P7 remains write-blocked |
 | Weekday scheduled sync | Facility yes; same CLI, Keychain, timeout, private log, rollback | Account-holder Keychain setup and live bootstrap |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |

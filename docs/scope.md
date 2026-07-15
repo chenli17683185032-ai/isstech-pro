@@ -89,6 +89,8 @@ The repository currently has:
 - Immutable local material ingestion and format-specific PDF/Office/text parsing
 - Evidence-backed local/HTTP-JSON field extraction with confidence and review gates
 - Versioned human review drafts with immutable AI proposals and append-only local audit
+- A same-origin local Web workspace for materials, evidence review, ready state,
+  SQLite follow-up lists, and policy-gated read-only sync
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
 It does **not** yet have a credentialed clean-process pure-HTTP smoke,

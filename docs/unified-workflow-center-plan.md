@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P9 本地统一流程中心 Web 工作台` |
+| 当前总阶段 | `P9 阶段性提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,24 +53,25 @@
 
 ### 0.2 当前未提交工作树
 
-P8 调度设施已提交为 `536d4e2 Add reversible weekday sync scheduling`。真实
-Keychain 配置和 bootstrap 保持 BLOCKED；当前只推进 P9 本地 Web 工作台，
-不得加入 P7 上游写动作。
+P9 本地 Web 工作台代码、构建产物、恢复 API、并发初始化修复、测试和文档已
+通过门禁，当前只进行独立阶段性提交。真实 Keychain 配置和 bootstrap 保持
+BLOCKED；不得加入 P7 上游写动作。
 
 ### 0.3 最近一次验证结果
 
 ```text
-pytest: 226 passed
+pytest: 231 passed
 ruff: passed
 OpenAPI: matches runtime
 secret scan: passed
 evidence hashes and permissions: passed
 git diff --check: passed
-scheduled facility tests: 10 passed
+npm production build: 1592 modules, JS/CSS emitted
+desktop browser QA: 1440x900, no console error or page overflow
+mobile browser QA: 390x844, no console error or page overflow
+wheel: web_dist HTML/JS/CSS + schema/migrations present
 repository plist: plutil OK
 installer dry-run plist: plutil OK
-credential/work-item scheduler log leakage tests: passed
-lint/bootstrap rollback tests: passed
 ```
 
 ### 0.4 当前外部阻断
@@ -933,7 +934,7 @@ keychain/subprocess timeout cannot hang indefinitely
 
 ## P9 本地统一流程中心 Web 工作台
 
-状态：`IN_PROGRESS`
+状态：`DONE`
 
 ### 目标用户闭环
 
@@ -997,6 +998,29 @@ no UI action or API route can submit upstream
 desktop/mobile screenshots have no overlap, clipping, blank primary view, or console error
 FastAPI wheel serves the built root UI without Node installed
 ```
+
+### 实际结果（2026-07-15）
+
+- `web/` 已实现总览、材料、草稿审阅和催办清单；FastAPI 根路径同源提供
+  `src/isstech_replay/web_dist/`，运行时不依赖 Node 或第三方 CDN。
+- 新增本地恢复列表：`GET /v1/extractions`、`GET /v1/drafts`、
+  `GET /v1/work-items/current`、`GET /v1/sync/runs`；刷新后可恢复全部工作状态。
+- 已用隔离 mock 上游和临时 SQLite 证明：登录、材料、local_rules 抽取、草稿、
+  三个必填证据确认、`validated -> ready`、只读同步、催办筛选和刷新恢复。
+- 通过第二本地会话把草稿从 v1 推进到 v2 后，旧 UI 写入得到 409、显示冲突并
+  刷新到 v2；待处理字段未被覆盖。
+- 修复全新数据库五路并发读取时的迁移竞争；线程锁加 mode `0600` 有界进程锁
+  串行化 schema 初始化，8 路并发回归连续五轮通过。
+- 空成功同步即使没有可催办快照也保留最近 `observed_at`，不再误报“尚无快照”。
+- 桌面 `1440x900` 和移动 `390x844` 检查无全页横向溢出、空白主视图或 console
+  error/warn；移动宽表只在自身容器滚动，紧凑图标按钮保留 accessible name。
+- Vite 构建 1,592 modules；JS `234.24 kB`（gzip `71.75 kB`），CSS
+  `23.72 kB`（gzip `5.32 kB`）；wheel 含入口、哈希 JS/CSS、schema 和 migrations。
+- 内置 Browser 不支持设置本地文件；本地 multipart API 和自动化测试已验证。
+  Chrome 原生选择器能选中 QA 文件，但扩展未开启 file URL 权限，未把此工具
+  权限缺口误写成产品代码通过。
+- 全量 `pytest` 231 项、Ruff、OpenAPI、秘密扫描、证据校验、diff、plist 和
+  wheel 内容检查通过；UI 仍没有 submit/approve/delete/upload-to-iPSA 动作。
 
 ## P10 第二个流程适配器
 
@@ -1094,7 +1118,8 @@ FastAPI wheel serves the built root UI without Node installed
 | 14 | `DONE` | P8 调度设施代码 | 226 tests + plist lint + timeout/redaction/rollback 通过 |
 | 15 | `DONE` | P8 阶段性提交 | `536d4e2 Add reversible weekday sync scheduling` |
 | 16 | `BLOCKED` | P8 真实激活 | 等账号持有人配置 Keychain 并确认执行时间 |
-| 17 | `IN_PROGRESS` | P9 本地 Web 工作台 | 材料→审阅→ready 与催办同步 UI 闭环通过 |
+| 17 | `DONE` | P9 本地 Web 工作台 | 231 tests + browser QA + wheel 静态资源检查通过 |
+| 18 | `IN_PROGRESS` | P9 阶段性提交 | 独立提交 P9 代码、构建、测试和文档 |
 
 ---
 

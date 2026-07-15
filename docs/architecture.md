@@ -2,9 +2,9 @@
 
 ## Goal
 
-Provide a browser-independent, read-only-first HTTP facade over the authorized
-iPSA Purchase Requisition CTF target. Browser tooling is analysis-only; the
-final runtime uses direct HTTP through a single guarded transport.
+Provide a local AI-assisted workflow center over the authorized iPSA Purchase
+Requisition CTF target. Browser tooling is analysis-only; the final runtime is
+a same-origin Web workspace plus direct HTTP through a single guarded transport.
 
 ## Target surfaces
 
@@ -13,6 +13,7 @@ final runtime uses direct HTTP through a single guarded transport.
 | Business entry | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` | Purchase requisition UI and AJAX endpoints |
 | Portal | `http://ipsapro.isstech.com/Portal` | Portal / SSO entry |
 | Passport | `https://passport.isstech.com/` | Credential POST, redirects, session cookies |
+| Local workspace | `http://127.0.0.1:8000/` | Materials, evidence review, ready state, sync, follow-up list |
 | Local API | `http://127.0.0.1:8000` | Stable REST facade (`/docs` for OpenAPI) |
 
 ## Component diagram
@@ -24,7 +25,7 @@ Chrome/CDP (analysis only)
 captures/raw  --redact-->  captures/redacted (fixtures)
                                 |
                                 v
-FastAPI /v1  -->  session store  -->  IsstechClient
+React workspace --> FastAPI /v1 --> session store --> IsstechClient
      |                                   |
      +--> material service --> immutable originals
      |          |
@@ -57,7 +58,7 @@ sync service  --------------------> SQLite state/audit
 
 | Module | Responsibility |
 | --- | --- |
-| `api.py` | FastAPI app assembly and `/health` |
+| `api.py` | FastAPI app assembly, `/health`, and root static workspace mount |
 | `config.py` | Base URLs, timeouts, session TTL |
 | `auth.py` | Pure HTTP login and auth detection |
 | `client.py` | Upstream business client, exact read methods, and bounded pagination |
@@ -73,6 +74,8 @@ sync service  --------------------> SQLite state/audit
 | `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
 | `workflow_state.py` | Human review, exact-evidence revalidation, optimistic state transitions |
 | `scheduler.py` | Keychain reads, bounded manual-CLI child process, private outcome log |
+| `web/` | React/Vite source for overview, materials, drafts, and follow-up views |
+| `web_dist/` | Hashed production assets served by FastAPI and packaged in the wheel |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
@@ -97,6 +100,8 @@ sync service  --------------------> SQLite state/audit
    `.send()`.
 6. Local API sessions are random Bearer tokens mapping to in-memory upstream
    cookie jars. Upstream `.iPSA` is never returned to API clients.
+7. The Web workspace has no upstream execution control. Local material upload,
+   field review, ready transitions, and SQLite sync are the only mutations it can request.
 
 ## Evidence pipeline
 
@@ -199,6 +204,30 @@ and document issues hold the draft in `needs_review`. Human confirmation may
 resolve low model confidence, but cannot replace exact evidence. Only
 `validated -> ready` is implemented; there is no P6 route to preview, submit, or
 reach `GuardedTransport`.
+
+## Local workspace feedback loop
+
+The Vite build is mounted after all `/v1`, `/health`, `/docs`, and OpenAPI routes,
+so API routing takes precedence. Runtime deployment needs only the Python wheel;
+Node, browser automation, and third-party CDNs are absent from the serving path.
+
+After login, the UI loads five independent local measurements concurrently:
+materials, extraction runs, draft summaries, current actionable snapshots, and
+sync runs. SQLite schema initialization is serialized by a process thread lock
+and a mode `0600` per-database advisory lock with a 10-second ceiling. This
+prevents first-run requests or a simultaneous scheduler process from racing
+migrations or moving `PRAGMA user_version` backwards.
+
+The browser holds the local Bearer token only in `sessionStorage`. All draft
+mutations include `expected_version`; a 409 response shows a conflict notice and
+reloads the authoritative draft before another action. A successful sync keeps
+its observation time even when it produces zero actionable items, so an empty
+follow-up list is distinguishable from a workspace that has never synchronized.
+
+Desktop and mobile layouts share the same data boundary. Tables that cannot
+preserve useful column width on mobile scroll inside their own container; the
+page itself remains fixed to the viewport width. String-labelled common buttons
+retain an accessible name when compact CSS hides their visible label.
 
 ## Scheduled measurement loop
 
