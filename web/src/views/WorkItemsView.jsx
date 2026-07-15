@@ -29,12 +29,17 @@ async function writeClipboardText(text) {
 
 export default function WorkItemsView({ token, data, notify, onSync, syncing }) {
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState("follow_up");
+  const [modeOverride, setModeOverride] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRequestVersion, setDetailRequestVersion] = useState(0);
+  const mode = modeOverride ?? (
+    data.workItems.follow_up_count > 0
+      ? "follow_up"
+      : (data.workItems.approved_count > 0 ? "approved" : "follow_up")
+  );
   const items = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return data.workItems.items.filter((item) => {
@@ -116,10 +121,14 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         </div>
         <div className="table-toolbar">
           <div className="search-control"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索编号、项目、责任人" aria-label="搜索流程记录" /></div>
-          <div className="segmented" aria-label="流程范围">
-            <button className={mode === "follow_up" ? "is-active" : ""} onClick={() => setMode("follow_up")} type="button">待催办</button>
-            <button className={mode === "overdue" ? "is-active" : ""} onClick={() => setMode("overdue")} type="button">超过 7 天</button>
-            <button className={mode === "approved" ? "is-active" : ""} onClick={() => setMode("approved")} type="button">已过审</button>
+          <div
+            className="segmented"
+            aria-label="流程范围"
+            data-selection-source={modeOverride === null ? "automatic" : "manual"}
+          >
+            <button className={mode === "follow_up" ? "is-active" : ""} onClick={() => setModeOverride("follow_up")} type="button">待催办</button>
+            <button className={mode === "overdue" ? "is-active" : ""} onClick={() => setModeOverride("overdue")} type="button">超过 7 天</button>
+            <button className={mode === "approved" ? "is-active" : ""} onClick={() => setModeOverride("approved")} type="button">已过审</button>
           </div>
           <div className="table-toolbar__actions">
             <Button icon={Clipboard} onClick={copyList} disabled={!items.length}>复制清单</Button>

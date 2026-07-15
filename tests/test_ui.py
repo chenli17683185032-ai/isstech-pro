@@ -35,6 +35,7 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "范围：我发起的" in js.text
     assert "查看本地详情" in js.text
     assert "审批轨迹" in js.text
+    assert "data-selection-source" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
