@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P9.1 阶段性提交` |
+| 当前总阶段 | `P9.1 已完成；等待 P7/P8 外部解锁` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -55,7 +55,8 @@
 
 P9 本地 Web 工作台已提交为 `04b7016 Add local unified workflow center workspace`。
 P9.1 账号作用域、Portal 身份过滤、`待催办/已过审` 分类、调度解释器修复、真实
-只读同步、桌面/移动 QA 和全量门禁均已完成，当前只进行独立阶段性提交。旧
+只读同步、桌面/移动 QA 和全量门禁均已完成，并提交为
+`c1f2e9f Isolate workflow views by authenticated account`。旧
 `data/workflow-center.sqlite3` 原样保留但不再作为账号流程数据源；两个中间验证数据集
 已保存在 `data/quarantine/`，不进入 Git。Keychain 已配置，LaunchAgent 仍等待执行
 时间确认。P7 保持 `BLOCKED`，P10 保持 `TODO`。
@@ -1130,6 +1131,7 @@ full pytest, ruff, OpenAPI, secret/evidence, diff and wheel checks pass
 - 全量 `pytest` 246 项、Ruff、OpenAPI、秘密扫描、证据哈希/权限、diff、两份 plist、
   Vite 1,592 modules 和 60 文件 wheel 检查通过。正式服务继续绑定
   `http://127.0.0.1:8000/`；没有发出 Create/Save/Edit/Submit/Approve/Delete/Upload。
+- P9.1 已独立提交为 `c1f2e9f Isolate workflow views by authenticated account`。
 
 ## P10 第二个流程适配器
 
@@ -1230,7 +1232,7 @@ full pytest, ruff, OpenAPI, secret/evidence, diff and wheel checks pass
 | 17 | `DONE` | P9 本地 Web 工作台 | 231 tests + browser QA + wheel 静态资源检查通过 |
 | 18 | `DONE` | P9 阶段性提交 | `04b7016 Add local unified workflow center workspace` |
 | 19 | `DONE` | P9.1 账号归属隔离与已过审视图 | 246 tests + Portal/Search 身份求交 + 真实 0 待催办/1 已过审 + desktop/mobile QA |
-| 20 | `IN_PROGRESS` | P9.1 阶段性提交 | 独立提交账号隔离、身份过滤、已过审视图、测试和文档 |
+| 20 | `DONE` | P9.1 阶段性提交 | `c1f2e9f Isolate workflow views by authenticated account` |
 
 ---
 
