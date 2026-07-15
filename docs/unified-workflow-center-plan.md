@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P9 阶段性提交` |
+| 当前总阶段 | `P9 已完成；等待 P7/P8 外部解锁` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -51,11 +51,12 @@
    - `temporalio/samples-python`：工作流状态持久化、活动级重试和确定性编排的设计方向。
    - `n8n-io/n8n`：节点化适配、显式重试配置和人工介入点的产品形态。
 
-### 0.2 当前未提交工作树
+### 0.2 当前工作树与阶段提交
 
 P9 本地 Web 工作台代码、构建产物、恢复 API、并发初始化修复、测试和文档已
-通过门禁，当前只进行独立阶段性提交。真实 Keychain 配置和 bootstrap 保持
-BLOCKED；不得加入 P7 上游写动作。
+通过门禁，并提交为 `04b7016 Add local unified workflow center workspace`。当前无
+待实施的产品代码；真实 Keychain 配置和 bootstrap 保持 `BLOCKED`，P7 上游写
+动作保持 `BLOCKED`，P10 保持 `TODO`，不得自动开始。
 
 ### 0.3 最近一次验证结果
 
@@ -1021,6 +1022,7 @@ FastAPI wheel serves the built root UI without Node installed
   权限缺口误写成产品代码通过。
 - 全量 `pytest` 231 项、Ruff、OpenAPI、秘密扫描、证据校验、diff、plist 和
   wheel 内容检查通过；UI 仍没有 submit/approve/delete/upload-to-iPSA 动作。
+- P9 已独立提交为 `04b7016 Add local unified workflow center workspace`。
 
 ## P10 第二个流程适配器
 
@@ -1119,7 +1121,7 @@ FastAPI wheel serves the built root UI without Node installed
 | 15 | `DONE` | P8 阶段性提交 | `536d4e2 Add reversible weekday sync scheduling` |
 | 16 | `BLOCKED` | P8 真实激活 | 等账号持有人配置 Keychain 并确认执行时间 |
 | 17 | `DONE` | P9 本地 Web 工作台 | 231 tests + browser QA + wheel 静态资源检查通过 |
-| 18 | `IN_PROGRESS` | P9 阶段性提交 | 独立提交 P9 代码、构建、测试和文档 |
+| 18 | `DONE` | P9 阶段性提交 | `04b7016 Add local unified workflow center workspace` |
 
 ---
 
