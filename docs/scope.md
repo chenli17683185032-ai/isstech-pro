@@ -10,6 +10,7 @@
 - Authentication redirects and callbacks on `https://passport.isstech.com`
 - Static assets and AJAX endpoints loaded by the in-scope pages
 - Local FastAPI facade at `http://127.0.0.1:8000` (development only)
+- Local material originals, derived structured documents, extraction runs, and SQLite state
 - Browser/CDP analysis limited to the authorized iPSA CTF target
 
 ## Out of scope
@@ -84,6 +85,8 @@ The repository currently has:
 - Runtime-captured Search/Approval/Adjust/Revocation GET paths, observed Search
   filter/pagination POSTs, and Search current-approver parsing
 - Offline write request previews that cannot reach the live transport
+- Immutable local material ingestion and format-specific PDF/Office/text parsing
+- Evidence-backed local/HTTP-JSON field extraction with confidence and review gates
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
 It does **not** yet have a credentialed clean-process pure-HTTP smoke,

@@ -21,6 +21,7 @@ for the authorized CTF target:
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
 | SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
+| Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -91,9 +92,39 @@ uv run python tools/ingest_materials.py /path/to/incoming --recursive --json
 
 Original bytes are stored once at
 `data/materials/originals/<sha256>/blob` with mode `0400`. Original filenames,
-declared/detected MIME, review state, and references live in SQLite. Future OCR
-or AI output must go under `data/materials/derived/<material-id>/`; it never
+declared/detected MIME, review state, and references live in SQLite. Parsed and
+AI-derived output goes under `data/materials/derived/<material-id>/`; it never
 overwrites the original blob.
+
+### Document parsing and evidence-backed extraction
+
+This path is also offline with the default deterministic provider. Use the
+material ID returned by ingestion:
+
+```bash
+uv run python tools/extract_material.py MATERIAL_ID --json
+```
+
+Supported first-pass parsers are PDF text layers, DOCX, XLSX, PPTX, UTF-8 text,
+and JSON. Each proposed field records the material ID, source kind, source
+index, label, and exact source excerpt. Missing required fields, confidence
+below `0.85`, invalid source references, truncated documents, MIME review, and
+PDFs without a text layer remain `needs_review`.
+
+The optional `http_json` provider is enabled only through runtime environment
+configuration:
+
+```bash
+export ISSTECH_AI_ENDPOINT='https://...'
+export ISSTECH_AI_MODEL='...'
+export ISSTECH_AI_API_KEY='...'
+uv run python tools/extract_material.py MATERIAL_ID --provider http_json --json
+unset ISSTECH_AI_API_KEY ISSTECH_AI_MODEL ISSTECH_AI_ENDPOINT
+```
+
+Plain HTTP is accepted only on loopback. The iPSA and Passport hosts are always
+rejected as AI endpoints. Provider output is size-bounded and treated as
+untrusted; no provider has access to an adapter submit method.
 
 ### Local API (examples)
 
@@ -123,6 +154,16 @@ curl -s -X POST http://127.0.0.1:8000/v1/materials \
   -H "Authorization: Bearer $TOKEN" \
   -F 'file=@/path/to/file.pdf'
 
+# parse locally and propose purchase-requisition fields with source evidence
+curl -s -X POST http://127.0.0.1:8000/v1/materials/MATERIAL_ID/extractions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"local_rules","confidence_threshold":0.85}'
+
+# read the immutable proposal/audit record
+curl -s http://127.0.0.1:8000/v1/extractions/EXTRACTION_ID \
+  -H "Authorization: Bearer $TOKEN"
+
 # delete is preview-only
 curl -s -X POST http://127.0.0.1:8000/v1/previews/purchase-requisitions/ID/delete \
   -H "Authorization: Bearer $TOKEN"
@@ -137,8 +178,9 @@ Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`,
 ```text
 src/isstech_replay/
   api.py policy.py transport.py client.py auth.py
-  request_builders.py session_store.py storage.py sync.py materials.py schema.sql
-  models/ parsers/ routes/
+  request_builders.py session_store.py storage.py sync.py materials.py extraction.py
+  field_mapping.py schema.sql migration_002_materials.sql migration_003_extraction.sql
+  ai/ models/ parsers/ routes/
 tests/                 # unit + API tests (redacted fixtures only)
 captures/raw/          # gitignored originals
 captures/redacted/     # commit-safe fixtures
@@ -146,6 +188,7 @@ docs/                  # architecture, matrix, vulns, verification, openapi path
 tools/first-commit.sh  # baseline commit helper if .git is locked in a sandbox
 tools/sync_work_items.py # manual/daily sync entry; credentials from env only
 tools/ingest_materials.py # offline file/directory material ingestion
+tools/extract_material.py # offline parse + evidence-backed field extraction
 data/                  # ignored SQLite, run summaries, and CSV exports
 ```
 

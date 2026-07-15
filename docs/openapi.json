@@ -48,6 +48,281 @@
         "title": "Body_ingest_material_v1_materials_post",
         "type": "object"
       },
+      "ExtractedFieldOut": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "confirmed_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Value"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FieldEvidenceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_valid": {
+            "title": "Evidence Valid",
+            "type": "boolean"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "proposed_value": {
+            "title": "Proposed Value",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "review_status": {
+            "title": "Review Status",
+            "type": "string"
+          },
+          "validation_issues": {
+            "items": {
+              "$ref": "#/components/schemas/FieldIssueOut"
+            },
+            "title": "Validation Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "field_name",
+          "proposed_value",
+          "confidence",
+          "required",
+          "evidence_valid",
+          "review_status"
+        ],
+        "title": "ExtractedFieldOut",
+        "type": "object"
+      },
+      "ExtractionCreateIn": {
+        "properties": {
+          "confidence_threshold": {
+            "default": 0.85,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Threshold",
+            "type": "number"
+          },
+          "profile": {
+            "const": "purchase_requisition",
+            "default": "purchase_requisition",
+            "title": "Profile",
+            "type": "string"
+          },
+          "provider": {
+            "default": "local_rules",
+            "enum": [
+              "local_rules",
+              "http_json"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "title": "ExtractionCreateIn",
+        "type": "object"
+      },
+      "ExtractionOut": {
+        "properties": {
+          "can_advance": {
+            "title": "Can Advance",
+            "type": "boolean"
+          },
+          "confidence_threshold": {
+            "title": "Confidence Threshold",
+            "type": "number"
+          },
+          "document_path": {
+            "title": "Document Path",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "extraction_id": {
+            "title": "Extraction Id",
+            "type": "string"
+          },
+          "extractor_version": {
+            "title": "Extractor Version",
+            "type": "string"
+          },
+          "field_count": {
+            "title": "Field Count",
+            "type": "integer"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ExtractedFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "issue_count": {
+            "title": "Issue Count",
+            "type": "integer"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/FieldIssueOut"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "material_id": {
+            "title": "Material Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "result_path": {
+            "title": "Result Path",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction_id",
+          "material_id",
+          "profile",
+          "provider",
+          "model",
+          "extractor_version",
+          "status",
+          "confidence_threshold",
+          "can_advance",
+          "document_path",
+          "result_path",
+          "started_at",
+          "field_count",
+          "issue_count"
+        ],
+        "title": "ExtractionOut",
+        "type": "object"
+      },
+      "FieldEvidenceOut": {
+        "properties": {
+          "material_id": {
+            "title": "Material Id",
+            "type": "string"
+          },
+          "source_index": {
+            "title": "Source Index",
+            "type": "integer"
+          },
+          "source_kind": {
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_label": {
+            "title": "Source Label",
+            "type": "string"
+          },
+          "source_text": {
+            "title": "Source Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_id",
+          "source_kind",
+          "source_index",
+          "source_label",
+          "source_text"
+        ],
+        "title": "FieldEvidenceOut",
+        "type": "object"
+      },
+      "FieldIssueOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "field_name",
+          "message"
+        ],
+        "title": "FieldIssueOut",
+        "type": "object"
+      },
       "FieldsBody": {
         "properties": {
           "fields": {
@@ -871,6 +1146,64 @@
         ]
       }
     },
+    "/v1/extractions/{extraction_id}": {
+      "get": {
+        "operationId": "get_extraction_v1_extractions__extraction_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "extraction_id",
+            "required": true,
+            "schema": {
+              "title": "Extraction Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Extraction",
+        "tags": [
+          "extractions"
+        ]
+      }
+    },
     "/v1/health": {
       "get": {
         "operationId": "health_v1_v1_health_get",
@@ -1140,6 +1473,74 @@
         "summary": "Get Material Content",
         "tags": [
           "materials"
+        ]
+      }
+    },
+    "/v1/materials/{material_id}/extractions": {
+      "post": {
+        "operationId": "create_extraction_v1_materials__material_id__extractions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtractionCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Extraction",
+        "tags": [
+          "extractions"
         ]
       }
     },

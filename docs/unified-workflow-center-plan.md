@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P4 已完成，准备阶段提交` |
+| 当前总阶段 | `P5 已完成，准备阶段提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,54 +53,46 @@
 
 ### 0.2 当前未提交工作树
 
-本检查点之前已经产生代码改动，不能丢弃或重做。当前涉及：
+当前仅有 P5 的解析、字段映射、schema v3、API/CLI、测试和文档改动；不能
+丢弃或拆入 P6。主要文件：
 
 ```text
-src/isstech_replay/policy.py
-src/isstech_replay/client.py
-src/isstech_replay/models/purchase.py
-src/isstech_replay/models/work_items.py
-src/isstech_replay/parsers/purchase.py
-src/isstech_replay/parsers/attachment.py
-src/isstech_replay/routes/purchase_requisitions.py
-src/isstech_replay/routes/work_items.py
-src/isstech_replay/work_items.py
-src/isstech_replay/api.py
-tools/redact_login_cdp.py
-tools/redact_login_har.py
-tests/fixtures/purchase/*.html
-tests/test_*.py
+src/isstech_replay/extraction.py
+src/isstech_replay/field_mapping.py
+src/isstech_replay/ai/
+src/isstech_replay/models/extraction.py
+src/isstech_replay/routes/extractions.py
+src/isstech_replay/migration_003_extraction.sql
+src/isstech_replay/storage.py
+tools/extract_material.py
+tests/test_extraction.py
+tests/test_field_mapping.py
+tests/test_storage.py
+tests/test_api.py
+README.md
+docs/architecture.md
+docs/final-verification.md
 docs/openapi.json
-captures/redacted/login-success-protocol.json
 ```
 
-这些改动的意图是：解除四个已抓取视图的只读门禁、切换到真实 `Detail`/Download 路由、解析 `next_approver` 与 `approval_steps`，并增加 `/v1/work-items` 归一化待办接口。
+这些改动的意图是证明“不可变原件 → 结构化文档 → 不可信 provider →
+证据/阈值门禁 → pending SQLite 字段”闭环；没有 P6 审阅状态变更，也没有
+任何上游写请求。
 
 ### 0.3 最近一次验证结果
 
 ```text
-pytest: 95 passed
-ruff: passed
-CDP login redactor tests: 4 passed
-真实 SearchIndex 抓包解析: 78 条总数、当前页 10 条、存在下一级审批人
-真实审批中详情解析: 11 个基本字段、5 个审批步骤
-真实已保存详情附件解析: 5 个附件 ID 均可解析
-```
-
-`2026-07-15` P0 最终门禁结果：
-
-```text
-pytest: 95 passed
+pytest: 205 passed
 ruff: passed
 OpenAPI: matches runtime
 secret scan: passed
 evidence hashes and permissions: passed
-login protocol raw -> redacted byte comparison: passed
-10 dated CDP captures: mode 0600 and gitignored
 git diff --check: passed
+offline extraction smoke: succeeded|1|3|0
+field evidence: 3 valid, all review_status=pending
+result.json: mode 0600
+wheel: migration_003 + parser/provider/routes included
 ```
-
-P0 证据收口已经完成。README、架构说明与只读实现的一致性复核归入当前 P1。
 
 ### 0.4 当前外部阻断
 
@@ -302,9 +294,10 @@ data/
   workflow-center.sqlite3
   materials/
     originals/<sha256>/<original-name>
-    derived/<material-id>/document.json
-    derived/<material-id>/text.txt
-    derived/<material-id>/pages/*.json
+    derived/<material-id>/documents/<document-hash>/document.json
+    derived/<material-id>/documents/<document-hash>/text.txt
+    derived/<material-id>/documents/<document-hash>/pages/*.json
+    derived/<material-id>/extractions/<extraction-id>/result.json
   runs/<run-id>/summary.json
   exports/YYYY-MM-DD-work-items.csv
   logs/workflow-center.log
@@ -677,7 +670,7 @@ original is never overwritten by derived output
 
 ## P5 文档解析与 AI 字段抽取
 
-状态：`TODO`
+状态：`DONE`
 
 ### 工具选择
 
@@ -692,8 +685,15 @@ src/isstech_replay/extraction.py
 src/isstech_replay/ai/base.py
 src/isstech_replay/ai/provider.py
 src/isstech_replay/field_mapping.py
+src/isstech_replay/models/extraction.py
+src/isstech_replay/routes/extractions.py
+src/isstech_replay/migration_003_extraction.sql
+src/isstech_replay/storage.py
+tools/extract_material.py
 tests/test_extraction.py
 tests/test_field_mapping.py
+tests/test_storage.py
+tests/test_api.py
 ```
 
 ### 验收
@@ -703,6 +703,26 @@ every proposed field has source material/page/text
 required fields without evidence cannot become ready
 AI output cannot directly call adapter submit
 ```
+
+### 实际结果（2026-07-15）
+
+- PDF、DOCX、XLSX、PPTX、UTF-8 文本和 JSON 先转换为有界
+  `StructuredDocument`；无文本 PDF、截断、MIME 冲突和解析问题全部进入复核。
+- XLSX 原件以无扩展名 `blob` 保存仍可通过持续打开的二进制流只读解析；
+  本地规则同时识别冒号行和 Office 表格的制表符单元。
+- 结构化文档按内容哈希原子保存；重复命中会逐文件比对，损坏目录不会被
+  静默当作幂等成功。
+- 默认 `local_rules` 可重复运行；可选 `http_json` 仅显式配置启用，流式
+  限长、严格 JSON 类型、外部强制 HTTPS，并拒绝 iPSA/Passport 作为端点。
+- 字段白名单、必填、`0.85` 阈值、material/source 单元、source label、
+  exact excerpt 和 value 定位全部在 provider 后二次校验。
+- schema v2 升级到 v3 后保留已有材料；抽取 run、字段 evidence、问题和
+  脱敏失败原因写 SQLite，所有字段初始 `review_status='pending'`。
+- 新增 `POST /v1/materials/{material_id}/extractions`、
+  `GET /v1/extractions/{extraction_id}` 和离线 `tools/extract_material.py`。
+- 离线 smoke 得到 `succeeded|1|3|0`，三个必填字段 evidence 有效、状态
+  pending、结果文件 `0600`；wheel 包含 migration 和 P5 运行模块。
+- 全量 `pytest` 205 项、Ruff、OpenAPI、秘密扫描、证据校验和 diff 检查通过。
 
 ## P6 人工审阅与草稿状态机
 
@@ -848,11 +868,12 @@ failure has exit code, run record and可定位日志
 | 5 | `DONE` | P3 SQLite 快照和手动同步 CLI | 141 tests + 幂等/差异/失败事务/API 冒烟通过 |
 | 6 | `DONE` | P3 阶段性提交 | `63ed69e Add transactional workflow snapshot sync` |
 | 7 | `DONE` | P4 材料入库 | 158 tests + 离线双次 ingestion + wheel 检查通过 |
-| 8 | `IN_PROGRESS` | P4 阶段性提交 | 提交只包含 P4 代码、migration、文档和测试 |
-| 9 | `TODO` | P5 AI 抽取接口与来源证据 | 每个字段可追溯且低置信度被拦截 |
-| 10 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
-| 11 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 12 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 8 | `DONE` | P4 阶段性提交 | `8131eea Add immutable local material ingestion` |
+| 9 | `DONE` | P5 AI 抽取接口与来源证据 | 205 tests + 离线 extraction + wheel 检查通过 |
+| 10 | `IN_PROGRESS` | P5 阶段性提交 | 提交只包含 P5 代码、migration、文档和测试 |
+| 11 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
+| 12 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
+| 13 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
 ---
 

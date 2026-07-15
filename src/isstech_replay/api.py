@@ -12,6 +12,7 @@ from .client import IsstechClient
 from .config import Settings
 from .routes import (
     attachments,
+    extractions,
     materials,
     previews,
     purchase_requisitions,
@@ -47,6 +48,7 @@ def create_app(
     application.include_router(purchase_requisitions.router, prefix="/v1")
     application.include_router(attachments.router, prefix="/v1")
     application.include_router(materials.router, prefix="/v1")
+    application.include_router(extractions.router, prefix="/v1")
     application.include_router(previews.router, prefix="/v1")
     application.include_router(work_items.router, prefix="/v1")
     application.include_router(sync_routes.router, prefix="/v1")

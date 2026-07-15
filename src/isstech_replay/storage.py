@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import sqlite3
 
+from .models.extraction import ExtractionResult, ExtractionStatus, FieldSpec
 from .models.work_items import ChangeEvent, ChangeKind, WorkflowKind, WorkflowSnapshot
-from .models.materials import Material, MaterialStatus
+from .models.materials import Material, MaterialArtifact, MaterialStatus
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -25,12 +27,17 @@ _WORKFLOW_TABLES = {
     "workflow_events",
 }
 _MATERIAL_TABLES = {"material_blobs", "materials", "material_artifacts"}
-_REQUIRED_TABLES = _WORKFLOW_TABLES | _MATERIAL_TABLES
+_EXTRACTION_TABLES = {"extraction_runs", "extracted_fields"}
+_REQUIRED_TABLES = _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES
 _REQUIRED_TABLES_BY_VERSION = {
     1: _WORKFLOW_TABLES,
-    2: _REQUIRED_TABLES,
+    2: _WORKFLOW_TABLES | _MATERIAL_TABLES,
+    3: _REQUIRED_TABLES,
 }
-_MIGRATIONS = {1: "migration_002_materials.sql"}
+_MIGRATIONS = {
+    1: "migration_002_materials.sql",
+    2: "migration_003_extraction.sql",
+}
 
 
 class StorageError(RuntimeError):
@@ -738,6 +745,245 @@ class WorkflowStorage:
         finally:
             connection.close()
 
+    def register_material_artifact(
+        self,
+        *,
+        material_id: str,
+        kind: str,
+        path: str,
+        parser_version: str,
+        sha256: str,
+        size_bytes: int,
+        created_at: str,
+    ) -> MaterialArtifact:
+        if not material_id or not kind or not path:
+            raise ValueError("material_id, kind, and path are required")
+        if not _HASH_RE.fullmatch(sha256):
+            raise ValueError("artifact sha256 must be lowercase SHA-256")
+        if size_bytes < 0:
+            raise ValueError("artifact size_bytes cannot be negative")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "INSERT INTO material_artifacts "
+                    "(material_id, kind, path, parser_version, sha256, size_bytes, "
+                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(material_id, kind, path) DO UPDATE SET "
+                    "parser_version = excluded.parser_version, sha256 = excluded.sha256, "
+                    "size_bytes = excluded.size_bytes",
+                    (
+                        material_id,
+                        kind,
+                        path,
+                        parser_version,
+                        sha256,
+                        size_bytes,
+                        created_at,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM material_artifacts "
+                    "WHERE material_id = ? AND kind = ? AND path = ?",
+                    (material_id, kind, path),
+                ).fetchone()
+                if row is None:
+                    raise StorageError("material artifact registration disappeared")
+                return self._artifact_from_row(row)
+        finally:
+            connection.close()
+
+    def list_material_artifacts(self, material_id: str) -> tuple[MaterialArtifact, ...]:
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM material_artifacts WHERE material_id = ? "
+                "ORDER BY artifact_id",
+                (material_id,),
+            ).fetchall()
+            return tuple(self._artifact_from_row(row) for row in rows)
+        finally:
+            connection.close()
+
+    def start_extraction(
+        self,
+        *,
+        extraction_id: str,
+        material_id: str,
+        profile: str,
+        provider: str,
+        model: str,
+        extractor_version: str,
+        confidence_threshold: float,
+        started_at: str,
+    ) -> None:
+        if not extraction_id or not material_id or not profile or not provider:
+            raise ValueError("extraction identity/profile/provider are required")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "INSERT INTO extraction_runs "
+                    "(extraction_id, material_id, profile, provider, model, "
+                    "extractor_version, status, confidence_threshold, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)",
+                    (
+                        extraction_id,
+                        material_id,
+                        profile,
+                        provider,
+                        model,
+                        extractor_version,
+                        confidence_threshold,
+                        started_at,
+                    ),
+                )
+        finally:
+            connection.close()
+
+    def complete_extraction(
+        self,
+        result: ExtractionResult,
+        *,
+        field_specs: tuple[FieldSpec, ...],
+    ) -> None:
+        if result.status not in {
+            ExtractionStatus.SUCCEEDED,
+            ExtractionStatus.NEEDS_REVIEW,
+        }:
+            raise ValueError("only successful/review extraction results can complete")
+        if result.can_advance != (result.status is ExtractionStatus.SUCCEEDED):
+            raise ValueError("extraction status and can_advance disagree")
+        specs = {spec.name: spec for spec in field_specs}
+        issue_payload = [asdict(issue) for issue in result.issues]
+        evidence_issue_codes = {
+            "missing_evidence",
+            "wrong_material",
+            "unknown_source",
+            "source_label_mismatch",
+            "source_text_mismatch",
+            "value_not_in_source",
+        }
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                run = connection.execute(
+                    "SELECT status FROM extraction_runs WHERE extraction_id = ?",
+                    (result.id,),
+                ).fetchone()
+                if run is None or run["status"] != "running":
+                    raise StorageError(f"extraction is missing or not running: {result.id}")
+                for proposal in result.proposals:
+                    spec = specs.get(proposal.field_name)
+                    if spec is None:
+                        raise StorageError(
+                            f"validated proposal lacks field spec: {proposal.field_name}"
+                        )
+                    if not math.isfinite(proposal.confidence):
+                        raise StorageError("proposal confidence must be finite")
+                    field_issues = [
+                        asdict(issue)
+                        for issue in result.issues
+                        if issue.field_name == proposal.field_name
+                    ]
+                    evidence_valid = not any(
+                        issue["code"] in evidence_issue_codes for issue in field_issues
+                    )
+                    evidence = proposal.evidence
+                    connection.execute(
+                        "INSERT INTO extracted_fields "
+                        "(extraction_id, field_name, proposed_value, confidence, required, "
+                        "source_material_id, source_kind, source_index, source_label, "
+                        "source_text, evidence_valid, validation_issues_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            result.id,
+                            proposal.field_name,
+                            proposal.proposed_value,
+                            proposal.confidence,
+                            int(spec.required),
+                            evidence.material_id if evidence else None,
+                            evidence.source_kind.value if evidence else None,
+                            evidence.source_index if evidence else None,
+                            evidence.source_label if evidence else None,
+                            evidence.source_text if evidence else None,
+                            int(evidence_valid),
+                            json.dumps(field_issues, ensure_ascii=False, sort_keys=True),
+                        ),
+                    )
+                cursor = connection.execute(
+                    "UPDATE extraction_runs SET status = ?, can_advance = ?, "
+                    "document_path = ?, result_path = ?, finished_at = ?, "
+                    "field_count = ?, issue_count = ?, issues_json = ?, "
+                    "error_type = NULL, error_message = NULL "
+                    "WHERE extraction_id = ? AND status = 'running'",
+                    (
+                        result.status.value,
+                        int(result.can_advance),
+                        result.document_path,
+                        result.result_path,
+                        result.finished_at,
+                        len(result.proposals),
+                        len(result.issues),
+                        json.dumps(issue_payload, ensure_ascii=False, sort_keys=True),
+                        result.id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(f"extraction completion lost state: {result.id}")
+        finally:
+            connection.close()
+
+    def fail_extraction(
+        self,
+        *,
+        extraction_id: str,
+        finished_at: str,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE extraction_runs SET status = 'failed', finished_at = ?, "
+                    "error_type = ?, error_message = ? "
+                    "WHERE extraction_id = ? AND status = 'running'",
+                    (finished_at, error_type[:120], error_message[:1000], extraction_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(
+                        f"extraction is missing or not running: {extraction_id}"
+                    )
+        finally:
+            connection.close()
+
+    def get_extraction(self, extraction_id: str) -> dict[str, object] | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            run = connection.execute(
+                "SELECT * FROM extraction_runs WHERE extraction_id = ?",
+                (extraction_id,),
+            ).fetchone()
+            if run is None:
+                return None
+            fields = connection.execute(
+                "SELECT * FROM extracted_fields WHERE extraction_id = ? "
+                "ORDER BY field_id",
+                (extraction_id,),
+            ).fetchall()
+            result = dict(run)
+            result["fields"] = [dict(field) for field in fields]
+            return result
+        finally:
+            connection.close()
+
     @staticmethod
     def _material_from_row(row: sqlite3.Row) -> Material:
         return Material(
@@ -751,5 +997,18 @@ class WorkflowStorage:
             status=MaterialStatus(row["ingest_status"]),
             review_reason=row["review_reason"],
             original_path=row["original_path"],
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _artifact_from_row(row: sqlite3.Row) -> MaterialArtifact:
+        return MaterialArtifact(
+            id=row["artifact_id"],
+            material_id=row["material_id"],
+            kind=row["kind"],
+            path=row["path"],
+            parser_version=row["parser_version"],
+            sha256=row["sha256"],
+            size_bytes=row["size_bytes"],
             created_at=row["created_at"],
         )

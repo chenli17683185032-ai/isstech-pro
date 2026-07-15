@@ -20,10 +20,10 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P4 gate on `2026-07-15`: **158 passed**, Ruff clean, OpenAPI
+Last complete P5 gate on `2026-07-15`: **205 passed**, Ruff clean, OpenAPI
 matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, SQLite migration/wheel/API/CLI contracts passed, offline material smoke
-passed, and `git diff --check` passed.
+passed, SQLite v2-to-v3 migration, parser/provider/API/CLI contracts passed,
+offline extraction smoke passed, and `git diff --check` passed.
 
 ## Operator evidence check
 
@@ -129,6 +129,29 @@ Pass criteria: both CLI calls exit zero; the second reports deduplicated; the
 database reports `1|1`; the original blob mode is `400`; no staging `.part`
 remains.
 
+## Document extraction smoke (offline)
+
+```bash
+tmp_dir="$(mktemp -d)"
+printf '项目编号：PRJ-001\n项目名称：REDACTED PROJECT\n采购方式：公开询价\n' \
+  > "$tmp_dir/project.txt"
+ingest_json="$(uv run python tools/ingest_materials.py "$tmp_dir/project.txt" \
+  --data-dir "$tmp_dir/data" --json)"
+material_id="$(printf '%s' "$ingest_json" | jq -r '.materials[0].material.id')"
+uv run python tools/extract_material.py "$material_id" \
+  --data-dir "$tmp_dir/data" --json
+sqlite3 "$tmp_dir/data/workflow-center.sqlite3" \
+  "select status, can_advance, field_count, issue_count from extraction_runs;"
+sqlite3 "$tmp_dir/data/workflow-center.sqlite3" \
+  "select field_name, evidence_valid, review_status from extracted_fields order by field_id;"
+stat -f '%Lp %N' "$tmp_dir"/data/materials/derived/*/extractions/*/result.json
+rm -rf "$tmp_dir"
+```
+
+Pass criteria: extraction is `succeeded|1|3|0`; every field has
+`evidence_valid=1` and `review_status=pending`; result JSON mode is `600`; no
+upstream credential or browser session is required.
+
 ## Zero write egress check
 
 ```bash
@@ -211,6 +234,7 @@ bash tools/first-commit.sh
 | SQLite snapshot/diff | Yes; transactional and version-gated | Credentialed live sync |
 | Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
+| Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples; P6 human review |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 

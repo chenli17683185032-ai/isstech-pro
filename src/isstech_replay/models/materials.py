@@ -31,3 +31,15 @@ class IngestResult:
     material: Material
     deduplicated: bool
     blob_created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialArtifact:
+    id: int
+    material_id: str
+    kind: str
+    path: str
+    parser_version: str
+    sha256: str
+    size_bytes: int
+    created_at: str

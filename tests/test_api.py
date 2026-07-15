@@ -132,10 +132,17 @@ def test_session_required() -> None:
             ("GET", "/v1/work-items"),
             ("POST", "/v1/sync/work-items"),
             ("POST", "/v1/materials"),
+            ("GET", "/v1/extractions/missing"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
             assert r.json()["detail"]["code"] == "AUTH_EXPIRED"
+        extraction = client.post(
+            "/v1/materials/missing/extractions",
+            json={},
+        )
+        assert extraction.status_code == 401
+        assert extraction.json()["detail"]["code"] == "AUTH_EXPIRED"
 
 
 def test_create_session_route_returns_local_token_without_upstream_ticket() -> None:
@@ -346,6 +353,92 @@ def test_material_upload_size_limit_and_status_validation(
     assert missing.json()["detail"]["code"] == "NOT_FOUND"
 
 
+def test_material_extraction_api_persists_evidence_and_supports_lookup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ISSTECH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(data_dir / "workflow.sqlite3"))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    text = "\n".join(
+        (
+            "项目编号：PRJ-001",
+            "项目名称：REDACTED PROJECT",
+            "采购方式：公开询价",
+        )
+    ).encode()
+    with client:
+        uploaded = client.post(
+            "/v1/materials",
+            headers=headers,
+            files={"file": ("project.txt", text, "text/plain")},
+        )
+        material_id = uploaded.json()["material"]["id"]
+        created = client.post(
+            f"/v1/materials/{material_id}/extractions",
+            headers=headers,
+            json={},
+        )
+        extraction_id = created.json()["extraction_id"]
+        fetched = client.get(
+            f"/v1/extractions/{extraction_id}",
+            headers=headers,
+        )
+
+    assert uploaded.status_code == 201
+    assert created.status_code == 201
+    assert created.json()["status"] == "succeeded"
+    assert created.json()["can_advance"] is True
+    assert created.json()["field_count"] == 3
+    assert {field["review_status"] for field in created.json()["fields"]} == {
+        "pending"
+    }
+    assert all(field["evidence"]["material_id"] == material_id for field in created.json()["fields"])
+    assert fetched.status_code == 200
+    assert fetched.json() == created.json()
+
+
+def test_material_extraction_api_reports_missing_material_and_provider_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ISSTECH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(data_dir / "workflow.sqlite3"))
+    monkeypatch.delenv("ISSTECH_AI_ENDPOINT", raising=False)
+    monkeypatch.delenv("ISSTECH_AI_MODEL", raising=False)
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        missing = client.post(
+            "/v1/materials/missing/extractions",
+            headers=headers,
+            json={},
+        )
+        uploaded = client.post(
+            "/v1/materials",
+            headers=headers,
+            files={"file": ("project.txt", b"REDACTED", "text/plain")},
+        )
+        material_id = uploaded.json()["material"]["id"]
+        unconfigured = client.post(
+            f"/v1/materials/{material_id}/extractions",
+            headers=headers,
+            json={"provider": "http_json"},
+        )
+        missing_run = client.get("/v1/extractions/missing", headers=headers)
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "NOT_FOUND"
+    assert unconfigured.status_code == 400
+    assert unconfigured.json()["detail"]["code"] == "BAD_REQUEST"
+    assert "ISSTECH_AI_ENDPOINT" in unconfigured.json()["detail"]["message"]
+    assert missing_run.status_code == 404
+    assert missing_run.json()["detail"]["code"] == "NOT_FOUND"
+
+
 def test_preview_delete_not_sendable() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -406,6 +499,8 @@ def test_openapi_available() -> None:
     assert "/v1/sync/work-items" in paths
     assert "/v1/materials" in paths
     assert "/v1/materials/{material_id}/content" in paths
+    assert "/v1/materials/{material_id}/extractions" in paths
+    assert "/v1/extractions/{extraction_id}" in paths
     assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
 
 

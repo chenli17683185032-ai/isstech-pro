@@ -26,11 +26,18 @@ captures/raw  --redact-->  captures/redacted (fixtures)
                                 v
 FastAPI /v1  -->  session store  -->  IsstechClient
      |                                   |
-     v                                   v
-sync service  --------------------> complete SearchIndex measurement
+     +--> material service --> immutable originals
+     |          |
+     |          v
+     |     structured document --> extraction provider
+     |                                  |
+     |                                  v
+     |                         evidence/threshold gate
+     |                                  |
+     v                                  v
+sync service  --------------------> SQLite state/audit
      |
-     v
-SQLite snapshots/current/events
+     +---------------------------> complete SearchIndex measurement
                                          |
                                          v
                                    EndpointPolicy
@@ -59,11 +66,15 @@ SQLite snapshots/current/events
 | `sync.py` | Complete read, normalization, run lifecycle, and failure recording |
 | `storage.py` + `schema.sql` | Versioned SQLite snapshots, current state, and events |
 | `materials.py` | Streaming hash, MIME gate, content-addressed originals, and deduplication |
+| `extraction.py` | Bounded format parsers, immutable structured artifacts, extraction run lifecycle |
+| `field_mapping.py` | Workflow field profiles plus required/evidence/confidence gates |
+| `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
 | `routes/` | sessions, purchase-requisitions, attachments, previews, work items |
 | `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
+| `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
 
 ## Safety model
 
@@ -135,3 +146,27 @@ Exact duplicate content/name is idempotent. Different names for the same bytes
 create separate material references but share one blob. Extension, declared
 MIME, and detected content conflicts enter `needs_review`; they are not silently
 accepted as ready.
+
+## Extraction control loop
+
+```text
+immutable original
+  -> format-specific parser with unit/document character limits
+  -> StructuredDocument(page/document/sheet/slide)
+  -> deterministic local rules OR explicitly configured HTTP JSON provider
+  -> field whitelist + required + confidence + exact-source validation
+  -> SQLite extraction run + pending extracted fields
+  -> P6 human review (no upstream submission in P5)
+```
+
+Structured documents are content-hashed and atomically stored at
+`data/materials/derived/<material-id>/documents/<document-hash>/`. Existing
+hash directories are byte-compared against regenerated deterministic output;
+corruption is not accepted as an idempotent hit. Extraction results are mode
+`0600` under `derived/<material-id>/extractions/<extraction-id>/result.json`.
+
+The default provider is local and repeatable. The optional HTTP provider streams
+and caps its response, requires HTTPS outside loopback, rejects workflow target
+hosts, and strictly parses JSON types. Its output cannot reach
+`WorkflowAdapter`, `GuardedTransport`, or any submit action. Every stored field
+starts with `review_status='pending'`; P6 alone may confirm or reject it.

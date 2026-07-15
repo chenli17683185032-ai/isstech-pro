@@ -264,3 +264,41 @@ def test_version_one_database_migrates_without_losing_runs(tmp_path: Path) -> No
     assert storage.schema_version() == SCHEMA_VERSION
     assert storage.get_run("existing-run")["status"] == "running"  # type: ignore[index]
     assert storage.table_count("materials") == 0
+    assert storage.table_count("extraction_runs") == 0
+
+
+def test_version_two_database_migrates_without_losing_materials(tmp_path: Path) -> None:
+    database = tmp_path / "version-two.sqlite3"
+    package_root = Path(__file__).parents[1] / "src" / "isstech_replay"
+    connection = sqlite3.connect(database)
+    connection.executescript((package_root / "schema.sql").read_text(encoding="utf-8"))
+    connection.executescript(
+        (package_root / "migration_002_materials.sql").read_text(encoding="utf-8")
+    )
+    sha256 = "a" * 64
+    connection.execute(
+        "INSERT INTO material_blobs "
+        "(sha256, size_bytes, original_path, detected_mime_type, created_at) "
+        "VALUES (?, 8, ?, 'text/plain', ?)",
+        (sha256, f"materials/originals/{sha256}/blob", T1),
+    )
+    connection.execute(
+        "INSERT INTO materials "
+        "(material_id, sha256, original_name, declared_mime_type, "
+        "detected_mime_type, extension, ingest_status, review_reason, created_at) "
+        "VALUES ('existing-material', ?, 'existing.txt', 'text/plain', "
+        "'text/plain', '.txt', 'ready', '', ?)",
+        (sha256, T1),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    connection.close()
+
+    storage = WorkflowStorage(database)
+
+    assert storage.schema_version() == SCHEMA_VERSION
+    material = storage.get_material("existing-material")
+    assert material is not None
+    assert material.original_name == "existing.txt"
+    assert storage.table_count("materials") == 1
+    assert storage.table_count("extraction_runs") == 0
