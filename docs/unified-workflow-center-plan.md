@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P9 已完成；等待 P7/P8 外部解锁` |
+| 当前总阶段 | `P9.1 账号作用域隔离修复` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,10 +53,12 @@
 
 ### 0.2 当前工作树与阶段提交
 
-P9 本地 Web 工作台代码、构建产物、恢复 API、并发初始化修复、测试和文档已
-通过门禁，并提交为 `04b7016 Add local unified workflow center workspace`。当前无
-待实施的产品代码；真实 Keychain 配置和 bootstrap 保持 `BLOCKED`，P7 上游写
-动作保持 `BLOCKED`，P10 保持 `TODO`，不得自动开始。
+P9 本地 Web 工作台已提交为 `04b7016 Add local unified workflow center workspace`。
+`2026-07-15` 用户在真实登录后发现催办清单显示了另一账号历史同步的数据；运行态
+检查确认当前 schema v4 的工作流快照没有账号作用域。P9.1 正在先隔离后恢复；旧
+`data/workflow-center.sqlite3` 原样保留但不再作为账号催办数据源。Keychain 凭据已由
+账号持有人配置并通过非空验证，LaunchAgent 仍等待执行时间确认。P7 保持
+`BLOCKED`，P10 保持 `TODO`。
 
 ### 0.3 最近一次验证结果
 
@@ -80,6 +82,7 @@ installer dry-run plist: plutil OK
 1. 纯 HTTP 客户端使用真实凭据从空会话登录的 live smoke 尚未执行。密码不得写进聊天、仓库、抓包摘要或日志，只能由账号持有人放入本机环境变量。
 2. 当前竞赛规则仍是“不得篡改系统数据”。因此真实新增、保存、提交、审批、调整、撤销、删除和上传全部禁止。
 3. 第二角色 IDOR 验证需要另一合法比赛账号，目前没有执行条件。
+4. P8 Keychain 配置已完成，但真实 LaunchAgent 激活仍等待账号持有人确认执行时间。
 
 ---
 
@@ -1024,6 +1027,66 @@ FastAPI wheel serves the built root UI without Node installed
   wheel 内容检查通过；UI 仍没有 submit/approve/delete/upload-to-iPSA 动作。
 - P9 已独立提交为 `04b7016 Add local unified workflow center workspace`。
 
+## P9.1 账号作用域隔离修复
+
+状态：`IN_PROGRESS`
+
+### 运行证据与根因
+
+- `2026-07-15` 账号持有人在真实登录后确认催办清单包含其他账号的项目。
+- 运行中的 `data/workflow-center.sqlite3` 为 schema v4，包含 1 次同步、78 条历史
+  快照和 78 条当前记录；检查只读取表结构和计数，没有输出业务字段值。
+- `sync_runs`、`workflow_snapshots`、`workflow_current` 和 `workflow_events` 均无
+  账号作用域；`GET /v1/work-items/current` 与 `GET /v1/sync/runs` 虽要求有效会话，
+  却丢弃 `session.username` 后读取同一全局数据库。这是已复现的数据串号根因。
+
+### 控制目标与稳定性边界
+
+```text
+当前登录账号
+→ 规范化账号标识
+→ SHA-256 不可逆作用域键
+→ 独立 SQLite / run summary / CSV 目录
+→ 只显示同一作用域的快照与同步记录
+```
+
+1. 不猜测旧快照属于哪个账号，不把历史数据迁给当前账号；旧全局数据库原样隔离，
+   便于审计和回退。
+2. 账号原文不得进入目录名、普通日志、Git 或 API 响应；路径只使用完整 SHA-256
+   作用域键。同一账号在空白、大小写和 Unicode 兼容形式归一后必须落到同一作用域。
+3. API 手动同步、CLI、Keychain 定时同步、当前清单和同步历史必须使用同一作用域
+   解析函数，不能各自拼路径。
+4. `ISSTECH_DATABASE_PATH` 和 CLI `--database` 只定义数据库基名/根位置，实际账号
+   数据库仍落在相邻的 `accounts/<scope>/` 下，避免测试或运维配置重新引入共享库。
+5. 不删除、不移动、不修改 `data/workflow-center.sqlite3`；不触发任何上游写请求。
+
+### 修改与保存位置
+
+```text
+账号作用域与路径: src/isstech_replay/account_scope.py
+API 当前清单:      src/isstech_replay/routes/work_items.py
+API 同步与历史:    src/isstech_replay/routes/sync.py
+只读同步 CLI:      tools/sync_work_items.py
+自动化测试:        tests/test_account_scope.py, tests/test_api.py, tests/test_sync.py
+文档:              README.md, docs/architecture.md,
+                   docs/final-verification.md,
+                   docs/unified-workflow-center-plan.md
+```
+
+### 验收门禁
+
+```text
+account A sync -> account A current/runs visible
+account A sync -> account B current/runs empty
+account B sync -> account A state unchanged
+same normalized account -> same scoped path
+raw username absent from scoped path and scheduler log
+legacy global SQLite remains byte-for-byte unchanged during isolated sync
+real Keychain read-only sync populates only the configured account scope
+no Create/Save/Edit/Submit/Approve/Delete/Upload request is emitted
+full pytest, ruff, OpenAPI, secret/evidence, diff and wheel checks pass
+```
+
 ## P10 第二个流程适配器
 
 状态：`TODO`
@@ -1119,9 +1182,10 @@ FastAPI wheel serves the built root UI without Node installed
 | 13 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
 | 14 | `DONE` | P8 调度设施代码 | 226 tests + plist lint + timeout/redaction/rollback 通过 |
 | 15 | `DONE` | P8 阶段性提交 | `536d4e2 Add reversible weekday sync scheduling` |
-| 16 | `BLOCKED` | P8 真实激活 | 等账号持有人配置 Keychain 并确认执行时间 |
+| 16 | `BLOCKED` | P8 真实激活 | Keychain 已配置；等待账号持有人确认执行时间 |
 | 17 | `DONE` | P9 本地 Web 工作台 | 231 tests + browser QA + wheel 静态资源检查通过 |
 | 18 | `DONE` | P9 阶段性提交 | `04b7016 Add local unified workflow center workspace` |
+| 19 | `IN_PROGRESS` | P9.1 账号作用域隔离修复 | 两账号互不可见 + 旧库不变 + 真实只读同步验证 |
 
 ---
 
