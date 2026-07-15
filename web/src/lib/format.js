@@ -30,6 +30,8 @@ export const statusLabels = {
   succeeded: "成功",
   failed: "失败",
   running: "运行中",
+  follow_up: "待催办",
+  approved: "已过审",
 };
 
 export function statusLabel(value) {

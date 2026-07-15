@@ -6,12 +6,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 计划版本 | `v1.0` |
+| 计划版本 | `v1.1` |
 | 最后更新 | `2026-07-15` |
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P9.1 账号作用域隔离修复` |
+| 当前总阶段 | `P9.1 阶段性提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -54,35 +54,34 @@
 ### 0.2 当前工作树与阶段提交
 
 P9 本地 Web 工作台已提交为 `04b7016 Add local unified workflow center workspace`。
-`2026-07-15` 用户在真实登录后发现催办清单显示了另一账号历史同步的数据；运行态
-检查确认当前 schema v4 的工作流快照没有账号作用域。P9.1 正在先隔离后恢复；旧
-`data/workflow-center.sqlite3` 原样保留但不再作为账号催办数据源。Keychain 凭据已由
-账号持有人配置并通过非空验证，LaunchAgent 仍等待执行时间确认。P7 保持
-`BLOCKED`，P10 保持 `TODO`。
+P9.1 账号作用域、Portal 身份过滤、`待催办/已过审` 分类、调度解释器修复、真实
+只读同步、桌面/移动 QA 和全量门禁均已完成，当前只进行独立阶段性提交。旧
+`data/workflow-center.sqlite3` 原样保留但不再作为账号流程数据源；两个中间验证数据集
+已保存在 `data/quarantine/`，不进入 Git。Keychain 已配置，LaunchAgent 仍等待执行
+时间确认。P7 保持 `BLOCKED`，P10 保持 `TODO`。
 
 ### 0.3 最近一次验证结果
 
 ```text
-pytest: 231 passed
+pytest: 246 passed
 ruff: passed
 OpenAPI: matches runtime
 secret scan: passed
 evidence hashes and permissions: passed
 git diff --check: passed
-npm production build: 1592 modules, JS/CSS emitted
-desktop browser QA: 1440x900, no console error or page overflow
-mobile browser QA: 390x844, no console error or page overflow
-wheel: web_dist HTML/JS/CSS + schema/migrations present
+npm production build: 1592 modules, JS 235.22 kB, CSS 23.71 kB
+desktop Chrome QA: 1440x900, approved=1, no console error/overflow/overlap
+mobile Chrome QA: 390x844, no overflow/overlap; segmented control fits
+wheel: 60 files; account scope, Portal parser, web_dist and migrations present
 repository plist: plutil OK
 installer dry-run plist: plutil OK
 ```
 
 ### 0.4 当前外部阻断
 
-1. 纯 HTTP 客户端使用真实凭据从空会话登录的 live smoke 尚未执行。密码不得写进聊天、仓库、抓包摘要或日志，只能由账号持有人放入本机环境变量。
-2. 当前竞赛规则仍是“不得篡改系统数据”。因此真实新增、保存、提交、审批、调整、撤销、删除和上传全部禁止。
-3. 第二角色 IDOR 验证需要另一合法比赛账号，目前没有执行条件。
-4. P8 Keychain 配置已完成，但真实 LaunchAgent 激活仍等待账号持有人确认执行时间。
+1. 当前竞赛规则仍是“不得篡改系统数据”。因此真实新增、保存、提交、审批、调整、撤销、删除和上传全部禁止。
+2. 第二角色 IDOR 验证需要另一合法比赛账号，目前没有执行条件。
+3. P8 Keychain 配置已完成，但真实 LaunchAgent 激活仍等待账号持有人确认执行时间。
 
 ---
 
@@ -1029,7 +1028,7 @@ FastAPI wheel serves the built root UI without Node installed
 
 ## P9.1 账号作用域隔离修复
 
-状态：`IN_PROGRESS`
+状态：`DONE`
 
 ### 运行证据与根因
 
@@ -1047,7 +1046,8 @@ FastAPI wheel serves the built root UI without Node installed
 → 规范化账号标识
 → SHA-256 不可逆作用域键
 → 独立 SQLite / run summary / CSV 目录
-→ 只显示同一作用域的快照与同步记录
+→ Portal 当前显示身份 ∩ SearchIndex 申请人
+→ 同账号的待催办 + 已过审清单
 ```
 
 1. 不猜测旧快照属于哪个账号，不把历史数据迁给当前账号；旧全局数据库原样隔离，
@@ -1059,15 +1059,27 @@ FastAPI wheel serves the built root UI without Node installed
 4. `ISSTECH_DATABASE_PATH` 和 CLI `--database` 只定义数据库基名/根位置，实际账号
    数据库仍落在相邻的 `accounts/<scope>/` 下，避免测试或运维配置重新引入共享库。
 5. 不删除、不移动、不修改 `data/workflow-center.sqlite3`；不触发任何上游写请求。
+6. 运行测量证明 `Index` 仅返回 5 条“已保存”草稿，不能作为历史所有权集合；该
+   方案作废。Portal 的 `#AccountGreetings #Greeting p` 稳定显示
+   `Hi, <CURRENT_USER>`，且与 Search 申请人列存在唯一匹配。以 Portal 当前显示身份
+   精确过滤 `SearchIndex`；全局 Search 记录不得单独进入工作台。本人记录分为
+   `待催办` 和 `已过审`，只有明确的审批通过/完成状态可以标记为 `已过审`，已保存、
+   驳回和未知终态不猜测。
 
 ### 修改与保存位置
 
 ```text
 账号作用域与路径: src/isstech_replay/account_scope.py
+Portal 身份解析:   src/isstech_replay/parsers/portal.py,
+                   src/isstech_replay/client.py
 API 当前清单:      src/isstech_replay/routes/work_items.py
 API 同步与历史:    src/isstech_replay/routes/sync.py
+归属关联与分类:    src/isstech_replay/sync.py, src/isstech_replay/work_items.py
 只读同步 CLI:      tools/sync_work_items.py
-自动化测试:        tests/test_account_scope.py, tests/test_api.py, tests/test_sync.py
+Web 清单与总览:     web/src/views/WorkItemsView.jsx,
+                   web/src/views/OverviewView.jsx
+自动化测试:        tests/test_account_scope.py, tests/test_portal.py,
+                   tests/test_api.py, tests/test_sync.py
 文档:              README.md, docs/architecture.md,
                    docs/final-verification.md,
                    docs/unified-workflow-center-plan.md
@@ -1079,6 +1091,10 @@ API 同步与历史:    src/isstech_replay/routes/sync.py
 account A sync -> account A current/runs visible
 account A sync -> account B current/runs empty
 account B sync -> account A state unchanged
+Portal identity mismatch -> Search record excluded even when pending with named approver
+Portal identity missing/ambiguous -> fail closed, never return the global Search list
+owned approved/completed record -> visible under 已过审, not 待催办
+saved/rejected/unknown terminal record -> never mislabeled 已过审
 same normalized account -> same scoped path
 raw username absent from scoped path and scheduler log
 legacy global SQLite remains byte-for-byte unchanged during isolated sync
@@ -1086,6 +1102,34 @@ real Keychain read-only sync populates only the configured account scope
 no Create/Save/Edit/Submit/Approve/Delete/Upload request is emitted
 full pytest, ruff, OpenAPI, secret/evidence, diff and wheel checks pass
 ```
+
+### 实际结果（2026-07-15）
+
+- 复现了两层根因：旧 API 跨会话读取同一全局 SQLite；即使换成账号独立库，未过滤
+  的 `SearchIndex` 仍会把 78 条全局可见记录中的他人待办误当成本人项目。
+- `account_scope.py` 以 NFKC/trim/casefold 后的完整 SHA-256 建立
+  `data/accounts/<scope>/`；API、CLI、Keychain 调度、run JSON 和默认 CSV 共用同一
+  路径函数。两账号 mock 证明 A/B current 和 runs 互不可见。
+- Portal 真实结构 `#AccountGreetings #Greeting p` 返回 `Hi, <CURRENT_USER>`；
+  精确身份与 Search 申请人求交后，当前账号从 78 条全局记录收敛为 1 条本人记录。
+  Portal 身份缺失、重复或布局漂移会失败，不回退到全局 Search。
+- 当前真实账号结果为 `待催办 0`、`已过审 1`；只把 `审批通过/已完成` 归为
+  `approved`，已保存、驳回和未知状态不会被猜成已过审。UI 提供 `待催办`、
+  `超过 7 天`、`已过审` 三段视图，总览分别计数。
+- 旧 `data/workflow-center.sqlite3` 在全部验证前后 SHA-256 均为
+  `e17c2c349f3c5efffc3d825659d422a95df44e1ba3aca044b9df4e6bd814b0d8`；未删除、
+  未迁移归属。两个试验阶段的账号目录完整移入 mode `0700` 的 `data/quarantine/`，
+  数据库保持 mode `0600`。
+- 修复调度器解引用 `.venv/bin/python` 符号链接导致子进程丢失虚拟环境的问题，并以
+  符号链接回归测试证明 LaunchAgent 路径保持不变。Keychain 包装器真实只读同步成功，
+  安全日志不含用户名、密码、项目内容或票据。
+- 内置 Browser 连续两次无法附着新 webview，按故障指引改用本机 Google Chrome 的
+  隔离 headless Playwright；使用 Keychain 完成真实登录。桌面 `1440x900` 与移动
+  `390x844` 均显示 `0/0/1`，切换“已过审”后恰好 1 行；无全页溢出、摘要重叠、
+  segmented 溢出或页面 console warning/error。QA 截图只在 `/tmp`，业务单元格已遮蔽。
+- 全量 `pytest` 246 项、Ruff、OpenAPI、秘密扫描、证据哈希/权限、diff、两份 plist、
+  Vite 1,592 modules 和 60 文件 wheel 检查通过。正式服务继续绑定
+  `http://127.0.0.1:8000/`；没有发出 Create/Save/Edit/Submit/Approve/Delete/Upload。
 
 ## P10 第二个流程适配器
 
@@ -1185,7 +1229,8 @@ full pytest, ruff, OpenAPI, secret/evidence, diff and wheel checks pass
 | 16 | `BLOCKED` | P8 真实激活 | Keychain 已配置；等待账号持有人确认执行时间 |
 | 17 | `DONE` | P9 本地 Web 工作台 | 231 tests + browser QA + wheel 静态资源检查通过 |
 | 18 | `DONE` | P9 阶段性提交 | `04b7016 Add local unified workflow center workspace` |
-| 19 | `IN_PROGRESS` | P9.1 账号作用域隔离修复 | 两账号互不可见 + 旧库不变 + 真实只读同步验证 |
+| 19 | `DONE` | P9.1 账号归属隔离与已过审视图 | 246 tests + Portal/Search 身份求交 + 真实 0 待催办/1 已过审 + desktop/mobile QA |
+| 20 | `IN_PROGRESS` | P9.1 阶段性提交 | 独立提交账号隔离、身份过滤、已过审视图、测试和文档 |
 
 ---
 

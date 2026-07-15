@@ -12,8 +12,13 @@ from isstech_replay.models.purchase import (
     PurchaseRequisitionSummary,
     PurchaseView,
 )
+from isstech_replay.models.work_items import WorkItemCategory
 from isstech_replay.parsers.purchase import parse_purchase_list
-from isstech_replay.work_items import purchase_follow_up_items
+from isstech_replay.work_items import (
+    is_purchase_approved,
+    purchase_center_items,
+    purchase_follow_up_items,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "purchase"
@@ -63,6 +68,41 @@ def test_waiting_days_do_not_guess_invalid_or_future_dates() -> None:
         today=date(2026, 7, 15),
     )
     assert [item.waiting_days for item in items] == [None, None]
+
+
+def test_purchase_center_separates_follow_up_approved_and_unproven_states() -> None:
+    result = PurchaseListResult(
+        view=PurchaseView.APPLICATION,
+        items=(
+            PurchaseRequisitionSummary(
+                id="pending",
+                status="审批中",
+                next_approver="USER_APPROVER",
+                create_date="2026-07-01",
+            ),
+            PurchaseRequisitionSummary(id="approved", status="审批通过"),
+            PurchaseRequisitionSummary(id="completed", status="已完成"),
+            PurchaseRequisitionSummary(id="saved", status="已保存"),
+            PurchaseRequisitionSummary(id="rejected", status="已驳回"),
+            PurchaseRequisitionSummary(id="unknown", status="未知终态"),
+        ),
+    )
+
+    items = purchase_center_items(
+        result,
+        base_url="http://ipsapro.isstech.com",
+        today=date(2026, 7, 15),
+    )
+
+    assert [(item.external_id, item.category) for item in items] == [
+        ("pending", WorkItemCategory.FOLLOW_UP),
+        ("approved", WorkItemCategory.APPROVED),
+        ("completed", WorkItemCategory.APPROVED),
+    ]
+    assert items[0].waiting_days == 14
+    assert all(item.waiting_days is None for item in items[1:])
+    assert is_purchase_approved("审批通过") is True
+    assert is_purchase_approved("已驳回") is False
 
 
 def test_actionable_record_without_internal_id_fails_normalization() -> None:

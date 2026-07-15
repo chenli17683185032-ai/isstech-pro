@@ -13,6 +13,7 @@ from uuid import uuid4
 from .client import IsstechClient
 from .models.purchase import PurchaseListQuery, PurchaseListResult, PurchaseView
 from .models.work_items import SyncResult, WorkflowKind, WorkflowSnapshot
+from .parsers.portal import normalize_display_name
 from .storage import WorkflowStorage
 from .validation import require_path_segment
 from .work_items import (
@@ -134,6 +135,47 @@ def purchase_snapshots(
     return tuple(snapshots)
 
 
+def filter_account_purchase_requisitions(
+    search_result: PurchaseListResult,
+    *,
+    display_name: str,
+) -> PurchaseListResult:
+    """Filter the global SearchIndex by the authenticated Portal identity."""
+    normalized_display_name = normalize_display_name(display_name)
+    owned = tuple(
+        record
+        for record in search_result.items
+        if record.creator_name
+        and normalize_display_name(record.creator_name) == normalized_display_name
+    )
+
+    return PurchaseListResult(
+        view=PurchaseView.SEARCH,
+        items=owned,
+        total_text=None,
+        total_count=len(owned),
+        page=1,
+        page_size=search_result.page_size,
+        source_url=search_result.source_url,
+    )
+
+
+def read_account_purchase_requisitions(
+    client: IsstechClient,
+    *,
+    max_pages: int,
+) -> PurchaseListResult:
+    display_name = client.get_portal_display_name()
+    search_result = client.list_all_purchase_requisitions(
+        PurchaseListQuery(view=PurchaseView.SEARCH),
+        max_pages=max_pages,
+    )
+    return filter_account_purchase_requisitions(
+        search_result,
+        display_name=display_name,
+    )
+
+
 def sync_purchase_requisitions(
     client: IsstechClient,
     *,
@@ -166,10 +208,7 @@ def sync_purchase_requisitions(
         run_started = True
 
     try:
-        result = client.list_all_purchase_requisitions(
-            PurchaseListQuery(view=PurchaseView.SEARCH),
-            max_pages=max_pages,
-        )
+        result = read_account_purchase_requisitions(client, max_pages=max_pages)
         observed_datetime = observed_at or datetime.now(UTC)
         observed_text = utc_iso(observed_datetime)
         effective_today = today or date.today()

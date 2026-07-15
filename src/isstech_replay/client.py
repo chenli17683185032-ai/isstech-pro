@@ -24,6 +24,7 @@ from .models.purchase import (
 )
 from .parsers.attachment import parse_attachment_list
 from .parsers.login import is_login_page
+from .parsers.portal import parse_portal_display_name
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
 from .policy import EndpointPolicy, PolicyViolation, UnsafeRequestError
 from .transport import GuardedTransport
@@ -105,6 +106,12 @@ class IsstechClient:
 
     def get_purchase_requisition_page(self) -> httpx.Response:
         return self.get(self._url("/WebTP/PurchaseRequisition"))
+
+    def get_portal_display_name(self) -> str:
+        response = self.get(self._url("/Portal"))
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_portal_display_name(response.text)
 
     def _ensure_not_login(self, response: httpx.Response) -> None:
         if is_login_page(response.text):

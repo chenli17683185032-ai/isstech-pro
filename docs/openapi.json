@@ -50,6 +50,14 @@
       },
       "CurrentWorkItemListOut": {
         "properties": {
+          "approved_count": {
+            "title": "Approved Count",
+            "type": "integer"
+          },
+          "follow_up_count": {
+            "title": "Follow Up Count",
+            "type": "integer"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WorkItemOut"
@@ -80,7 +88,9 @@
         },
         "required": [
           "items",
-          "total_count"
+          "total_count",
+          "follow_up_count",
+          "approved_count"
         ],
         "title": "CurrentWorkItemListOut",
         "type": "object"
@@ -1647,8 +1657,24 @@
         "title": "VersionedActionIn",
         "type": "object"
       },
+      "WorkItemCategory": {
+        "enum": [
+          "follow_up",
+          "approved"
+        ],
+        "title": "WorkItemCategory",
+        "type": "string"
+      },
       "WorkItemListOut": {
         "properties": {
+          "approved_count": {
+            "title": "Approved Count",
+            "type": "integer"
+          },
+          "follow_up_count": {
+            "title": "Follow Up Count",
+            "type": "integer"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/WorkItemOut"
@@ -1668,6 +1694,8 @@
         "required": [
           "items",
           "total_count",
+          "follow_up_count",
+          "approved_count",
           "synced_at"
         ],
         "title": "WorkItemListOut",
@@ -1679,6 +1707,10 @@
             "default": "",
             "title": "Applicant",
             "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/WorkItemCategory",
+            "default": "follow_up"
           },
           "current_approver": {
             "default": "",

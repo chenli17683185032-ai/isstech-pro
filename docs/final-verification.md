@@ -187,7 +187,8 @@ Open `http://127.0.0.1:8000/`. The verified local-only browser path was:
 ```text
 mock login -> material in local store -> local_rules extraction -> draft
 -> three required evidence-backed confirmations -> validated -> ready
--> mock read-only SearchIndex sync -> one SQLite follow-up item
+-> mock Portal identity + read-only SearchIndex sync
+-> one follow-up item + one approved item in account-scoped SQLite
 -> refresh recovery -> stale-version 409 refresh without overwrite
 ```
 
@@ -239,8 +240,9 @@ stat -f '%Lp %N' \
 
 Expected: agent is loaded with five weekday intervals, installed plist mode is
 `600`, no credential appears in the plist, and a later scheduled run writes a
-successful SQLite run plus one safe `scheduled-sync.log` line while the FastAPI
-app is closed. Do not activate before Keychain is configured.
+successful SQLite run under `data/accounts/<sha256-account-scope>/` plus one safe
+`scheduled-sync.log` line while the FastAPI app is closed. The raw username must
+not appear in the scoped path or log. Do not activate before Keychain is configured.
 
 ## Zero write egress check
 

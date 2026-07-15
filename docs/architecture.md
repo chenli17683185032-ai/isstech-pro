@@ -40,7 +40,10 @@ React workspace --> FastAPI /v1 --> session store --> IsstechClient
      v                                  v
 sync service  --------------------> SQLite state/audit
      |
-     +---------------------------> complete SearchIndex measurement
+     +---------------------------> Portal identity + complete SearchIndex
+                                         |
+                                         v
+                              exact applicant ownership filter
                                          |
                                          v
                                    EndpointPolicy
@@ -66,6 +69,7 @@ sync service  --------------------> SQLite state/audit
 | `transport.py` | Sole real network egress |
 | `request_builders.py` | Offline construction of mutating requests |
 | `session_store.py` | Short-lived local Bearer handles (never return `.iPSA`) |
+| `account_scope.py` | Normalized SHA-256 account scope and isolated runtime paths |
 | `sync.py` | Complete read, normalization, run lifecycle, and failure recording |
 | `storage.py` + `schema.sql` | Versioned SQLite snapshots, current state, and events |
 | `materials.py` | Streaming hash, MIME gate, content-addressed originals, and deduplication |
@@ -77,7 +81,7 @@ sync service  --------------------> SQLite state/audit
 | `web/` | React/Vite source for overview, materials, drafts, and follow-up views |
 | `web_dist/` | Hashed production assets served by FastAPI and packaged in the wheel |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
-| `parsers/` | Login / purchase / attachment HTML parsers |
+| `parsers/` | Login / Portal identity / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
 | `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
@@ -100,7 +104,14 @@ sync service  --------------------> SQLite state/audit
    `.send()`.
 6. Local API sessions are random Bearer tokens mapping to in-memory upstream
    cookie jars. Upstream `.iPSA` is never returned to API clients.
-7. The Web workspace has no upstream execution control. Local material upload,
+7. Persisted work-item snapshots, sync runs, summaries, and default CSV exports
+   are isolated by a normalized SHA-256 account scope. Legacy unscoped workflow
+   data is retained but never attributed to a logged-in account.
+8. Portal `#AccountGreetings #Greeting p` supplies the authenticated display
+   identity. SearchIndex records enter the local account scope only when their
+   applicant matches that identity exactly after Unicode/whitespace normalization.
+   Missing or ambiguous Portal identity fails closed.
+9. The Web workspace has no upstream execution control. Local material upload,
    field review, ready transitions, and SQLite sync are the only mutations it can request.
 
 ## Evidence pipeline
@@ -127,12 +138,16 @@ separate live-smoke gate because the browser capture already carried `.iPSA`.
 ## Snapshot transaction
 
 1. Create and commit one `sync_runs` row with status `running` before the read.
-2. Fetch every SearchIndex page; incomplete pagination raises and records the run
-   as `failed` without snapshot rows.
-3. Normalize every source record into a canonical payload and SHA-256 state hash.
-4. In one SQLite transaction, append history, derive events, update current state,
+2. Read the Portal greeting identity, then fetch every SearchIndex page; Portal
+   drift or incomplete pagination raises and records the run as `failed` without
+   snapshot rows.
+3. Keep only exact applicant matches. Classify explicit active/named-approver
+   records as `follow_up` and explicit approval-complete records as `approved`;
+   saved, rejected, and unknown states are not guessed.
+4. Normalize every owned source record into a canonical payload and SHA-256 state hash.
+5. In one SQLite transaction, append history, derive events, update current state,
    and mark the run `succeeded`.
-5. If any item fails, rollback the whole state transaction, then mark the run
+6. If any item fails, rollback the whole state transaction, then mark the run
    `failed` in a separate transaction.
 
 Absence from one measurement is not treated as completion. A `completed` event

@@ -115,7 +115,9 @@ def run_scheduled_sync(
     if config.keychain_timeout_seconds <= 0 or config.sync_timeout_seconds <= 0:
         raise ValueError("scheduler timeouts must be positive")
     repo_root = config.repo_root.expanduser().resolve()
-    python_executable = config.python_executable.expanduser().resolve()
+    # Keep the virtualenv symlink intact; resolving it launches the base interpreter
+    # without the virtualenv's site-packages.
+    python_executable = config.python_executable.expanduser().absolute()
     data_dir = config.data_dir.expanduser().resolve()
     log_file = config.log_file.expanduser().resolve()
     sync_script = repo_root / "tools" / "sync_work_items.py"

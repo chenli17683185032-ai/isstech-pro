@@ -122,6 +122,47 @@ def test_scheduled_sync_calls_existing_cli_and_logs_only_safe_counts(tmp_path: P
     }
 
 
+def test_scheduled_sync_preserves_virtualenv_interpreter_symlink(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    interpreter_link = config.python_executable
+    interpreter_link.unlink()
+    base_interpreter = tmp_path / "base-python"
+    base_interpreter.write_text("", encoding="utf-8")
+    interpreter_link.symlink_to(base_interpreter)
+    captured: dict[str, object] = {}
+
+    def runner(command, **_kwargs):
+        captured["command"] = list(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "run_id": "run-symlink",
+                    "status": "succeeded",
+                    "observed_count": 0,
+                    "actionable_count": 0,
+                    "events": [],
+                }
+            ),
+            stderr="",
+        )
+
+    result = run_scheduled_sync(
+        config,
+        credential_reader=_credentials,
+        runner=runner,
+        account="local-test-account",
+        now=NOW,
+    )
+
+    assert result == 0
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[0] == str(interpreter_link.absolute())
+    assert command[0] != str(interpreter_link.resolve())
+
+
 def test_keychain_failure_is_nonzero_logged_and_does_not_start_sync(tmp_path: Path) -> None:
     config = _config(tmp_path)
     called = False

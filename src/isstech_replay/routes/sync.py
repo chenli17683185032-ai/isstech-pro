@@ -7,11 +7,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from isstech_replay.account_scope import account_database_path
 from isstech_replay.errors import local_storage_error, upstream_error
 from isstech_replay.routes.deps import get_session
 from isstech_replay.routes.work_items import WorkItemOut
 from isstech_replay.session_store import SessionRecord
-from isstech_replay.storage import WorkflowStorage, default_database_path
+from isstech_replay.storage import WorkflowStorage
 from isstech_replay.sync import safe_error_message, sync_purchase_requisitions
 
 
@@ -62,11 +63,13 @@ class SyncRunSummaryOut(BaseModel):
 
 @router.get("/sync/runs", response_model=list[SyncRunSummaryOut])
 def list_sync_runs(
-    _session: Annotated[SessionRecord, Depends(get_session)],
+    session: Annotated[SessionRecord, Depends(get_session)],
     limit: int = Query(default=10, ge=1, le=100),
 ) -> list[SyncRunSummaryOut]:
     try:
-        records = WorkflowStorage(default_database_path()).list_runs(limit=limit)
+        records = WorkflowStorage(
+            account_database_path(session.username)
+        ).list_runs(limit=limit)
         return [
             SyncRunSummaryOut(
                 run_id=str(record["run_id"]),
@@ -111,7 +114,11 @@ def sync_work_items(
     max_pages: int = Query(default=20, ge=1, le=100),
     dry_run: bool = Query(default=False),
 ) -> SyncRunOut:
-    storage = None if dry_run else WorkflowStorage(default_database_path())
+    storage = (
+        None
+        if dry_run
+        else WorkflowStorage(account_database_path(session.username))
+    )
     try:
         result = sync_purchase_requisitions(
             session.client,
@@ -164,6 +171,7 @@ def sync_work_items(
                 current_approver=item.current_approver,
                 waiting_days=item.waiting_days,
                 source_url=item.source_url,
+                category=item.category,
             )
             for item in result.work_items
         ],

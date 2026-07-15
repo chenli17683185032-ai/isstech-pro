@@ -10,6 +10,11 @@ class WorkflowKind(StrEnum):
     PURCHASE_REQUISITION = "purchase_requisition"
 
 
+class WorkItemCategory(StrEnum):
+    FOLLOW_UP = "follow_up"
+    APPROVED = "approved"
+
+
 class ChangeKind(StrEnum):
     NEW = "new"
     NODE_CHANGED = "node_changed"
@@ -31,6 +36,7 @@ class WorkItem:
     current_approver: str = ""
     waiting_days: int | None = None
     source_url: str = ""
+    category: WorkItemCategory = WorkItemCategory.FOLLOW_UP
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,7 +5,13 @@ const emptyData = {
   materials: [],
   extractions: [],
   drafts: [],
-  workItems: { items: [], total_count: 0, synced_at: null },
+  workItems: {
+    items: [],
+    total_count: 0,
+    follow_up_count: 0,
+    approved_count: 0,
+    synced_at: null,
+  },
   syncRuns: [],
 };
 

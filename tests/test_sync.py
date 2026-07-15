@@ -10,16 +10,21 @@ from pathlib import Path
 
 import pytest
 
+from isstech_replay.account_scope import account_database_path, account_runtime_dir
 from isstech_replay.client import PaginationIncompleteError
 from isstech_replay.config import Settings
 from isstech_replay.models.purchase import (
+    PurchaseListQuery,
     PurchaseListResult,
     PurchaseRequisitionSummary,
     PurchaseView,
 )
 from isstech_replay.models.work_items import ChangeKind, WorkItem, WorkflowKind
 from isstech_replay.storage import WorkflowStorage
-from isstech_replay.sync import sync_purchase_requisitions
+from isstech_replay.sync import (
+    filter_account_purchase_requisitions,
+    sync_purchase_requisitions,
+)
 from tools import sync_work_items as cli
 
 
@@ -72,8 +77,11 @@ class FakeClient:
         self.settings = Settings(base_url="http://ipsapro.isstech.com")
         self.result = result or _result()
         self.error = error
-        self.calls: list[int] = []
+        self.calls: list[tuple[PurchaseView, int]] = []
         self.closed = False
+
+    def get_portal_display_name(self) -> str:
+        return "USER_REQUESTER"
 
     def list_all_purchase_requisitions(
         self,
@@ -81,8 +89,8 @@ class FakeClient:
         *,
         max_pages: int,
     ) -> PurchaseListResult:
-        del query
-        self.calls.append(max_pages)
+        assert isinstance(query, PurchaseListQuery)
+        self.calls.append((query.view, max_pages))
         if self.error is not None:
             raise self.error
         return self.result
@@ -103,7 +111,9 @@ def test_sync_persists_all_records_and_returns_actionable_items(tmp_path: Path) 
         run_id="run-1",
     )
 
-    assert client.calls == [20]
+    assert client.calls == [
+        (PurchaseView.SEARCH, 20),
+    ]
     assert result.status == "succeeded"
     assert result.observed_count == 2
     assert result.snapshot_count == 2
@@ -113,6 +123,37 @@ def test_sync_persists_all_records_and_returns_actionable_items(tmp_path: Path) 
     assert [event.kind for event in result.events] == [ChangeKind.NEW, ChangeKind.NEW]
     assert storage.table_count("workflow_current") == 2
     assert storage.get_run("run-1")["status"] == "succeeded"  # type: ignore[index]
+
+
+def test_account_identity_filter_excludes_other_applicants() -> None:
+    owned = PurchaseRequisitionSummary(
+        id="owned-1",
+        requisition_no="REF-OWNED",
+        project_no="PROJECT-OWNED",
+        project_name="OWNED PROJECT",
+        creator_name="ACCOUNT USER",
+        create_date="2026-07-01",
+        status="审批中",
+    )
+    unrelated = PurchaseRequisitionSummary(
+        id="global-2",
+        requisition_no="REF-GLOBAL",
+        creator_name="OTHER USER",
+        status="审批中",
+        next_approver="GLOBAL APPROVER",
+    )
+
+    filtered = filter_account_purchase_requisitions(
+        PurchaseListResult(
+            view=PurchaseView.SEARCH,
+            items=(owned, unrelated),
+            total_count=2,
+        ),
+        display_name=" account user ",
+    )
+
+    assert [item.id for item in filtered.items] == ["owned-1"]
+    assert filtered.total_count == 1
 
 
 def test_same_state_next_day_updates_age_without_change_event(tmp_path: Path) -> None:
@@ -237,7 +278,12 @@ def test_cli_records_login_failure_without_secret(
     assert marker not in captured.err
     assert "<redacted>" in captured.err
 
-    storage = WorkflowStorage(tmp_path / "workflow-center.sqlite3")
+    storage = WorkflowStorage(
+        account_database_path(
+            "TEST_USER",
+            base_database_path=tmp_path / "workflow-center.sqlite3",
+        )
+    )
     runs = storage.list_runs()
     assert len(runs) == 1
     assert runs[0]["status"] == "failed"
@@ -273,10 +319,12 @@ def test_cli_writes_database_summary_and_csv_with_restrictive_modes(
     assert payload["actionable_count"] == 1
     assert fake_client.closed is True
 
-    database = tmp_path / "workflow-center.sqlite3"
-    summaries = list((tmp_path / "runs").glob("*/summary.json"))
-    exports = list((tmp_path / "exports").glob("*-work-items.csv"))
+    scoped_dir = account_runtime_dir(tmp_path, "TEST_USER")
+    database = scoped_dir / "workflow-center.sqlite3"
+    summaries = list((scoped_dir / "runs").glob("*/summary.json"))
+    exports = list((scoped_dir / "exports").glob("*-work-items.csv"))
     assert database.is_file()
+    assert "TEST_USER" not in str(scoped_dir)
     assert len(summaries) == 1
     assert len(exports) == 1
     assert summaries[0].stat().st_mode & 0o777 == 0o600

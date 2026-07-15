@@ -96,7 +96,7 @@ export ISSTECH_PASSWORD='...'
 # Prove fetch + normalization without creating data files
 uv run python tools/sync_work_items.py --dry-run --json
 
-# Persist snapshots, print JSON, and export the current follow-up list
+# Persist owned snapshots, print JSON, and export the current follow-up list
 uv run python tools/sync_work_items.py --json --csv
 
 unset ISSTECH_PASSWORD ISSTECH_USERNAME
@@ -105,14 +105,19 @@ unset ISSTECH_PASSWORD ISSTECH_USERNAME
 Runtime outputs:
 
 ```text
-data/workflow-center.sqlite3
-data/runs/<run-id>/summary.json
-data/exports/YYYY-MM-DD-work-items.csv
+data/accounts/<sha256-account-scope>/workflow-center.sqlite3
+data/accounts/<sha256-account-scope>/runs/<run-id>/summary.json
+data/accounts/<sha256-account-scope>/exports/YYYY-MM-DD-work-items.csv
 ```
 
 `data/` is gitignored. SQLite, summary, and CSV files are created with mode
-`0600`. A declared total mismatch, repeated/short page, schema mismatch, stale
-measurement, or local transaction error makes the command exit non-zero.
+`0600`. The account scope is a normalized SHA-256 key; the raw username is not
+used in paths. Legacy `data/workflow-center.sqlite3` data is retained for audit
+but is not shown as any logged-in account's current work-item state. Portal's
+authenticated greeting supplies the display identity; only exact applicant
+matches from the complete SearchIndex enter that account scope. A declared total
+mismatch, repeated/short page, missing/ambiguous Portal identity, schema mismatch,
+stale measurement, or local transaction error makes the command exit non-zero.
 
 ### Weekday scheduled sync
 
@@ -148,8 +153,9 @@ Keychain timeout and 15-minute sync timeout.
 
 The wrapper captures detailed CLI output in memory and appends only timestamp,
 run ID, status, counts, exit code, and a redacted error to
-`data/logs/scheduled-sync.log` (mode `0600`). Full run summaries and CSV remain
-under the existing private `data/runs/` and `data/exports/` paths.
+`data/logs/scheduled-sync.log` (mode `0600`). Full run summaries, SQLite state,
+and CSV output remain under the configured account's private
+`data/accounts/<sha256-account-scope>/` path.
 
 ```bash
 # stop future runs and remove the installed plist; local data and backup remain
@@ -239,7 +245,7 @@ curl -s http://127.0.0.1:8000/v1/sessions \
 curl -s 'http://127.0.0.1:8000/v1/purchase-requisitions?view=application' \
   -H "Authorization: Bearer $TOKEN"
 
-# unified follow-up list (SearchIndex-backed, read-only)
+# owned follow-up + approved list (Portal identity + SearchIndex, read-only)
 curl -s 'http://127.0.0.1:8000/v1/work-items' \
   -H "Authorization: Bearer $TOKEN"
 

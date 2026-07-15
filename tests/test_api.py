@@ -8,6 +8,7 @@ import json
 import httpx
 from fastapi.testclient import TestClient
 
+from isstech_replay.account_scope import account_database_path
 from isstech_replay.api import create_app
 from isstech_replay.auth import login
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
@@ -42,8 +43,34 @@ def _search_html() -> str:
     return (FIXTURES_PR / "list_search.html").read_text(encoding="utf-8")
 
 
+def _account_correlated_search_html() -> str:
+    return (
+        _search_html()
+        .replace("20001", "10002")
+        .replace("XQ-REDACTED-101", "XQ-REDACTED-002")
+        .replace("PRJ-REDACTED-X", "PRJ-REDACTED-B")
+        .replace("REDACTED PROJECT X", "REDACTED PROJECT BETA")
+        .replace("USER_REQUESTER", "USER_B")
+        .replace("2026-07-01", "2026-06-15")
+        .replace("20002", "10001")
+        .replace("XQ-REDACTED-102", "XQ-REDACTED-001")
+        .replace("PRJ-REDACTED-Y", "PRJ-REDACTED-A")
+        .replace("REDACTED PROJECT Y", "REDACTED PROJECT ALPHA")
+        .replace("USER_DONE", "USER_B")
+        .replace("2026-06-20", "2026-07-01")
+    )
+
+
 def _approval_html() -> str:
     return (FIXTURES_PR / "list_approval_empty.html").read_text(encoding="utf-8")
+
+
+def _portal_html() -> str:
+    return (
+        '<div id="AccountGreetings"><div id="Greeting">'
+        "<p>Hi, USER_B</p>"
+        "</div></div>"
+    )
 
 
 def _upstream_handler(request: httpx.Request) -> httpx.Response:
@@ -75,6 +102,8 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
             },
             request=request,
         )
+    if host == "ipsapro.isstech.com" and path.rstrip("/") == "/Portal":
+        return httpx.Response(200, text=_portal_html(), request=request)
     if host == "ipsapro.isstech.com" and path.startswith(
         "/WebTP/PurchaseRequisition/Download/"
     ):
@@ -90,7 +119,11 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
         if "/ApprovalIndex" in path:
             return httpx.Response(200, text=_approval_html(), request=request)
         if "/SearchIndex" in path:
-            return httpx.Response(200, text=_search_html(), request=request)
+            return httpx.Response(
+                200,
+                text=_account_correlated_search_html(),
+                request=request,
+            )
         return httpx.Response(200, text=_list_html(), request=request)
     return httpx.Response(404, text=f"no {host}{path}", request=request)
 
@@ -108,6 +141,17 @@ def _authed_client() -> tuple[TestClient, str]:
     record = store.create(upstream, username="alice")
     app = create_app(session_store=store)
     return TestClient(app), record.token
+
+
+def _add_authed_session(client: TestClient, username: str) -> str:
+    upstream = IsstechClient(
+        settings=Settings(base_url=BUSINESS, passport_url=PASSPORT),
+        transport=httpx.MockTransport(_upstream_handler),
+    )
+    result = login(upstream, username, "TEST_PASSWORD")
+    assert result.success
+    record = client.app.state.session_store.create(upstream, username=username)
+    return record.token
 
 
 def _mock_client_factory() -> IsstechClient:
@@ -218,22 +262,32 @@ def test_list_and_detail_and_attachments() -> None:
         assert meta["content_length"] == len(b"FILEBYTES")
 
 
-def test_unified_work_items_returns_only_pending_named_approvers() -> None:
+def test_unified_work_items_returns_owned_follow_up_and_approved_records() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
     with client:
         r = client.get("/v1/work-items", headers=headers)
     assert r.status_code == 200
     body = r.json()
-    assert body["total_count"] == 1
-    assert body["items"][0]["workflow"] == "purchase_requisition"
-    assert body["items"][0]["external_id"] == "20001"
-    assert body["items"][0]["current_approver"] == "USER_APPROVER"
-    assert body["items"][0]["status"] == "审批中"
-    assert body["items"][0]["source_url"].endswith(
-        "/WebTP/PurchaseRequisition/Detail/20001"
+    assert body["total_count"] == 2
+    assert body["follow_up_count"] == 1
+    assert body["approved_count"] == 1
+    by_category = {item["category"]: item for item in body["items"]}
+    follow_up = by_category["follow_up"]
+    approved = by_category["approved"]
+    assert follow_up["workflow"] == "purchase_requisition"
+    assert follow_up["external_id"] == "10002"
+    assert follow_up["current_approver"] == "USER_APPROVER"
+    assert follow_up["status"] == "审批中"
+    assert follow_up["source_url"].endswith(
+        "/WebTP/PurchaseRequisition/Detail/10002"
     )
-    assert isinstance(body["items"][0]["waiting_days"], int)
+    assert isinstance(follow_up["waiting_days"], int)
+    assert approved["external_id"] == "10001"
+    assert approved["status"] == "审批通过"
+    assert approved["current_approver"] == ""
+    assert approved["waiting_days"] is None
+    assert {item["external_id"] for item in body["items"]} == {"10001", "10002"}
 
 
 def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
@@ -279,12 +333,19 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert second.json()["event_count"] == 0
     assert current.status_code == 200
     assert current.json()["source"] == "sqlite_current"
-    assert current.json()["total_count"] == 1
-    assert current.json()["items"][0]["current_approver"] == "USER_APPROVER"
+    assert current.json()["total_count"] == 2
+    assert current.json()["follow_up_count"] == 1
+    assert current.json()["approved_count"] == 1
+    assert {item["category"] for item in current.json()["items"]} == {
+        "follow_up",
+        "approved",
+    }
     assert runs.status_code == 200
     assert len(runs.json()) == 2
     assert runs.json()[0]["status"] == "succeeded"
-    storage = WorkflowStorage(database)
+    storage = WorkflowStorage(
+        account_database_path("alice", base_database_path=database)
+    )
     assert storage.table_count("sync_runs") == 2
     assert storage.table_count("workflow_current") == 2
     assert storage.table_count("workflow_events") == 2
@@ -296,7 +357,9 @@ def test_current_work_items_keeps_freshness_when_successful_sync_is_empty(
 ) -> None:
     database = tmp_path / "workflow.sqlite3"
     monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
-    storage = WorkflowStorage(database)
+    storage = WorkflowStorage(
+        account_database_path("alice", base_database_path=database)
+    )
     observed_at = "2026-07-15T01:00:00+00:00"
     storage.start_run(
         run_id="empty-run",
@@ -342,6 +405,62 @@ def test_manual_sync_dry_run_does_not_create_database(
     assert response.json()["status"] == "dry_run"
     assert response.json()["database_path"] is None
     assert not database.exists()
+    assert not (tmp_path / "accounts").exists()
+
+
+def test_persisted_work_items_and_runs_are_isolated_by_login_account(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    legacy = WorkflowStorage(database)
+    observed_at = "2026-07-15T01:00:00+00:00"
+    legacy.start_run(
+        run_id="legacy-unscoped-run",
+        adapter=WorkflowKind.PURCHASE_REQUISITION,
+        started_at=observed_at,
+        max_pages=20,
+    )
+    legacy.complete_run(
+        run_id="legacy-unscoped-run",
+        observed_at=observed_at,
+        finished_at=observed_at,
+        source_total_count=0,
+        snapshots=(),
+        actionable_count=0,
+    )
+    legacy_bytes = database.read_bytes()
+
+    client, alice_token = _authed_client()
+    bob_token = _add_authed_session(client, "bob")
+    alice_headers = {"Authorization": f"Bearer {alice_token}"}
+    bob_headers = {"Authorization": f"Bearer {bob_token}"}
+
+    with client:
+        assert client.get("/v1/sync/runs", headers=alice_headers).json() == []
+        alice_sync = client.post("/v1/sync/work-items", headers=alice_headers)
+        bob_before = client.get("/v1/work-items/current", headers=bob_headers)
+        bob_runs_before = client.get("/v1/sync/runs", headers=bob_headers)
+        bob_sync = client.post("/v1/sync/work-items", headers=bob_headers)
+        alice_after = client.get("/v1/work-items/current", headers=alice_headers)
+        alice_runs_after = client.get("/v1/sync/runs", headers=alice_headers)
+
+    assert alice_sync.status_code == 200
+    assert bob_before.status_code == 200
+    assert bob_before.json()["items"] == []
+    assert bob_before.json()["synced_at"] is None
+    assert bob_runs_before.json() == []
+    assert bob_sync.status_code == 200
+    assert alice_after.json()["total_count"] == 2
+    assert alice_after.json()["follow_up_count"] == 1
+    assert alice_after.json()["approved_count"] == 1
+    assert len(alice_runs_after.json()) == 1
+    assert account_database_path(
+        "alice", base_database_path=database
+    ).is_file()
+    assert account_database_path("bob", base_database_path=database).is_file()
+    assert database.read_bytes() == legacy_bytes
 
 
 def test_material_upload_list_detail_content_and_deduplication(

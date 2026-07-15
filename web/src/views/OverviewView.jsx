@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   ArrowRight,
+  CircleCheckBig,
   ClipboardCheck,
   FileText,
   Inbox,
@@ -16,11 +17,14 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
   const reviewDrafts = data.drafts.filter((draft) =>
     ["extracted", "needs_review"].includes(draft.state),
   );
+  const followUpItems = data.workItems.items.filter(
+    (item) => item.category === "follow_up",
+  );
   const latestRun = data.syncRuns[0];
   const metrics = [
     { label: "待审草稿", value: reviewDrafts.length, icon: ClipboardCheck, tone: "warning" },
-    { label: "待催办", value: data.workItems.total_count, icon: ListTodo, tone: "danger" },
-    { label: "今日变化", value: latestRun?.event_count || 0, icon: RefreshCw, tone: "success" },
+    { label: "待催办", value: data.workItems.follow_up_count, icon: ListTodo, tone: "danger" },
+    { label: "已过审", value: data.workItems.approved_count, icon: CircleCheckBig, tone: "success" },
     { label: "材料", value: data.materials.length, icon: FileText, tone: "neutral" },
   ];
 
@@ -51,12 +55,12 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
             <div><h2>催办清单</h2><span>{data.workItems.synced_at ? `快照 ${formatDateTime(data.workItems.synced_at)}` : "尚无快照"}</span></div>
             <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("work-items")}>查看全部</Button>
           </div>
-          {data.workItems.items.length ? (
+          {followUpItems.length ? (
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr><th>编号</th><th>项目</th><th>责任人</th><th>停留</th><th>状态</th></tr></thead>
                 <tbody>
-                  {data.workItems.items.slice(0, 6).map((item) => (
+                  {followUpItems.slice(0, 6).map((item) => (
                     <tr key={item.key}>
                       <td className="mono">{item.reference_no || item.external_id}</td>
                       <td><strong>{item.title || "未命名项目"}</strong><span>{item.project_no}</span></td>

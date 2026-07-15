@@ -15,6 +15,7 @@ import tempfile
 from typing import Sequence
 from uuid import uuid4
 
+from isstech_replay.account_scope import account_database_path, account_runtime_dir
 from isstech_replay.auth import login_with_settings
 from isstech_replay.models.work_items import WorkItem, WorkflowKind
 from isstech_replay.storage import DEFAULT_DATABASE_NAME, WorkflowStorage
@@ -109,7 +110,11 @@ def _parser() -> argparse.ArgumentParser:
         "--database",
         type=Path,
         default=None,
-        help="SQLite path (default: <data-dir>/workflow-center.sqlite3).",
+        help=(
+            "SQLite base path; the actual file is isolated under "
+            "accounts/<account-scope>/ (default base: "
+            "<data-dir>/workflow-center.sqlite3)."
+        ),
     )
     parser.add_argument("--max-pages", type=int, default=20)
     parser.add_argument(
@@ -128,7 +133,10 @@ def _parser() -> argparse.ArgumentParser:
         const=_AUTO_CSV,
         default=None,
         metavar="PATH",
-        help="Write work items to PATH or the dated default under data/exports.",
+        help=(
+            "Write work items to PATH or the dated default under the "
+            "account-scoped exports directory."
+        ),
     )
     return parser
 
@@ -175,10 +183,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     data_dir: Path = args.data_dir.expanduser()
-    database_path = (
+    database_base_path = (
         args.database.expanduser()
         if args.database is not None
         else data_dir / DEFAULT_DATABASE_NAME
+    )
+    scoped_data_dir = account_runtime_dir(data_dir, username)
+    database_path = account_database_path(
+        username,
+        base_database_path=database_base_path,
     )
     storage = None if args.dry_run else WorkflowStorage(database_path)
     client = None
@@ -197,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         summary_path: Path | None = None
         if not args.dry_run:
-            summary_path = data_dir / "runs" / result.run_id / "summary.json"
+            summary_path = scoped_data_dir / "runs" / result.run_id / "summary.json"
             _atomic_write_text(
                 summary_path,
                 json.dumps(
@@ -212,7 +225,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         csv_path: Path | None = None
         if args.csv is not None:
             csv_path = (
-                data_dir / "exports" / f"{date.today().isoformat()}-work-items.csv"
+                scoped_data_dir
+                / "exports"
+                / f"{date.today().isoformat()}-work-items.csv"
                 if args.csv == _AUTO_CSV
                 else Path(args.csv).expanduser()
             )

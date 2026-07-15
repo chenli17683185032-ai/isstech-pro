@@ -7,6 +7,8 @@ const toneMap = {
   confirmed: "success",
   extracted: "info",
   running: "info",
+  follow_up: "warning",
+  approved: "success",
   needs_review: "warning",
   pending: "warning",
   failed: "danger",
