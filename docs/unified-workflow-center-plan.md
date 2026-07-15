@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P8 调度设施已完成，准备阶段提交` |
+| 当前总阶段 | `P9 本地统一流程中心 Web 工作台` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,9 +53,9 @@
 
 ### 0.2 当前未提交工作树
 
-P6 已提交为 `3c13ed8 Add audited human review draft state machine`。当前未提交
-工作树只包含 P8 scheduler、Keychain/LaunchAgent 工具、plist、测试和文档；
-不得加入 P7 上游写动作。真实 Keychain 配置和 bootstrap 仍未执行。
+P8 调度设施已提交为 `536d4e2 Add reversible weekday sync scheduling`。真实
+Keychain 配置和 bootstrap 保持 BLOCKED；当前只推进 P9 本地 Web 工作台，
+不得加入 P7 上游写动作。
 
 ### 0.3 最近一次验证结果
 
@@ -824,7 +824,10 @@ no P6 route can reach GuardedTransport or adapter submit
 
 ## P8 每日调度
 
-状态：`IN_PROGRESS`
+状态：`BLOCKED`
+
+阻断仅针对真实激活：账号持有人尚未通过本机安全提示配置 Keychain，也尚未
+最终确认默认工作日 08:30。设施代码、plist、测试和安装器已经完成并提交。
 
 ### 设施
 
@@ -928,7 +931,74 @@ keychain/subprocess timeout cannot hang indefinitely
 - 尚未执行真实 Keychain 配置和 LaunchAgent bootstrap；解除条件是账号持有人
   在本机安全提示中输入凭据并确认默认 08:30 或指定其他时间。
 
-## P9 第二个流程适配器
+## P9 本地统一流程中心 Web 工作台
+
+状态：`IN_PROGRESS`
+
+### 目标用户闭环
+
+```text
+本地登录
+→ 总览今日待办/本地材料/待审草稿/最近同步
+→ 拖入材料并开始抽取
+→ 查看 AI 值和逐字段来源
+→ 人工确认/拒绝/修正 evidence
+→ validate → ready
+→ 查看 SQLite 当前催办清单
+→ 手动触发只读同步并观察结果
+```
+
+### 修改与保存位置
+
+```text
+前端源码: web/
+构建产物: src/isstech_replay/web_dist/
+静态服务: src/isstech_replay/api.py
+本地聚合/列表 API: src/isstech_replay/routes/drafts.py,
+                    src/isstech_replay/routes/extractions.py,
+                    src/isstech_replay/routes/work_items.py
+前端/API 测试: tests/test_ui.py, tests/test_api.py
+```
+
+### 最小设计
+
+1. 根路径直接是工作台，不做营销 landing page。未登录时显示紧凑登录面板；
+   token 只放 `sessionStorage`，不显示/持久化上游 Cookie。
+2. 安静、密集、操作型布局：左侧视图导航，顶部连接/同步状态，主区按总览、
+   材料、审阅草稿、催办清单切换；不使用大 hero、装饰卡片或渐变背景。
+3. 新增只读列表 API，使刷新后仍能恢复 extraction/draft/current snapshot，
+   不依赖前端内存保存 ID。
+4. 材料页支持 drag/drop 与文件选择、进度/错误、MIME review 状态、开始
+   local_rules 抽取并幂等创建 draft。
+5. 草稿页同时显示 AI 原建议、confidence、原 evidence、人工值/人工 evidence、
+   validation issues 和 audit；所有修改携带最新 `expected_version`，409 后刷新。
+6. 只有状态允许时显示 validate/ready；不显示或实现 submit、upload-to-iPSA、
+   approve、delete 等 P7 动作。
+7. 催办页优先读取 SQLite 当前快照，展示责任人、状态、等待天数和详情链接；
+   手动同步调用现有只读 API，失败不清空旧快照。
+8. React/Vite 仅作为本地构建工具；运行时由 FastAPI 同源提供构建产物，
+   不依赖 Node dev server或第三方 CDN。图标使用 `lucide-react` 构建进 bundle。
+9. 固定桌面/移动尺寸做浏览器 screenshot、console/network error、文本溢出、
+   点击和响应式检查；构建产物必须进入 wheel。
+
+### 需要看的网站与工具
+
+- 实际产品：`http://127.0.0.1:8000/`；API 文档：`/docs`。
+- 使用 Browser/Playwright 检查渲染、交互、console、网络和桌面/移动截图。
+- 不需要打开 iPSA 页面做 UI 开发；真实同步仍通过既有只读 HTTP 客户端。
+
+### 验收
+
+```text
+material -> extraction -> draft -> reviewed -> validated -> ready works in UI
+refresh can recover drafts/extractions/current work items from SQLite
+409 stale version refreshes instead of overwriting
+no UI action or API route can submit upstream
+desktop/mobile screenshots have no overlap, clipping, blank primary view, or console error
+FastAPI wheel serves the built root UI without Node installed
+```
+
+## P10 第二个流程适配器
 
 状态：`TODO`
 
@@ -1022,8 +1092,9 @@ keychain/subprocess timeout cannot hang indefinitely
 | 12 | `DONE` | P6 阶段性提交 | `3c13ed8 Add audited human review draft state machine` |
 | 13 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
 | 14 | `DONE` | P8 调度设施代码 | 226 tests + plist lint + timeout/redaction/rollback 通过 |
-| 15 | `IN_PROGRESS` | P8 阶段性提交 | 提交只包含 scheduler/plist/tools/tests/docs |
+| 15 | `DONE` | P8 阶段性提交 | `536d4e2 Add reversible weekday sync scheduling` |
 | 16 | `BLOCKED` | P8 真实激活 | 等账号持有人配置 Keychain 并确认执行时间 |
+| 17 | `IN_PROGRESS` | P9 本地 Web 工作台 | 材料→审阅→ready 与催办同步 UI 闭环通过 |
 
 ---
 
