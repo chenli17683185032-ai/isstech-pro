@@ -142,6 +142,54 @@ def test_successful_empty_measurement_preserves_sync_freshness(tmp_path: Path) -
 
     assert storage.current_snapshots(actionable_only=True) == ()
     assert storage.latest_successful_observed_at() == T1
+    assert storage.latest_successful_run()["run_id"] == "run-empty"  # type: ignore[index]
+
+
+def test_current_snapshot_lookup_is_scoped_by_adapter_and_external_id(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    _apply(storage, "run-1", T1, (_snapshot(T1, external_id="owned-1"),))
+
+    found = storage.get_current_snapshot(
+        WorkflowKind.PURCHASE_REQUISITION,
+        "owned-1",
+    )
+
+    assert found is not None
+    assert found.external_id == "owned-1"
+    assert (
+        storage.get_current_snapshot(
+            WorkflowKind.PURCHASE_REQUISITION,
+            "missing",
+        )
+        is None
+    )
+
+
+def test_source_candidate_count_may_exceed_owned_snapshot_count(tmp_path: Path) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    snapshot = _snapshot(T1, external_id="owned-1")
+    storage.start_run(
+        run_id="filtered-run",
+        adapter=WorkflowKind.PURCHASE_REQUISITION,
+        started_at=T1,
+        max_pages=20,
+    )
+
+    storage.complete_run(
+        run_id="filtered-run",
+        observed_at=T1,
+        finished_at=T1,
+        source_total_count=78,
+        snapshots=(snapshot,),
+        actionable_count=1,
+    )
+
+    run = storage.get_run("filtered-run")
+    assert run is not None
+    assert run["source_total_count"] == 78
+    assert run["observed_count"] == 1
 
 
 def test_exact_observation_replay_reuses_history_without_events(tmp_path: Path) -> None:

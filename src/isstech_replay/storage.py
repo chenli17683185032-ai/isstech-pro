@@ -298,9 +298,9 @@ class WorkflowStorage:
                     raise StorageError(f"run is missing or not running: {run_id}")
                 if actionable_count != sum(snapshot.actionable for snapshot in snapshots):
                     raise StorageError("actionable_count does not match snapshots")
-                if source_total_count is not None and source_total_count != len(snapshots):
+                if source_total_count is not None and source_total_count < len(snapshots):
                     raise StorageError(
-                        f"source_total_count={source_total_count} does not match "
+                        f"source_total_count={source_total_count} is smaller than "
                         f"snapshot_count={len(snapshots)}"
                     )
 
@@ -610,6 +610,18 @@ class WorkflowStorage:
         finally:
             connection.close()
 
+    def latest_successful_run(self) -> dict[str, object] | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM sync_runs WHERE status = 'succeeded' "
+                "ORDER BY started_at DESC, run_id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
     def list_events(self, run_id: str) -> tuple[ChangeEvent, ...]:
         self.initialize()
         connection = self._connect()
@@ -657,6 +669,24 @@ class WorkflowStorage:
                 parameters,
             ).fetchall()
             return tuple(self._snapshot_from_current(row) for row in rows)
+        finally:
+            connection.close()
+
+    def get_current_snapshot(
+        self,
+        adapter: WorkflowKind,
+        external_id: str,
+    ) -> WorkflowSnapshot | None:
+        if not external_id.strip():
+            raise ValueError("external_id is required")
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM workflow_current WHERE adapter = ? AND external_id = ?",
+                (adapter.value, external_id),
+            ).fetchone()
+            return self._snapshot_from_current(row) if row is not None else None
         finally:
             connection.close()
 

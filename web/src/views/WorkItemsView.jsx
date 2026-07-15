@@ -1,8 +1,10 @@
-import { Clipboard, ExternalLink, ListTodo, RefreshCw, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Clipboard, Eye, ListTodo, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { apiRequest } from "../api";
 import Button from "../components/Button";
 import EmptyState from "../components/EmptyState";
 import StatusTag from "../components/StatusTag";
+import WorkItemDetailDrawer from "../components/WorkItemDetailDrawer";
 import { formatDateTime } from "../lib/format";
 
 const CLIPBOARD_TIMEOUT_MS = 3000;
@@ -25,9 +27,14 @@ async function writeClipboardText(text) {
   }
 }
 
-export default function WorkItemsView({ data, notify, onSync, syncing }) {
+export default function WorkItemsView({ token, data, notify, onSync, syncing }) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("follow_up");
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailError, setDetailError] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailRequestVersion, setDetailRequestVersion] = useState(0);
   const items = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return data.workItems.items.filter((item) => {
@@ -43,6 +50,33 @@ export default function WorkItemsView({ data, notify, onSync, syncing }) {
         .some((value) => String(value || "").toLowerCase().includes(normalized));
     });
   }, [data.workItems.items, query, mode]);
+
+  const closeDetail = useCallback(() => setSelectedItem(null), []);
+
+  useEffect(() => {
+    if (!selectedItem) return undefined;
+    let active = true;
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    apiRequest(`/v1/work-items/${encodeURIComponent(selectedItem.external_id)}/detail`, { token })
+      .then((result) => {
+        if (active) setDetail(result);
+      })
+      .catch((error) => {
+        if (active) setDetailError(error);
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedItem, token, detailRequestVersion]);
+
+  function openDetail(item) {
+    setSelectedItem(item);
+  }
 
   async function copyList() {
     const text = items.map((item) => [
@@ -71,6 +105,15 @@ export default function WorkItemsView({ data, notify, onSync, syncing }) {
         <div><span>快照时间</span><strong>{formatDateTime(data.workItems.synced_at)}</strong></div>
       </section>
       <section className="content-section">
+        <div className="work-item-scope">
+          <ShieldCheck size={17} aria-hidden="true" />
+          <div><strong>范围：我发起的</strong><span>申请人按当前登录身份精确匹配</span></div>
+          <p>
+            全量候选 <strong>{data.workItems.source_total_count ?? "--"}</strong>
+            <span>·</span>
+            本人匹配 <strong>{data.workItems.matched_count ?? data.workItems.total_count}</strong>
+          </p>
+        </div>
         <div className="table-toolbar">
           <div className="search-control"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索编号、项目、责任人" aria-label="搜索流程记录" /></div>
           <div className="segmented" aria-label="流程范围">
@@ -89,14 +132,40 @@ export default function WorkItemsView({ data, notify, onSync, syncing }) {
               <thead><tr><th>编号</th><th>项目</th><th>当前节点</th><th>责任人</th><th>停留</th><th>状态</th><th /></tr></thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.key}>
+                  <tr
+                    key={item.key}
+                    className="clickable-row"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`查看 ${item.reference_no || item.external_id} 详情`}
+                    onClick={() => openDetail(item)}
+                    onKeyDown={(event) => {
+                      if (event.target === event.currentTarget && ["Enter", " "].includes(event.key)) {
+                        event.preventDefault();
+                        openDetail(item);
+                      }
+                    }}
+                  >
                     <td className="mono">{item.reference_no || item.external_id}</td>
                     <td><strong>{item.title || "未命名项目"}</strong><span>{item.project_no}</span></td>
                     <td>{item.status || "--"}</td>
                     <td><strong>{item.current_approver || "--"}</strong></td>
                     <td className={(item.waiting_days || 0) >= 7 ? "waiting waiting--high" : "waiting"}>{item.waiting_days == null ? "--" : `${item.waiting_days} 天`}</td>
                     <td><StatusTag value={item.category} label={item.category === "approved" ? "已过审" : item.status} /></td>
-                    <td className="align-right"><a className="icon-link" href={item.source_url} target="_blank" rel="noreferrer" title="打开只读详情" aria-label="打开只读详情"><ExternalLink size={16} /></a></td>
+                    <td className="align-right">
+                      <button
+                        className="icon-link"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDetail(item);
+                        }}
+                        title="查看本地详情"
+                        aria-label={`查看 ${item.reference_no || item.external_id} 本地详情`}
+                      >
+                        <Eye size={16} aria-hidden="true" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -104,6 +173,16 @@ export default function WorkItemsView({ data, notify, onSync, syncing }) {
           </div>
         ) : <EmptyState icon={ListTodo} title={query ? "没有匹配的流程记录" : (mode === "approved" ? "暂无已过审单据" : "暂无本地待催办项")} />}
       </section>
+      {selectedItem ? (
+        <WorkItemDetailDrawer
+          item={selectedItem}
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+          onClose={closeDetail}
+          onRetry={() => setDetailRequestVersion((current) => current + 1)}
+        />
+      ) : null}
     </div>
   );
 }

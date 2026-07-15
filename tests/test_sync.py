@@ -153,7 +153,42 @@ def test_account_identity_filter_excludes_other_applicants() -> None:
     )
 
     assert [item.id for item in filtered.items] == ["owned-1"]
-    assert filtered.total_count == 1
+    assert filtered.total_count == 2
+
+
+def test_sync_preserves_global_candidate_count_after_account_filter(
+    tmp_path: Path,
+) -> None:
+    owned = _result().items[0]
+    unrelated = PurchaseRequisitionSummary(
+        id="global-2",
+        requisition_no="REF-GLOBAL",
+        creator_name="OTHER USER",
+        status="审批中",
+        next_approver="GLOBAL APPROVER",
+    )
+    source = PurchaseListResult(
+        view=PurchaseView.SEARCH,
+        items=(owned, unrelated),
+        total_count=78,
+    )
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+
+    result = sync_purchase_requisitions(
+        FakeClient(source),  # type: ignore[arg-type]
+        storage=storage,
+        observed_at=OBSERVED_1,
+        today=date(2026, 7, 15),
+        run_id="filtered-run",
+    )
+
+    assert result.source_total_count == 78
+    assert result.observed_count == 1
+    assert result.snapshot_count == 1
+    run = storage.get_run("filtered-run")
+    assert run is not None
+    assert run["source_total_count"] == 78
+    assert run["observed_count"] == 1
 
 
 def test_same_state_next_day_updates_age_without_change_event(tmp_path: Path) -> None:

@@ -153,7 +153,9 @@ def filter_account_purchase_requisitions(
         view=PurchaseView.SEARCH,
         items=owned,
         total_text=None,
-        total_count=len(owned),
+        # Preserve the complete SearchIndex count so the persisted run can explain
+        # how many globally visible candidates were reduced to this owned subset.
+        total_count=search_result.total_count,
         page=1,
         page_size=search_result.page_size,
         source_url=search_result.source_url,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import sqlite3
 
 import httpx
 from fastapi.testclient import TestClient
@@ -182,6 +183,7 @@ def test_session_required() -> None:
             ("GET", "/v1/drafts"),
             ("GET", "/v1/drafts/missing"),
             ("GET", "/v1/work-items/current"),
+            ("GET", "/v1/work-items/missing/detail"),
             ("GET", "/v1/sync/runs"),
         ):
             r = client.request(method, path)
@@ -336,6 +338,9 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert current.json()["total_count"] == 2
     assert current.json()["follow_up_count"] == 1
     assert current.json()["approved_count"] == 1
+    assert current.json()["ownership_scope"] == "applicant"
+    assert current.json()["source_total_count"] == 2
+    assert current.json()["matched_count"] == 2
     assert {item["category"] for item in current.json()["items"]} == {
         "follow_up",
         "approved",
@@ -349,6 +354,58 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert storage.table_count("sync_runs") == 2
     assert storage.table_count("workflow_current") == 2
     assert storage.table_count("workflow_events") == 2
+
+
+def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    record = client.app.state.session_store.get(token)
+    assert record is not None
+
+    with client:
+        sync = client.post("/v1/sync/work-items", headers=headers)
+        assert sync.status_code == 200
+
+        detail_calls: list[str] = []
+        original_detail = record.client.get_purchase_requisition
+
+        def tracked_detail(external_id: str):
+            detail_calls.append(external_id)
+            return original_detail(external_id)
+
+        record.client.get_purchase_requisition = tracked_detail  # type: ignore[method-assign]
+        owned = client.get("/v1/work-items/10001/detail", headers=headers)
+        missing = client.get("/v1/work-items/not-owned/detail", headers=headers)
+        blank = client.get("/v1/work-items/%20/detail", headers=headers)
+
+        scoped_database = account_database_path(
+            "alice",
+            base_database_path=database,
+        )
+        with sqlite3.connect(scoped_database) as connection:
+            connection.execute(
+                "UPDATE workflow_current SET status = '已保存', actionable = 0 "
+                "WHERE external_id = '10002'"
+            )
+            connection.commit()
+        hidden = client.get("/v1/work-items/10002/detail", headers=headers)
+
+    assert owned.status_code == 200
+    assert owned.json()["item"]["external_id"] == "10001"
+    assert owned.json()["item"]["category"] == "approved"
+    assert owned.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
+    assert len(owned.json()["approval_steps"]) == 2
+    assert missing.status_code == 404
+    assert blank.status_code == 404
+    assert hidden.status_code == 404
+    assert missing.json()["detail"]["code"] == "NOT_FOUND"
+    assert hidden.json()["detail"]["code"] == "NOT_FOUND"
+    assert detail_calls == ["10001"]
 
 
 def test_current_work_items_keeps_freshness_when_successful_sync_is_empty(
@@ -793,6 +850,7 @@ def test_openapi_available() -> None:
     assert "/v1/purchase-requisitions" in paths
     assert "/v1/work-items" in paths
     assert "/v1/work-items/current" in paths
+    assert "/v1/work-items/{external_id}/detail" in paths
     assert "/v1/sync/work-items" in paths
     assert "/v1/sync/runs" in paths
     assert "/v1/materials" in paths

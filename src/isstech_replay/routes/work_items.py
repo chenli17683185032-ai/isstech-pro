@@ -6,18 +6,19 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from isstech_replay.account_scope import account_database_path
-from isstech_replay.errors import local_storage_error, upstream_error
+from isstech_replay.errors import local_storage_error, not_found, upstream_error
 from isstech_replay.models.work_items import (
     WorkItemCategory,
+    WorkflowKind,
     WorkflowSnapshot,
 )
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
 from isstech_replay.storage import WorkflowStorage
-from isstech_replay.sync import read_account_purchase_requisitions
+from isstech_replay.sync import read_account_purchase_requisitions, safe_error_message
 from isstech_replay.work_items import purchase_center_items, purchase_item_category
 
 router = APIRouter(tags=["work-items"])
@@ -54,6 +55,25 @@ class CurrentWorkItemListOut(BaseModel):
     approved_count: int
     synced_at: str | None = None
     source: str = "sqlite_current"
+    ownership_scope: str = "applicant"
+    source_total_count: int | None = None
+    matched_count: int = 0
+
+
+class WorkItemApprovalStepOut(BaseModel):
+    sequence: str = ""
+    timestamp: str = ""
+    approver_name: str = ""
+    role: str = ""
+    action: str = ""
+    comment: str = ""
+
+
+class WorkItemDetailOut(BaseModel):
+    item: WorkItemOut
+    fields: dict[str, str] = Field(default_factory=dict)
+    html_title: str = ""
+    approval_steps: list[WorkItemApprovalStepOut] = Field(default_factory=list)
 
 
 def _snapshot_out(
@@ -103,7 +123,17 @@ def list_current_work_items(
             )
             is not None
         ]
-        synced_at = storage.latest_successful_observed_at()
+        latest_run = storage.latest_successful_run()
+        synced_at = (
+            str(latest_run["observed_at"])
+            if latest_run is not None and latest_run.get("observed_at") is not None
+            else None
+        )
+        source_total_count = (
+            int(latest_run["source_total_count"])
+            if latest_run is not None and latest_run.get("source_total_count") is not None
+            else None
+        )
     except Exception as exc:
         raise local_storage_error(
             f"current work-item lookup failed: {type(exc).__name__}"
@@ -118,6 +148,63 @@ def list_current_work_items(
             category is WorkItemCategory.APPROVED for _, category in categorized
         ),
         synced_at=synced_at,
+        source_total_count=source_total_count,
+        matched_count=len(snapshots),
+    )
+
+
+@router.get("/work-items/{external_id}/detail", response_model=WorkItemDetailOut)
+def get_work_item_detail(
+    external_id: str,
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> WorkItemDetailOut:
+    normalized_id = external_id.strip()
+    if not normalized_id:
+        raise not_found("Work item not found in the current account scope")
+    try:
+        storage = WorkflowStorage(account_database_path(session.username))
+        snapshot = storage.get_current_snapshot(
+            WorkflowKind.PURCHASE_REQUISITION,
+            normalized_id,
+        )
+    except Exception as exc:
+        raise local_storage_error(
+            f"work-item ownership lookup failed: {type(exc).__name__}"
+        ) from exc
+
+    category = (
+        purchase_item_category(
+            snapshot.status,
+            has_current_approver=snapshot.actionable,
+        )
+        if snapshot is not None
+        else None
+    )
+    if snapshot is None or category is None:
+        raise not_found("Work item not found in the current account scope")
+
+    try:
+        detail = session.client.get_purchase_requisition(normalized_id)
+    except PermissionError as exc:
+        raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
+    except Exception as exc:
+        raise upstream_error(f"work-item detail failed: {safe_error_message(exc)}") from exc
+
+    return WorkItemDetailOut(
+        item=_snapshot_out(snapshot, category),
+        fields=detail.fields,
+        html_title=detail.html_title,
+        approval_steps=[
+            WorkItemApprovalStepOut(
+                sequence=step.sequence,
+                timestamp=step.timestamp,
+                approver_name=step.approver_name,
+                role=step.role,
+                action=step.action,
+                comment=step.comment,
+            )
+            for step in detail.approval_steps
+        ],
     )
 
 

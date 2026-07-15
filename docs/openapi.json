@@ -65,10 +65,31 @@
             "title": "Items",
             "type": "array"
           },
+          "matched_count": {
+            "default": 0,
+            "title": "Matched Count",
+            "type": "integer"
+          },
+          "ownership_scope": {
+            "default": "applicant",
+            "title": "Ownership Scope",
+            "type": "string"
+          },
           "source": {
             "default": "sqlite_current",
             "title": "Source",
             "type": "string"
+          },
+          "source_total_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Total Count"
           },
           "synced_at": {
             "anyOf": [
@@ -1657,6 +1678,42 @@
         "title": "VersionedActionIn",
         "type": "object"
       },
+      "WorkItemApprovalStepOut": {
+        "properties": {
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "approver_name": {
+            "default": "",
+            "title": "Approver Name",
+            "type": "string"
+          },
+          "comment": {
+            "default": "",
+            "title": "Comment",
+            "type": "string"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "sequence": {
+            "default": "",
+            "title": "Sequence",
+            "type": "string"
+          },
+          "timestamp": {
+            "default": "",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "title": "WorkItemApprovalStepOut",
+        "type": "object"
+      },
       "WorkItemCategory": {
         "enum": [
           "follow_up",
@@ -1664,6 +1721,37 @@
         ],
         "title": "WorkItemCategory",
         "type": "string"
+      },
+      "WorkItemDetailOut": {
+        "properties": {
+          "approval_steps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemApprovalStepOut"
+            },
+            "title": "Approval Steps",
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "html_title": {
+            "default": "",
+            "title": "Html Title",
+            "type": "string"
+          },
+          "item": {
+            "$ref": "#/components/schemas/WorkItemOut"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "WorkItemDetailOut",
+        "type": "object"
       },
       "WorkItemListOut": {
         "properties": {
@@ -3951,6 +4039,64 @@
           }
         },
         "summary": "List Current Work Items",
+        "tags": [
+          "work-items"
+        ]
+      }
+    },
+    "/v1/work-items/{external_id}/detail": {
+      "get": {
+        "operationId": "get_work_item_detail_v1_work_items__external_id__detail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItemDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Work Item Detail",
         "tags": [
           "work-items"
         ]

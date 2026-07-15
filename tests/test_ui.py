@@ -32,6 +32,10 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "javascript" in js.headers["content-type"]
     assert "待催办" in js.text
     assert "已过审" in js.text
+    assert "范围：我发起的" in js.text
+    assert "查看本地详情" in js.text
+    assert "审批轨迹" in js.text
+    assert "打开只读详情" not in js.text
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
     assert icon.status_code == 200

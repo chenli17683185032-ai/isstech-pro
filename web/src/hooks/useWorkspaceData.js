@@ -11,6 +11,9 @@ const emptyData = {
     follow_up_count: 0,
     approved_count: 0,
     synced_at: null,
+    ownership_scope: "applicant",
+    source_total_count: null,
+    matched_count: 0,
   },
   syncRuns: [],
 };
