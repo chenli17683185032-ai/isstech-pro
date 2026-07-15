@@ -60,3 +60,7 @@ def payload_too_large(message: str, details: dict[str, Any] | None = None) -> Ap
 
 def local_storage_error(message: str, details: dict[str, Any] | None = None) -> ApiError:
     return ApiError(500, "LOCAL_STORAGE_ERROR", message, details=details)
+
+
+def conflict(message: str, details: dict[str, Any] | None = None) -> ApiError:
+    return ApiError(409, "CONFLICT", message, details=details)

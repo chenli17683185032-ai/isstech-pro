@@ -11,12 +11,27 @@ from pathlib import Path
 import re
 import sqlite3
 
-from .models.extraction import ExtractionResult, ExtractionStatus, FieldSpec
+from .models.drafts import (
+    DraftAuditEvent,
+    DraftCreateResult,
+    DraftField,
+    DraftState,
+    ReviewDecision,
+    WorkflowDraft,
+)
+from .models.extraction import (
+    ExtractionResult,
+    ExtractionStatus,
+    FieldEvidence,
+    FieldIssue,
+    FieldSpec,
+    SourceKind,
+)
 from .models.work_items import ChangeEvent, ChangeKind, WorkflowKind, WorkflowSnapshot
 from .models.materials import Material, MaterialArtifact, MaterialStatus
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -28,15 +43,20 @@ _WORKFLOW_TABLES = {
 }
 _MATERIAL_TABLES = {"material_blobs", "materials", "material_artifacts"}
 _EXTRACTION_TABLES = {"extraction_runs", "extracted_fields"}
-_REQUIRED_TABLES = _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES
+_DRAFT_TABLES = {"workflow_drafts", "draft_fields", "draft_audit_events"}
+_REQUIRED_TABLES = (
+    _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES
+)
 _REQUIRED_TABLES_BY_VERSION = {
     1: _WORKFLOW_TABLES,
     2: _WORKFLOW_TABLES | _MATERIAL_TABLES,
-    3: _REQUIRED_TABLES,
+    3: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES,
+    4: _REQUIRED_TABLES,
 }
 _MIGRATIONS = {
     1: "migration_002_materials.sql",
     2: "migration_003_extraction.sql",
+    3: "migration_004_review.sql",
 }
 
 
@@ -54,6 +74,14 @@ class SnapshotConflictError(StorageError):
 
 class SnapshotOrderError(StorageError):
     """An older measurement attempted to replace a newer current state."""
+
+
+class DraftVersionConflict(StorageError):
+    """A stale reviewer attempted to overwrite a newer draft version."""
+
+
+class DraftStateConflict(StorageError):
+    """A draft action is invalid from its current state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -983,6 +1011,604 @@ class WorkflowStorage:
             return result
         finally:
             connection.close()
+
+    def create_workflow_draft(
+        self,
+        *,
+        draft_id: str,
+        extraction_id: str,
+        workflow: str,
+        field_specs: tuple[FieldSpec, ...],
+        actor: str,
+        created_at: str,
+    ) -> DraftCreateResult:
+        if not draft_id or not extraction_id or not workflow or not actor:
+            raise ValueError("draft identity, workflow, and actor are required")
+        if not field_specs or len({spec.name for spec in field_specs}) != len(field_specs):
+            raise ValueError("draft field specs must be non-empty and unique")
+        self.initialize()
+        connection = self._connect()
+        actual_draft_id = draft_id
+        created = False
+        try:
+            with connection:
+                run = connection.execute(
+                    "SELECT profile, status FROM extraction_runs WHERE extraction_id = ?",
+                    (extraction_id,),
+                ).fetchone()
+                if run is None:
+                    raise StorageError(f"extraction not found: {extraction_id}")
+                if run["status"] not in {"succeeded", "needs_review"}:
+                    raise DraftStateConflict(
+                        f"extraction status cannot create a draft: {run['status']}"
+                    )
+                initial_state = (
+                    DraftState.EXTRACTED
+                    if run["status"] == "succeeded"
+                    else DraftState.NEEDS_REVIEW
+                )
+                cursor = connection.execute(
+                    "INSERT INTO workflow_drafts "
+                    "(draft_id, extraction_id, workflow, profile, state, version, "
+                    "created_by, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?) "
+                    "ON CONFLICT(extraction_id) DO NOTHING",
+                    (
+                        draft_id,
+                        extraction_id,
+                        workflow,
+                        run["profile"],
+                        initial_state.value,
+                        actor,
+                        created_at,
+                        created_at,
+                    ),
+                )
+                created = cursor.rowcount == 1
+                if not created:
+                    existing = connection.execute(
+                        "SELECT draft_id FROM workflow_drafts WHERE extraction_id = ?",
+                        (extraction_id,),
+                    ).fetchone()
+                    if existing is None:
+                        raise StorageError("draft conflict did not return an existing row")
+                    actual_draft_id = str(existing["draft_id"])
+                else:
+                    sources = connection.execute(
+                        "SELECT field_id, field_name, review_status "
+                        "FROM extracted_fields WHERE extraction_id = ?",
+                        (extraction_id,),
+                    ).fetchall()
+                    source_by_name = {str(row["field_name"]): row for row in sources}
+                    spec_names = {spec.name for spec in field_specs}
+                    unknown = sorted(set(source_by_name) - spec_names)
+                    if unknown:
+                        raise StorageError(
+                            "extraction fields are outside the draft profile: "
+                            + ", ".join(unknown)
+                        )
+                    for source in sources:
+                        if source["review_status"] != ReviewDecision.PENDING.value:
+                            raise StorageError(
+                                "extracted field review state lacks a draft audit trail"
+                            )
+                    for spec in field_specs:
+                        source = source_by_name.get(spec.name)
+                        decision = (
+                            ReviewDecision.PENDING
+                            if source is not None or spec.required
+                            else ReviewDecision.NOT_PROPOSED
+                        )
+                        connection.execute(
+                            "INSERT INTO draft_fields "
+                            "(draft_id, field_name, label, required, source_field_id, "
+                            "review_decision) VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                draft_id,
+                                spec.name,
+                                spec.label,
+                                int(spec.required),
+                                source["field_id"] if source is not None else None,
+                                decision.value,
+                            ),
+                        )
+                    self._insert_draft_event(
+                        connection,
+                        draft_id=draft_id,
+                        sequence=1,
+                        event_type="draft_created",
+                        actor=actor,
+                        from_state=None,
+                        to_state=initial_state,
+                        field_name=None,
+                        details={
+                            "extraction_id": extraction_id,
+                            "field_count": len(field_specs),
+                            "profile": str(run["profile"]),
+                        },
+                        created_at=created_at,
+                    )
+        finally:
+            connection.close()
+        draft = self.get_workflow_draft(actual_draft_id)
+        if draft is None:
+            raise StorageError("created workflow draft disappeared")
+        return DraftCreateResult(draft=draft, created=created)
+
+    def get_workflow_draft(self, draft_id: str) -> WorkflowDraft | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            return self._load_workflow_draft(connection, draft_id)
+        finally:
+            connection.close()
+
+    def get_workflow_draft_by_extraction(
+        self,
+        extraction_id: str,
+    ) -> WorkflowDraft | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT draft_id FROM workflow_drafts WHERE extraction_id = ?",
+                (extraction_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._load_workflow_draft(connection, str(row["draft_id"]))
+        finally:
+            connection.close()
+
+    def review_workflow_draft_field(
+        self,
+        *,
+        draft_id: str,
+        field_name: str,
+        decision: ReviewDecision,
+        confirmed_value: str | None,
+        human_evidence: FieldEvidence | None,
+        actor: str,
+        reviewed_at: str,
+        expected_version: int,
+    ) -> WorkflowDraft:
+        if decision not in {ReviewDecision.CONFIRMED, ReviewDecision.REJECTED}:
+            raise ValueError("human review decision must be confirmed or rejected")
+        if decision is ReviewDecision.CONFIRMED:
+            if confirmed_value is None or not confirmed_value.strip():
+                raise ValueError("confirmed fields require a non-empty value")
+            confirmed_value = confirmed_value.strip()
+        elif confirmed_value is not None or human_evidence is not None:
+            raise ValueError("rejected fields cannot contain a value or human evidence")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                draft = connection.execute(
+                    "SELECT d.state, d.version, r.material_id "
+                    "FROM workflow_drafts d "
+                    "JOIN extraction_runs r USING (extraction_id) "
+                    "WHERE d.draft_id = ?",
+                    (draft_id,),
+                ).fetchone()
+                if draft is None:
+                    raise StorageError(f"workflow draft not found: {draft_id}")
+                state = DraftState(str(draft["state"]))
+                if state not in {DraftState.EXTRACTED, DraftState.NEEDS_REVIEW}:
+                    raise DraftStateConflict(
+                        f"field review is not allowed from draft state {state.value}"
+                    )
+                self._require_draft_version(draft, expected_version)
+                if (
+                    human_evidence is not None
+                    and human_evidence.material_id != draft["material_id"]
+                ):
+                    raise ValueError("human evidence material does not match the draft")
+                field = connection.execute(
+                    "SELECT * FROM draft_fields WHERE draft_id = ? AND field_name = ?",
+                    (draft_id, field_name),
+                ).fetchone()
+                if field is None:
+                    raise ValueError(f"field is not in the draft profile: {field_name}")
+                next_version = expected_version + 1
+                previous_details = {
+                    "decision": str(field["review_decision"]),
+                    "confirmed_value": field["confirmed_value"],
+                }
+                connection.execute(
+                    "UPDATE draft_fields SET review_decision = ?, confirmed_value = ?, "
+                    "human_source_kind = ?, human_source_index = ?, "
+                    "human_source_label = ?, human_source_text = ?, "
+                    "reviewed_by = ?, reviewed_at = ? "
+                    "WHERE draft_id = ? AND field_name = ?",
+                    (
+                        decision.value,
+                        confirmed_value,
+                        human_evidence.source_kind.value if human_evidence else None,
+                        human_evidence.source_index if human_evidence else None,
+                        human_evidence.source_label if human_evidence else None,
+                        human_evidence.source_text if human_evidence else None,
+                        actor,
+                        reviewed_at,
+                        draft_id,
+                        field_name,
+                    ),
+                )
+                if field["source_field_id"] is not None:
+                    cursor = connection.execute(
+                        "UPDATE extracted_fields SET review_status = ?, confirmed_value = ? "
+                        "WHERE field_id = ?",
+                        (decision.value, confirmed_value, field["source_field_id"]),
+                    )
+                    if cursor.rowcount != 1:
+                        raise StorageError("source extracted field disappeared during review")
+                cursor = connection.execute(
+                    "UPDATE workflow_drafts SET version = ?, updated_at = ?, "
+                    "validation_issues_json = '[]', validated_at = NULL "
+                    "WHERE draft_id = ? AND version = ?",
+                    (next_version, reviewed_at, draft_id, expected_version),
+                )
+                if cursor.rowcount != 1:
+                    raise DraftVersionConflict("draft changed during field review")
+                self._insert_draft_event(
+                    connection,
+                    draft_id=draft_id,
+                    sequence=next_version,
+                    event_type="field_reviewed",
+                    actor=actor,
+                    from_state=state,
+                    to_state=state,
+                    field_name=field_name,
+                    details={
+                        "previous": previous_details,
+                        "decision": decision.value,
+                        "confirmed_value": confirmed_value,
+                        "human_evidence": asdict(human_evidence) if human_evidence else None,
+                    },
+                    created_at=reviewed_at,
+                )
+        finally:
+            connection.close()
+        updated = self.get_workflow_draft(draft_id)
+        if updated is None:
+            raise StorageError("reviewed workflow draft disappeared")
+        return updated
+
+    def apply_workflow_draft_validation(
+        self,
+        *,
+        draft_id: str,
+        issues: tuple[FieldIssue, ...],
+        actor: str,
+        validated_at: str,
+        expected_version: int,
+    ) -> WorkflowDraft:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                draft = connection.execute(
+                    "SELECT state, version FROM workflow_drafts WHERE draft_id = ?",
+                    (draft_id,),
+                ).fetchone()
+                if draft is None:
+                    raise StorageError(f"workflow draft not found: {draft_id}")
+                state = DraftState(str(draft["state"]))
+                if state not in {DraftState.EXTRACTED, DraftState.NEEDS_REVIEW}:
+                    raise DraftStateConflict(
+                        f"validation is not allowed from draft state {state.value}"
+                    )
+                self._require_draft_version(draft, expected_version)
+                target = DraftState.NEEDS_REVIEW if issues else DraftState.VALIDATED
+                next_version = expected_version + 1
+                issue_payload = [asdict(issue) for issue in issues]
+                cursor = connection.execute(
+                    "UPDATE workflow_drafts SET state = ?, version = ?, "
+                    "validation_issues_json = ?, updated_at = ?, validated_at = ? "
+                    "WHERE draft_id = ? AND version = ?",
+                    (
+                        target.value,
+                        next_version,
+                        json.dumps(issue_payload, ensure_ascii=False, sort_keys=True),
+                        validated_at,
+                        validated_at if not issues else None,
+                        draft_id,
+                        expected_version,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise DraftVersionConflict("draft changed during validation")
+                self._insert_draft_event(
+                    connection,
+                    draft_id=draft_id,
+                    sequence=next_version,
+                    event_type="validation_failed" if issues else "validation_passed",
+                    actor=actor,
+                    from_state=state,
+                    to_state=target,
+                    field_name=None,
+                    details={"issues": issue_payload},
+                    created_at=validated_at,
+                )
+        finally:
+            connection.close()
+        updated = self.get_workflow_draft(draft_id)
+        if updated is None:
+            raise StorageError("validated workflow draft disappeared")
+        return updated
+
+    def mark_workflow_draft_ready(
+        self,
+        *,
+        draft_id: str,
+        actor: str,
+        ready_at: str,
+        expected_version: int,
+    ) -> WorkflowDraft:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                draft = connection.execute(
+                    "SELECT state, version, validation_issues_json "
+                    "FROM workflow_drafts WHERE draft_id = ?",
+                    (draft_id,),
+                ).fetchone()
+                if draft is None:
+                    raise StorageError(f"workflow draft not found: {draft_id}")
+                state = DraftState(str(draft["state"]))
+                if state is not DraftState.VALIDATED:
+                    raise DraftStateConflict(
+                        f"ready is not allowed from draft state {state.value}"
+                    )
+                self._require_draft_version(draft, expected_version)
+                if self._issues_from_json(draft["validation_issues_json"]):
+                    raise DraftStateConflict("draft still has validation issues")
+                invalid = connection.execute(
+                    "SELECT COUNT(*) FROM draft_fields WHERE draft_id = ? AND ("
+                    "review_decision = 'pending' OR "
+                    "(required = 1 AND review_decision != 'confirmed') OR "
+                    "(review_decision = 'confirmed' AND "
+                    "length(trim(COALESCE(confirmed_value, ''))) = 0))",
+                    (draft_id,),
+                ).fetchone()[0]
+                if invalid:
+                    raise DraftStateConflict("draft fields no longer satisfy ready gates")
+                next_version = expected_version + 1
+                cursor = connection.execute(
+                    "UPDATE workflow_drafts SET state = 'ready', version = ?, "
+                    "updated_at = ?, ready_at = ? WHERE draft_id = ? AND version = ?",
+                    (next_version, ready_at, ready_at, draft_id, expected_version),
+                )
+                if cursor.rowcount != 1:
+                    raise DraftVersionConflict("draft changed while marking ready")
+                self._insert_draft_event(
+                    connection,
+                    draft_id=draft_id,
+                    sequence=next_version,
+                    event_type="draft_ready",
+                    actor=actor,
+                    from_state=state,
+                    to_state=DraftState.READY,
+                    field_name=None,
+                    details={},
+                    created_at=ready_at,
+                )
+        finally:
+            connection.close()
+        updated = self.get_workflow_draft(draft_id)
+        if updated is None:
+            raise StorageError("ready workflow draft disappeared")
+        return updated
+
+    @staticmethod
+    def _require_draft_version(row: sqlite3.Row, expected_version: int) -> None:
+        if expected_version < 1:
+            raise ValueError("expected_version must be positive")
+        if int(row["version"]) != expected_version:
+            raise DraftVersionConflict(
+                f"stale draft version {expected_version}; current version is {row['version']}"
+            )
+
+    @staticmethod
+    def _insert_draft_event(
+        connection: sqlite3.Connection,
+        *,
+        draft_id: str,
+        sequence: int,
+        event_type: str,
+        actor: str,
+        from_state: DraftState | None,
+        to_state: DraftState,
+        field_name: str | None,
+        details: dict[str, object],
+        created_at: str,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO draft_audit_events "
+            "(draft_id, sequence, event_type, actor, from_state, to_state, "
+            "field_name, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                draft_id,
+                sequence,
+                event_type,
+                actor,
+                from_state.value if from_state is not None else None,
+                to_state.value,
+                field_name,
+                json.dumps(details, ensure_ascii=False, sort_keys=True),
+                created_at,
+            ),
+        )
+
+    @classmethod
+    def _load_workflow_draft(
+        cls,
+        connection: sqlite3.Connection,
+        draft_id: str,
+    ) -> WorkflowDraft | None:
+        draft = connection.execute(
+            "SELECT d.*, r.material_id FROM workflow_drafts d "
+            "JOIN extraction_runs r USING (extraction_id) WHERE d.draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+        if draft is None:
+            return None
+        field_rows = connection.execute(
+            "SELECT df.*, ef.proposed_value AS original_proposed_value, "
+            "ef.confidence AS original_confidence, "
+            "ef.source_material_id AS original_material_id, "
+            "ef.source_kind AS original_source_kind, "
+            "ef.source_index AS original_source_index, "
+            "ef.source_label AS original_source_label, "
+            "ef.source_text AS original_source_text, "
+            "ef.evidence_valid AS original_evidence_valid, "
+            "ef.validation_issues_json AS original_validation_issues_json "
+            "FROM draft_fields df LEFT JOIN extracted_fields ef "
+            "ON ef.field_id = df.source_field_id "
+            "WHERE df.draft_id = ? ORDER BY df.rowid",
+            (draft_id,),
+        ).fetchall()
+        fields: list[DraftField] = []
+        for row in field_rows:
+            original_evidence = None
+            if row["original_material_id"] is not None:
+                original_evidence = FieldEvidence(
+                    material_id=str(row["original_material_id"]),
+                    source_kind=SourceKind(str(row["original_source_kind"])),
+                    source_index=int(row["original_source_index"]),
+                    source_label=str(row["original_source_label"]),
+                    source_text=str(row["original_source_text"]),
+                )
+            human_evidence = None
+            if row["human_source_kind"] is not None:
+                human_evidence = FieldEvidence(
+                    material_id=str(draft["material_id"]),
+                    source_kind=SourceKind(str(row["human_source_kind"])),
+                    source_index=int(row["human_source_index"]),
+                    source_label=str(row["human_source_label"]),
+                    source_text=str(row["human_source_text"]),
+                )
+            fields.append(
+                DraftField(
+                    field_name=str(row["field_name"]),
+                    label=str(row["label"]),
+                    required=bool(row["required"]),
+                    source_field_id=(
+                        int(row["source_field_id"])
+                        if row["source_field_id"] is not None
+                        else None
+                    ),
+                    proposed_value=(
+                        str(row["original_proposed_value"])
+                        if row["original_proposed_value"] is not None
+                        else None
+                    ),
+                    confidence=(
+                        float(row["original_confidence"])
+                        if row["original_confidence"] is not None
+                        else None
+                    ),
+                    original_evidence=original_evidence,
+                    original_evidence_valid=bool(row["original_evidence_valid"]),
+                    original_validation_issues=cls._issues_from_json(
+                        row["original_validation_issues_json"] or "[]"
+                    ),
+                    decision=ReviewDecision(str(row["review_decision"])),
+                    confirmed_value=(
+                        str(row["confirmed_value"])
+                        if row["confirmed_value"] is not None
+                        else None
+                    ),
+                    human_evidence=human_evidence,
+                    reviewed_by=(
+                        str(row["reviewed_by"])
+                        if row["reviewed_by"] is not None
+                        else None
+                    ),
+                    reviewed_at=(
+                        str(row["reviewed_at"])
+                        if row["reviewed_at"] is not None
+                        else None
+                    ),
+                )
+            )
+        event_rows = connection.execute(
+            "SELECT * FROM draft_audit_events WHERE draft_id = ? ORDER BY sequence",
+            (draft_id,),
+        ).fetchall()
+        events = tuple(
+            DraftAuditEvent(
+                id=int(row["event_id"]),
+                sequence=int(row["sequence"]),
+                event_type=str(row["event_type"]),
+                actor=str(row["actor"]),
+                from_state=(
+                    DraftState(str(row["from_state"]))
+                    if row["from_state"] is not None
+                    else None
+                ),
+                to_state=DraftState(str(row["to_state"])),
+                field_name=(
+                    str(row["field_name"])
+                    if row["field_name"] is not None
+                    else None
+                ),
+                details=cls._details_from_json(row["details_json"]),
+                created_at=str(row["created_at"]),
+            )
+            for row in event_rows
+        )
+        return WorkflowDraft(
+            id=str(draft["draft_id"]),
+            extraction_id=str(draft["extraction_id"]),
+            material_id=str(draft["material_id"]),
+            workflow=str(draft["workflow"]),
+            profile=str(draft["profile"]),
+            state=DraftState(str(draft["state"])),
+            version=int(draft["version"]),
+            validation_issues=cls._issues_from_json(draft["validation_issues_json"]),
+            created_by=str(draft["created_by"]),
+            created_at=str(draft["created_at"]),
+            updated_at=str(draft["updated_at"]),
+            validated_at=(
+                str(draft["validated_at"])
+                if draft["validated_at"] is not None
+                else None
+            ),
+            ready_at=str(draft["ready_at"]) if draft["ready_at"] is not None else None,
+            fields=tuple(fields),
+            audit_events=events,
+        )
+
+    @staticmethod
+    def _issues_from_json(value: object) -> tuple[FieldIssue, ...]:
+        if not isinstance(value, str):
+            raise StorageError("stored field issues are not JSON text")
+        payload = json.loads(value)
+        if not isinstance(payload, list):
+            raise StorageError("stored field issues are not a list")
+        issues: list[FieldIssue] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise StorageError("stored field issue is not an object")
+            issues.append(
+                FieldIssue(
+                    code=str(item.get("code", "")),
+                    field_name=str(item.get("field_name", "")),
+                    message=str(item.get("message", "")),
+                )
+            )
+        return tuple(issues)
+
+    @staticmethod
+    def _details_from_json(value: object) -> dict[str, object]:
+        if not isinstance(value, str):
+            raise StorageError("stored audit details are not JSON text")
+        payload = json.loads(value)
+        if not isinstance(payload, dict):
+            raise StorageError("stored audit details are not an object")
+        return payload
 
     @staticmethod
     def _material_from_row(row: sqlite3.Row) -> Material:

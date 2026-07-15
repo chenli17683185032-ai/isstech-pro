@@ -87,6 +87,7 @@ The repository currently has:
 - Offline write request previews that cannot reach the live transport
 - Immutable local material ingestion and format-specific PDF/Office/text parsing
 - Evidence-backed local/HTTP-JSON field extraction with confidence and review gates
+- Versioned human review drafts with immutable AI proposals and append-only local audit
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
 It does **not** yet have a credentialed clean-process pure-HTTP smoke,

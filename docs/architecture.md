@@ -33,6 +33,8 @@ FastAPI /v1  -->  session store  -->  IsstechClient
      |                                  |
      |                                  v
      |                         evidence/threshold gate
+     |                                  v
+     |                         human review/state gate
      |                                  |
      v                                  v
 sync service  --------------------> SQLite state/audit
@@ -69,9 +71,10 @@ sync service  --------------------> SQLite state/audit
 | `extraction.py` | Bounded format parsers, immutable structured artifacts, extraction run lifecycle |
 | `field_mapping.py` | Workflow field profiles plus required/evidence/confidence gates |
 | `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
+| `workflow_state.py` | Human review, exact-evidence revalidation, optimistic state transitions |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
-| `routes/` | sessions, purchase-requisitions, attachments, previews, work items |
+| `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
 | `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
@@ -156,7 +159,9 @@ immutable original
   -> deterministic local rules OR explicitly configured HTTP JSON provider
   -> field whitelist + required + confidence + exact-source validation
   -> SQLite extraction run + pending extracted fields
-  -> P6 human review (no upstream submission in P5)
+  -> human confirmed/rejected decisions + optional corrected evidence
+  -> exact-source revalidation
+  -> local validated -> ready (no upstream submission)
 ```
 
 Structured documents are content-hashed and atomically stored at
@@ -170,3 +175,23 @@ and caps its response, requires HTTPS outside loopback, rejects workflow target
 hosts, and strictly parses JSON types. Its output cannot reach
 `WorkflowAdapter`, `GuardedTransport`, or any submit action. Every stored field
 starts with `review_status='pending'`; P6 alone may confirm or reject it.
+
+## Human review transaction
+
+`workflow_drafts`, `draft_fields`, and `draft_audit_events` are introduced by
+schema v4. One extraction maps to at most one draft. `draft_fields` references
+the P5 source field, so proposed value/confidence/evidence remain unchanged while
+the confirmed value and human evidence are stored separately.
+
+Every field review, validation attempt, and ready transition supplies
+`expected_version`. The SQLite transaction checks state and version, applies the
+change, increments the version, and appends an audit event with the same sequence
+number. Stale callers fail with a conflict. SQLite triggers reject UPDATE or
+DELETE against audit events.
+
+Validation reparses the immutable original and reuses the P5 source validator.
+Missing or rejected required fields, pending proposed fields, invalid excerpts,
+and document issues hold the draft in `needs_review`. Human confirmation may
+resolve low model confidence, but cannot replace exact evidence. Only
+`validated -> ready` is implemented; there is no P6 route to preview, submit, or
+reach `GuardedTransport`.

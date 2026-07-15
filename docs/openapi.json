@@ -48,6 +48,299 @@
         "title": "Body_ingest_material_v1_materials_post",
         "type": "object"
       },
+      "DraftAuditEventOut": {
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "field_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Name"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From State"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "to_state": {
+            "title": "To State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "event_type",
+          "actor",
+          "to_state",
+          "created_at"
+        ],
+        "title": "DraftAuditEventOut",
+        "type": "object"
+      },
+      "DraftCreateOut": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/DraftOut"
+          }
+        },
+        "required": [
+          "created",
+          "draft"
+        ],
+        "title": "DraftCreateOut",
+        "type": "object"
+      },
+      "DraftFieldOut": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "confirmed_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Value"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "human_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FieldEvidenceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "original_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FieldEvidenceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "original_evidence_valid": {
+            "title": "Original Evidence Valid",
+            "type": "boolean"
+          },
+          "original_validation_issues": {
+            "items": {
+              "$ref": "#/components/schemas/FieldIssueOut"
+            },
+            "title": "Original Validation Issues",
+            "type": "array"
+          },
+          "proposed_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Value"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          }
+        },
+        "required": [
+          "field_name",
+          "label",
+          "required",
+          "original_evidence_valid",
+          "decision"
+        ],
+        "title": "DraftFieldOut",
+        "type": "object"
+      },
+      "DraftOut": {
+        "properties": {
+          "audit_events": {
+            "items": {
+              "$ref": "#/components/schemas/DraftAuditEventOut"
+            },
+            "title": "Audit Events",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "extraction_id": {
+            "title": "Extraction Id",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DraftFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "material_id": {
+            "title": "Material Id",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "validation_issues": {
+            "items": {
+              "$ref": "#/components/schemas/FieldIssueOut"
+            },
+            "title": "Validation Issues",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "workflow": {
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id",
+          "extraction_id",
+          "material_id",
+          "workflow",
+          "profile",
+          "state",
+          "version",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DraftOut",
+        "type": "object"
+      },
       "ExtractedFieldOut": {
         "properties": {
           "confidence": {
@@ -321,6 +614,51 @@
           "message"
         ],
         "title": "FieldIssueOut",
+        "type": "object"
+      },
+      "FieldReviewIn": {
+        "properties": {
+          "confirmed_value": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Value"
+          },
+          "decision": {
+            "enum": [
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewEvidenceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decision",
+          "expected_version"
+        ],
+        "title": "FieldReviewIn",
         "type": "object"
       },
       "FieldsBody": {
@@ -624,6 +962,38 @@
         "title": "PurchaseListOut",
         "type": "object"
       },
+      "ReviewEvidenceIn": {
+        "properties": {
+          "source_index": {
+            "minimum": 1.0,
+            "title": "Source Index",
+            "type": "integer"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "source_label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Label",
+            "type": "string"
+          },
+          "source_text": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Source Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_index",
+          "source_label",
+          "source_text"
+        ],
+        "title": "ReviewEvidenceIn",
+        "type": "object"
+      },
       "SessionResponse": {
         "properties": {
           "authenticated": {
@@ -681,6 +1051,16 @@
         ],
         "title": "SessionResponse",
         "type": "object"
+      },
+      "SourceKind": {
+        "enum": [
+          "page",
+          "document",
+          "sheet",
+          "slide"
+        ],
+        "title": "SourceKind",
+        "type": "string"
       },
       "SyncEventOut": {
         "properties": {
@@ -933,6 +1313,20 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionedActionIn": {
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "VersionedActionIn",
+        "type": "object"
+      },
       "WorkItemListOut": {
         "properties": {
           "items": {
@@ -1146,6 +1540,277 @@
         ]
       }
     },
+    "/v1/drafts/{draft_id}": {
+      "get": {
+        "operationId": "get_draft_v1_drafts__draft_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Draft",
+        "tags": [
+          "drafts"
+        ]
+      }
+    },
+    "/v1/drafts/{draft_id}/fields/{field_name}": {
+      "put": {
+        "operationId": "review_field_v1_drafts__draft_id__fields__field_name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "field_name",
+            "required": true,
+            "schema": {
+              "title": "Field Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Field",
+        "tags": [
+          "drafts"
+        ]
+      }
+    },
+    "/v1/drafts/{draft_id}/ready": {
+      "post": {
+        "operationId": "mark_ready_v1_drafts__draft_id__ready_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Ready",
+        "tags": [
+          "drafts"
+        ]
+      }
+    },
+    "/v1/drafts/{draft_id}/validate": {
+      "post": {
+        "operationId": "validate_draft_v1_drafts__draft_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Draft",
+        "tags": [
+          "drafts"
+        ]
+      }
+    },
     "/v1/extractions/{extraction_id}": {
       "get": {
         "operationId": "get_extraction_v1_extractions__extraction_id__get",
@@ -1201,6 +1866,64 @@
         "summary": "Get Extraction",
         "tags": [
           "extractions"
+        ]
+      }
+    },
+    "/v1/extractions/{extraction_id}/drafts": {
+      "post": {
+        "operationId": "create_draft_v1_extractions__extraction_id__drafts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "extraction_id",
+            "required": true,
+            "schema": {
+              "title": "Extraction Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCreateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Draft",
+        "tags": [
+          "drafts"
         ]
       }
     },

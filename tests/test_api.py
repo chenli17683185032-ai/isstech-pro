@@ -133,6 +133,7 @@ def test_session_required() -> None:
             ("POST", "/v1/sync/work-items"),
             ("POST", "/v1/materials"),
             ("GET", "/v1/extractions/missing"),
+            ("GET", "/v1/drafts/missing"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
@@ -143,6 +144,9 @@ def test_session_required() -> None:
         )
         assert extraction.status_code == 401
         assert extraction.json()["detail"]["code"] == "AUTH_EXPIRED"
+        draft = client.post("/v1/extractions/missing/drafts")
+        assert draft.status_code == 401
+        assert draft.json()["detail"]["code"] == "AUTH_EXPIRED"
 
 
 def test_create_session_route_returns_local_token_without_upstream_ticket() -> None:
@@ -439,6 +443,118 @@ def test_material_extraction_api_reports_missing_material_and_provider_config(
     assert missing_run.json()["detail"]["code"] == "NOT_FOUND"
 
 
+def test_draft_review_api_reaches_ready_with_audited_session_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ISSTECH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(data_dir / "workflow.sqlite3"))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    text = "项目编号：PRJ-001\n项目名称：REDACTED PROJECT\n采购方式：公开询价".encode()
+    with client:
+        uploaded = client.post(
+            "/v1/materials",
+            headers=headers,
+            files={"file": ("review.txt", text, "text/plain")},
+        )
+        material_id = uploaded.json()["material"]["id"]
+        extracted = client.post(
+            f"/v1/materials/{material_id}/extractions",
+            headers=headers,
+            json={},
+        )
+        extraction_id = extracted.json()["extraction_id"]
+        created = client.post(
+            f"/v1/extractions/{extraction_id}/drafts",
+            headers=headers,
+        )
+        duplicate = client.post(
+            f"/v1/extractions/{extraction_id}/drafts",
+            headers=headers,
+        )
+        draft = created.json()["draft"]
+        draft_id = draft["draft_id"]
+        premature = client.post(
+            f"/v1/drafts/{draft_id}/ready",
+            headers=headers,
+            json={"expected_version": draft["version"]},
+        )
+
+        first_pending = next(
+            field for field in draft["fields"] if field["proposed_value"] is not None
+        )
+        first_review = client.put(
+            f"/v1/drafts/{draft_id}/fields/{first_pending['field_name']}",
+            headers=headers,
+            json={
+                "decision": "confirmed",
+                "confirmed_value": first_pending["proposed_value"],
+                "expected_version": draft["version"],
+            },
+        )
+        stale = client.put(
+            f"/v1/drafts/{draft_id}/fields/PR_PrjName",
+            headers=headers,
+            json={
+                "decision": "confirmed",
+                "confirmed_value": "REDACTED PROJECT",
+                "expected_version": draft["version"],
+            },
+        )
+        current = first_review.json()
+        for field in current["fields"]:
+            if field["proposed_value"] is None or field["decision"] != "pending":
+                continue
+            reviewed = client.put(
+                f"/v1/drafts/{draft_id}/fields/{field['field_name']}",
+                headers=headers,
+                json={
+                    "decision": "confirmed",
+                    "confirmed_value": field["proposed_value"],
+                    "expected_version": current["version"],
+                },
+            )
+            assert reviewed.status_code == 200
+            current = reviewed.json()
+        validated = client.post(
+            f"/v1/drafts/{draft_id}/validate",
+            headers=headers,
+            json={"expected_version": current["version"]},
+        )
+        ready = client.post(
+            f"/v1/drafts/{draft_id}/ready",
+            headers=headers,
+            json={"expected_version": validated.json()["version"]},
+        )
+        fetched = client.get(f"/v1/drafts/{draft_id}", headers=headers)
+
+    assert created.status_code == 201
+    assert created.json()["created"] is True
+    assert duplicate.status_code == 200
+    assert duplicate.json()["created"] is False
+    assert duplicate.json()["draft"]["draft_id"] == draft_id
+    assert premature.status_code == 409
+    assert premature.json()["detail"]["code"] == "CONFLICT"
+    assert first_review.status_code == 200
+    first_field = next(
+        field
+        for field in first_review.json()["fields"]
+        if field["field_name"] == first_pending["field_name"]
+    )
+    assert first_field["proposed_value"] == first_pending["proposed_value"]
+    assert first_field["reviewed_by"] == "alice"
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "CONFLICT"
+    assert validated.status_code == 200
+    assert validated.json()["state"] == "validated"
+    assert ready.status_code == 200
+    assert ready.json()["state"] == "ready"
+    assert fetched.json() == ready.json()
+    assert {event["actor"] for event in ready.json()["audit_events"]} == {"alice"}
+
+
 def test_preview_delete_not_sendable() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -501,6 +617,11 @@ def test_openapi_available() -> None:
     assert "/v1/materials/{material_id}/content" in paths
     assert "/v1/materials/{material_id}/extractions" in paths
     assert "/v1/extractions/{extraction_id}" in paths
+    assert "/v1/extractions/{extraction_id}/drafts" in paths
+    assert "/v1/drafts/{draft_id}" in paths
+    assert "/v1/drafts/{draft_id}/fields/{field_name}" in paths
+    assert "/v1/drafts/{draft_id}/validate" in paths
+    assert "/v1/drafts/{draft_id}/ready" in paths
     assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
 
 

@@ -302,3 +302,58 @@ def test_version_two_database_migrates_without_losing_materials(tmp_path: Path) 
     assert material.original_name == "existing.txt"
     assert storage.table_count("materials") == 1
     assert storage.table_count("extraction_runs") == 0
+
+
+def test_version_three_database_migrates_without_losing_extractions(tmp_path: Path) -> None:
+    database = tmp_path / "version-three.sqlite3"
+    package_root = Path(__file__).parents[1] / "src" / "isstech_replay"
+    connection = sqlite3.connect(database)
+    for script in (
+        "schema.sql",
+        "migration_002_materials.sql",
+        "migration_003_extraction.sql",
+    ):
+        connection.executescript((package_root / script).read_text(encoding="utf-8"))
+    sha256 = "b" * 64
+    connection.execute(
+        "INSERT INTO material_blobs "
+        "(sha256, size_bytes, original_path, detected_mime_type, created_at) "
+        "VALUES (?, 8, ?, 'text/plain', ?)",
+        (sha256, f"materials/originals/{sha256}/blob", T1),
+    )
+    connection.execute(
+        "INSERT INTO materials "
+        "(material_id, sha256, original_name, declared_mime_type, "
+        "detected_mime_type, extension, ingest_status, review_reason, created_at) "
+        "VALUES ('material-v3', ?, 'existing.txt', 'text/plain', "
+        "'text/plain', '.txt', 'ready', '', ?)",
+        (sha256, T1),
+    )
+    connection.execute(
+        "INSERT INTO extraction_runs "
+        "(extraction_id, material_id, profile, provider, model, extractor_version, "
+        "status, confidence_threshold, can_advance, started_at, finished_at, "
+        "field_count) VALUES ('extraction-v3', 'material-v3', "
+        "'purchase_requisition', 'local_rules', 'label_value_lines', 'version-1', "
+        "'succeeded', 0.85, 1, ?, ?, 1)",
+        (T1, T2),
+    )
+    connection.execute(
+        "INSERT INTO extracted_fields "
+        "(extraction_id, field_name, proposed_value, confidence, required, "
+        "evidence_valid) VALUES "
+        "('extraction-v3', 'PR_PrjNo', 'PRJ-001', 0.98, 1, 1)"
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    connection.close()
+
+    storage = WorkflowStorage(database)
+
+    assert storage.schema_version() == SCHEMA_VERSION
+    extraction = storage.get_extraction("extraction-v3")
+    assert extraction is not None
+    assert extraction["status"] == "succeeded"
+    assert len(extraction["fields"]) == 1
+    assert storage.table_count("workflow_drafts") == 0
+    assert storage.table_count("draft_audit_events") == 0

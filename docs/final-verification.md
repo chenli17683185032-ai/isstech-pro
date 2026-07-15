@@ -20,10 +20,10 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P5 gate on `2026-07-15`: **205 passed**, Ruff clean, OpenAPI
+Last complete P6 gate on `2026-07-15`: **216 passed**, Ruff clean, OpenAPI
 matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, SQLite v2-to-v3 migration, parser/provider/API/CLI contracts passed,
-offline extraction smoke passed, and `git diff --check` passed.
+passed, SQLite v3-to-v4 migration, review/state/API contracts, append-only audit,
+offline extraction smoke, and `git diff --check` passed.
 
 ## Operator evidence check
 
@@ -152,6 +152,23 @@ Pass criteria: extraction is `succeeded|1|3|0`; every field has
 `evidence_valid=1` and `review_status=pending`; result JSON mode is `600`; no
 upstream credential or browser session is required.
 
+## Human review/state smoke (offline)
+
+```bash
+uv run pytest -q tests/test_workflow_state.py
+sqlite3 data/workflow-center.sqlite3 \
+  'select draft_id, state, version, validated_at, ready_at from workflow_drafts;'
+sqlite3 data/workflow-center.sqlite3 \
+  'select draft_id, field_name, review_decision, reviewed_by from draft_fields;'
+sqlite3 data/workflow-center.sqlite3 \
+  'select draft_id, sequence, event_type, actor from draft_audit_events order by draft_id, sequence;'
+```
+
+Pass criteria: the focused suite passes; a complete reviewed draft advances only
+through `validated` to `ready`; event sequence is contiguous with draft version;
+the AI proposal/source columns remain unchanged; stale versions and direct ready
+attempts return conflicts. These checks are local and send no iPSA request.
+
 ## Zero write egress check
 
 ```bash
@@ -235,9 +252,10 @@ bash tools/first-commit.sh
 | Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples; P6 human review |
+| Human review and draft state | Yes; version lock, corrected evidence, immutable proposal, audit, ready | Local UI; P7 remains write-blocked |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 
-Do **not** describe the project as fully production-finished against live iPSA
-until the credentialed pure-HTTP smoke passes and P3 persistence/diff recovery is
-complete.
+Do **not** describe the project as fully production-finished against live iPSA.
+The credentialed pure-HTTP smoke is still pending, and P7 upstream execution
+remains explicitly blocked by the current competition rules.

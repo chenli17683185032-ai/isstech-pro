@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P6 人工审阅与草稿状态机` |
+| 当前总阶段 | `P6 已完成，准备阶段提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,22 +53,23 @@
 
 ### 0.2 当前未提交工作树
 
-P5 已提交为 `68f57b0 Add evidence-backed material field extraction`。当前只推进
-P6 人工审阅与草稿状态机；不得修改 provider 原建议，不得接入任何真实提交。
+P5 已提交为 `68f57b0 Add evidence-backed material field extraction`。当前未提交
+工作树只包含 P6 schema v4、状态服务、draft API、测试和文档；不得混入 P8
+调度或任何 P7 上游执行代码。
 
 ### 0.3 最近一次验证结果
 
 ```text
-pytest: 205 passed
+pytest: 216 passed
 ruff: passed
 OpenAPI: matches runtime
 secret scan: passed
 evidence hashes and permissions: passed
 git diff --check: passed
-offline extraction smoke: succeeded|1|3|0
-field evidence: 3 valid, all review_status=pending
-result.json: mode 0600
-wheel: migration_003 + parser/provider/routes included
+P6 focused state/API/migration tests: passed
+schema v3 -> v4 existing extraction preservation: passed
+audit UPDATE/DELETE trigger: blocked
+stale expected_version/direct ready: conflict
 ```
 
 ### 0.4 当前外部阻断
@@ -703,15 +704,71 @@ AI output cannot directly call adapter submit
 
 ## P6 人工审阅与草稿状态机
 
-状态：`IN_PROGRESS`
+状态：`DONE`
 
 ### 修改文件
 
 ```text
 src/isstech_replay/workflow_state.py
+src/isstech_replay/models/drafts.py
+src/isstech_replay/migration_004_review.sql
+src/isstech_replay/storage.py
 src/isstech_replay/routes/drafts.py
 tests/test_workflow_state.py
+tests/test_api.py
 ```
+
+### 最小闭环与状态约束
+
+```text
+一个 extraction
+→ 幂等创建一个 workflow draft
+→ 展示 AI 原建议/原 evidence（只读）
+→ 人工逐字段 confirmed/rejected，可另给精确来源片段
+→ validate 重新对照结构化文档
+→ validated
+→ ready
+```
+
+1. extraction 为 `succeeded` 时草稿初态是 `extracted`；为
+   `needs_review` 时初态是 `needs_review`；failed/running 不可建草稿。
+2. 每个 profile 字段都有 draft field。AI 未提出的可选字段标记
+   `not_proposed`；缺失的必填字段保持 `pending`，必须人工补值和 evidence。
+3. AI 的 `proposed_value`、confidence、source 和 P5 validation issues 只通过
+   `source_field_id` 回读，P6 不更新这些原始列。
+4. 人工动作只更新 review decision、confirmed value、人工 evidence、reviewer
+   和时间；同时同步 P5 `extracted_fields.review_status/confirmed_value`，但不
+   改原建议。
+5. proposed 字段不得保持 pending；required 字段不得 rejected；confirmed
+   字段必须有非空值和可在原/人工 source excerpt 中精确定位的 evidence。
+6. 低置信度建议只有经人工 confirmed 后才视为已处置；document issue、
+   无效 evidence 和未确认必填字段会让 validate 回到/停在 `needs_review`。
+7. 只允许 `extracted|needs_review → validated → ready`。字段只能在前两个
+   状态修改；P6 不实现 previewed/submitted。
+8. 所有写入使用 `expected_version` 乐观锁；重复/过期 UI 操作返回冲突，
+   不静默覆盖另一位审阅者结果。
+9. draft 创建、字段审阅、校验成功/失败和 ready 都写 append-only audit
+   event，记录 actor、前后状态、字段和结构化 details。
+
+### 保存位置
+
+```text
+data/workflow-center.sqlite3
+  workflow_drafts
+  draft_fields
+  draft_audit_events
+```
+
+不生成新的上游请求文件。P5 的原件、document 和 extraction result 路径保持
+不变；P6 状态只写本机 mode `0600` SQLite。
+
+### 本阶段网站与工具
+
+- 只看本地 `http://127.0.0.1:8000/docs` 和 `/v1/drafts/*`；不需要打开
+  iPSA/Passport，不做新的目标抓包。
+- 使用 `pytest` 验证状态迁移、证据重校验、审计和并发冲突；使用
+  `sqlite3` 反查原建议未变；使用本地 FastAPI/TestClient 做 API 闭环。
+- P6 完成前仍由 `EndpointPolicy` 阻断所有目标写操作。
 
 ### 验收
 
@@ -719,7 +776,32 @@ tests/test_workflow_state.py
 invalid state transitions are rejected
 review changes preserve original AI proposal and reviewer identity
 ready state requires all mandatory validations
+stale expected_version cannot overwrite a newer review
+no P6 route can reach GuardedTransport or adapter submit
 ```
+
+### 实际结果（2026-07-15）
+
+- schema v4 新增 `workflow_drafts`、`draft_fields`、`draft_audit_events`；
+  v3→v4 保留已有 material、extraction 和 extracted field。
+- 一个 extraction 幂等映射到一个 draft；成功抽取初态 `extracted`，有门禁
+  问题的抽取初态 `needs_review`，failed/running 无法建草稿。
+- 五个采购 profile 字段全部进入 draft；AI 未建议的可选字段是
+  `not_proposed`，缺失必填字段保持 pending，可由人工值和精确 evidence 补齐。
+- P6 只更新 decision、confirmed value、人工 evidence、reviewer/time；P5
+  proposed value、confidence 和原 source 保持不变。
+- 字段审阅、校验成功/失败和 ready 在 SQLite 单事务中检查
+  `expected_version`、递增 version 并追加同序号 audit event；过期操作返回
+  `409 CONFLICT`。
+- audit 表有 SQLite UPDATE/DELETE trigger；测试证明普通写连接不能篡改事件。
+- validate 重新解析不可变原件并复用 P5 exact-source 校验；人工确认可处置低
+  confidence，但无效 evidence、pending 建议、缺失/拒绝必填和 document issue
+  均保持 `needs_review`。
+- 只实现 `extracted|needs_review → validated → ready`；validated 后字段锁定，
+  P6 没有 previewed/submitted 路由，也不引用 `GuardedTransport`。
+- 新增 draft 创建/读取、字段审阅、validate 和 ready API；reviewer 固定取
+  当前 session username，不接受请求体自报身份。
+- 全量 `pytest` 216 项、Ruff、OpenAPI、秘密扫描、证据校验和 diff 检查通过。
 
 ## P7 一键提交双模式
 
@@ -848,9 +930,10 @@ failure has exit code, run record and可定位日志
 | 8 | `DONE` | P4 阶段性提交 | `8131eea Add immutable local material ingestion` |
 | 9 | `DONE` | P5 AI 抽取接口与来源证据 | 205 tests + 离线 extraction + wheel 检查通过 |
 | 10 | `DONE` | P5 阶段性提交 | `68f57b0 Add evidence-backed material field extraction` |
-| 11 | `IN_PROGRESS` | P6 人工审阅 | 状态机和审计测试通过 |
-| 12 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 13 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 11 | `DONE` | P6 人工审阅 | 216 tests + v4 migration + API/state/audit 门禁通过 |
+| 12 | `IN_PROGRESS` | P6 阶段性提交 | 提交只包含 P6 代码、migration、文档和测试 |
+| 13 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
+| 14 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
 ---
 

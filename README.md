@@ -22,6 +22,7 @@ for the authorized CTF target:
 | SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
+| Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -126,6 +127,23 @@ Plain HTTP is accepted only on loopback. The iPSA and Passport hosts are always
 rejected as AI endpoints. Provider output is size-bounded and treated as
 untrusted; no provider has access to an adapter submit method.
 
+### Human review and local draft state
+
+One extraction has at most one local workflow draft. AI proposal values and
+evidence remain read-only; reviewers set a separate decision, confirmed value,
+and optional corrected evidence. Every mutation requires the draft's current
+`expected_version`, records the session username, and appends an audit event.
+
+The only P6 forward path is:
+
+```text
+extracted | needs_review -> validated -> ready
+```
+
+`ready` means the local required/evidence/review gates passed. It does **not**
+send, upload, save, or submit anything to iPSA. A stale version returns
+`409 CONFLICT` instead of overwriting another review.
+
 ### Local API (examples)
 
 ```bash
@@ -164,13 +182,35 @@ curl -s -X POST http://127.0.0.1:8000/v1/materials/MATERIAL_ID/extractions \
 curl -s http://127.0.0.1:8000/v1/extractions/EXTRACTION_ID \
   -H "Authorization: Bearer $TOKEN"
 
+# idempotently create the one local draft for an extraction
+curl -s -X POST http://127.0.0.1:8000/v1/extractions/EXTRACTION_ID/drafts \
+  -H "Authorization: Bearer $TOKEN"
+
+# confirm one field; VERSION must be the latest draft version
+curl -s -X PUT http://127.0.0.1:8000/v1/drafts/DRAFT_ID/fields/PR_PrjNo \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"confirmed","confirmed_value":"PRJ-001","expected_version":VERSION}'
+
+# after every proposed/required field has a human decision
+curl -s -X POST http://127.0.0.1:8000/v1/drafts/DRAFT_ID/validate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"expected_version":VERSION}'
+
+# only a validated draft can become locally ready
+curl -s -X POST http://127.0.0.1:8000/v1/drafts/DRAFT_ID/ready \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"expected_version":VERSION}'
+
 # delete is preview-only
 curl -s -X POST http://127.0.0.1:8000/v1/previews/purchase-requisitions/ID/delete \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`,
-`BAD_REQUEST`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `LOCAL_STORAGE_ERROR`,
+`BAD_REQUEST`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`, `LOCAL_STORAGE_ERROR`,
 `NOT_CAPTURED`.
 
 ### Layout
@@ -179,7 +219,8 @@ Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`,
 src/isstech_replay/
   api.py policy.py transport.py client.py auth.py
   request_builders.py session_store.py storage.py sync.py materials.py extraction.py
-  field_mapping.py schema.sql migration_002_materials.sql migration_003_extraction.sql
+  field_mapping.py workflow_state.py schema.sql migration_002_materials.sql
+  migration_003_extraction.sql migration_004_review.sql
   ai/ models/ parsers/ routes/
 tests/                 # unit + API tests (redacted fixtures only)
 captures/raw/          # gitignored originals
