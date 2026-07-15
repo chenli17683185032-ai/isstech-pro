@@ -1335,8 +1335,9 @@ SearchIndex 完整翻页
    `submitter`，非提交审批动作才记 `approver`，不混淆两者。
 3. Detail 扫描上限为 500 条，每条只允许一次只读重试。任一详情最终失败时
    整次同步失败，保留上一个完整快照，禁止静默返回部分集合。
-4. schema v5 只持久本人相关详情；其他候选只在当次内存测量中存在。SQLite
-   仍为 mode `0600`，详情与快照在同一事务内提交或回滚。
+4. 不新增 schema 表；使用现有 `workflow_current.payload_json` 的 v2 结构化数据包
+   持久关系、详情字段和审批轨迹。其他候选只在当次内存测量中存在；
+   SQLite 仍为 mode `0600`，详情与快照在同一行、同一事务内提交或回滚。
 5. 列表和详情 API 仍要求有效本地 Bearer 会话。前端只将 Bearer 从
    `sessionStorage` 迁移到同源 `localStorage`，不保存用户名、密码或 iPSA Cookie。
    标签重建和普通刷新应保持登录；后端进程重启仍需重新登录，不在本阶段伪造
@@ -1347,8 +1348,7 @@ SearchIndex 完整翻页
 ```text
 关系模型:       src/isstech_replay/models/work_items.py
 身份匹配/详情扫描: src/isstech_replay/sync.py
-schema v5:      src/isstech_replay/migration_005_workflow_details.sql
-事务存储:       src/isstech_replay/storage.py
+快照 v2 数据包:  src/isstech_replay/sync.py, src/isstech_replay/storage.py
 列表/详情 API:  src/isstech_replay/routes/work_items.py
 会话令牌:       web/src/App.jsx
 列表/详情 UI:   web/src/views/WorkItemsView.jsx,
@@ -1368,10 +1368,10 @@ schema v5:      src/isstech_replay/migration_005_workflow_details.sql
 身份嵌入更长字母数字 token -> 不匹配
 78 Search + 78 Detail -> 2 条本人相关，0 详情失败
 任一 Detail 两次均失败 -> 同步失败，旧 current/detail 原子保留
-本人 2 条 -> current=2, cached detail=2, approved=2
-无关 76 条 -> 不进入账号 SQLite 详情表
+本人 2 条 -> current=2, payload v2 detail=2, approved=2
+无关 76 条 -> 不进入账号 SQLite current/history
 本地缓存存在 -> 点击详情不发起上游 Detail GET
-旧 v4 账号库 -> 原位迁移 v5，快照/运行/材料/草稿不丢失
+旧 payload v1 -> 可读且不误报缓存；下次成功同步自然升级 v2
 首次登录 -> token 只进 localStorage；标签重建 -> 仍能恢复工作台
 列表显示“我参与的”、匹配 2 和每条本人关系
 两条已过审均可打开完整本地详情
@@ -1484,7 +1484,7 @@ pytest、Ruff、OpenAPI、秘密/证据、diff、Vite build、wheel 通过
 | 22 | `DONE` | P9.2 阶段性提交 | `dc2fc88 Add account-scoped workflow detail drawer` |
 | 23 | `DONE` | P9.3 空待办视图自动选择 | 250 tests + automatic approved row=1 + manual selection survives read-only sync |
 | 24 | `DONE` | P9.3 阶段性提交 | `eb0ec9d Select the first non-empty workflow view` |
-| 25 | `IN_PROGRESS` | P9.4 本人参与关系与离线详情 | 78 Detail 有界扫描 + 关系模型 + schema v5 + 缓存详情 + localStorage + 真实 2 条 QA |
+| 25 | `IN_PROGRESS` | P9.4 本人参与关系与离线详情 | 78 Detail 有界扫描 + 关系模型 + payload v2 缓存详情 + localStorage + 真实 2 条 QA |
 | 26 | `TODO` | P9.4 阶段性提交 | 全量门禁通过后记录提交 ID |
 
 ---
