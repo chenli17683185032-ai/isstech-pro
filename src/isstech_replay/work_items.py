@@ -12,7 +12,11 @@ from .validation import require_path_segment
 _PURCHASE_PENDING_STATUSES = {"审批中"}
 
 
-def _waiting_days(value: str, *, today: date) -> int | None:
+def is_purchase_active(status: str) -> bool:
+    return status in _PURCHASE_PENDING_STATUSES
+
+
+def waiting_days_since(value: str, *, today: date) -> int | None:
     try:
         submitted = datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
@@ -32,7 +36,7 @@ def purchase_follow_up_items(
     current_date = today or date.today()
     items = []
     for record in result.items:
-        if record.status not in _PURCHASE_PENDING_STATUSES or not record.next_approver:
+        if not is_purchase_active(record.status) or not record.next_approver:
             continue
         external_id = require_path_segment(record.id, "purchase requisition id")
         items.append(
@@ -47,7 +51,7 @@ def purchase_follow_up_items(
                 submitted_at=record.create_date,
                 status=record.status,
                 current_approver=record.next_approver,
-                waiting_days=_waiting_days(record.create_date, today=current_date),
+                waiting_days=waiting_days_since(record.create_date, today=current_date),
                 source_url=(
                     f"{base_url.rstrip('/')}/WebTP/PurchaseRequisition/Detail/{external_id}"
                 ),

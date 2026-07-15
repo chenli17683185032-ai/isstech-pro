@@ -1,0 +1,253 @@
+"""One complete measurement-to-snapshot workflow for PurchaseRequisition."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from datetime import UTC, date, datetime
+import hashlib
+import json
+import re
+from typing import Any
+from uuid import uuid4
+
+from .client import IsstechClient
+from .models.purchase import PurchaseListQuery, PurchaseListResult, PurchaseView
+from .models.work_items import SyncResult, WorkflowKind, WorkflowSnapshot
+from .storage import WorkflowStorage
+from .validation import require_path_segment
+from .work_items import (
+    is_purchase_active,
+    purchase_follow_up_items,
+    waiting_days_since,
+)
+
+
+_COOKIE_VALUE_RE = re.compile(
+    r"(?i)(\.iPSA|emp_Password|password|authorization|cookie|ticket|token)"
+    r"=([^;&\s]+)"
+)
+
+
+def utc_iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        raise ValueError("sync timestamps must be timezone-aware")
+    return value.astimezone(UTC).isoformat()
+
+
+def safe_error_message(error: BaseException) -> str:
+    message = str(error).replace("\r", " ").replace("\n", " ")
+    return _COOKIE_VALUE_RE.sub(lambda match: f"{match.group(1)}=<redacted>", message)[:1000]
+
+
+def _snapshot_payload(
+    *,
+    external_id: str,
+    reference_no: str,
+    project_no: str,
+    title: str,
+    applicant: str,
+    submitted_at: str,
+    status: str,
+    current_node: str,
+    current_approver: str,
+    source_url: str,
+    active: bool,
+    actionable: bool,
+) -> tuple[str, str]:
+    payload = {
+        "actionable": actionable,
+        "active": active,
+        "adapter": WorkflowKind.PURCHASE_REQUISITION.value,
+        "applicant": applicant,
+        "current_approver": current_approver,
+        "current_node": current_node,
+        "external_id": external_id,
+        "project_no": project_no,
+        "reference_no": reference_no,
+        "source_url": source_url,
+        "status": status,
+        "submitted_at": submitted_at,
+        "title": title,
+    }
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return payload_json, payload_hash
+
+
+def purchase_snapshots(
+    result: PurchaseListResult,
+    *,
+    base_url: str,
+    observed_at: str,
+    today: date,
+) -> tuple[WorkflowSnapshot, ...]:
+    snapshots: list[WorkflowSnapshot] = []
+    for record in result.items:
+        external_id = require_path_segment(record.id, "purchase requisition id")
+        active = is_purchase_active(record.status)
+        actionable = active and bool(record.next_approver)
+        source_url = (
+            f"{base_url.rstrip('/')}/WebTP/PurchaseRequisition/Detail/{external_id}"
+        )
+        # Status is the minimum observed node signal until Detail exposes a stable node name.
+        current_node = record.status
+        payload_json, payload_hash = _snapshot_payload(
+            external_id=external_id,
+            reference_no=record.requisition_no,
+            project_no=record.project_no,
+            title=record.project_name,
+            applicant=record.creator_name,
+            submitted_at=record.create_date,
+            status=record.status,
+            current_node=current_node,
+            current_approver=record.next_approver,
+            source_url=source_url,
+            active=active,
+            actionable=actionable,
+        )
+        snapshots.append(
+            WorkflowSnapshot(
+                adapter=WorkflowKind.PURCHASE_REQUISITION,
+                external_id=external_id,
+                observed_at=observed_at,
+                reference_no=record.requisition_no,
+                project_no=record.project_no,
+                title=record.project_name,
+                applicant=record.creator_name,
+                submitted_at=record.create_date,
+                status=record.status,
+                current_node=current_node,
+                current_approver=record.next_approver,
+                waiting_days=waiting_days_since(record.create_date, today=today),
+                source_url=source_url,
+                active=active,
+                actionable=actionable,
+                payload_json=payload_json,
+                payload_hash=payload_hash,
+            )
+        )
+    return tuple(snapshots)
+
+
+def sync_purchase_requisitions(
+    client: IsstechClient,
+    *,
+    storage: WorkflowStorage | None,
+    max_pages: int = 20,
+    dry_run: bool = False,
+    observed_at: datetime | None = None,
+    started_at: datetime | None = None,
+    today: date | None = None,
+    run_id: str | None = None,
+) -> SyncResult:
+    """Fetch a complete list, normalize it, then atomically persist one measurement."""
+    if max_pages < 1:
+        raise ValueError("max_pages must be at least 1")
+    if not dry_run and storage is None:
+        raise ValueError("storage is required unless dry_run is enabled")
+
+    adapter = WorkflowKind.PURCHASE_REQUISITION
+    actual_run_id = run_id or uuid4().hex
+    started_text = utc_iso(started_at or datetime.now(UTC))
+    run_started = False
+    if not dry_run:
+        assert storage is not None
+        storage.start_run(
+            run_id=actual_run_id,
+            adapter=adapter,
+            started_at=started_text,
+            max_pages=max_pages,
+        )
+        run_started = True
+
+    try:
+        result = client.list_all_purchase_requisitions(
+            PurchaseListQuery(view=PurchaseView.SEARCH),
+            max_pages=max_pages,
+        )
+        observed_datetime = observed_at or datetime.now(UTC)
+        observed_text = utc_iso(observed_datetime)
+        effective_today = today or date.today()
+        snapshots = purchase_snapshots(
+            result,
+            base_url=client.settings.base_url,
+            observed_at=observed_text,
+            today=effective_today,
+        )
+        work_items = purchase_follow_up_items(
+            result,
+            base_url=client.settings.base_url,
+            today=effective_today,
+        )
+        if len(snapshots) != len(result.items):
+            raise RuntimeError("snapshot normalization lost records")
+        finished_at = utc_iso(datetime.now(UTC))
+
+        if dry_run:
+            return SyncResult(
+                run_id=actual_run_id,
+                status="dry_run",
+                dry_run=True,
+                started_at=started_text,
+                observed_at=observed_text,
+                finished_at=finished_at,
+                source_total_count=result.total_count,
+                observed_count=len(result.items),
+                actionable_count=len(work_items),
+                snapshot_count=len(snapshots),
+                history_rows_inserted=0,
+                work_items=work_items,
+            )
+
+        assert storage is not None
+        applied = storage.complete_run(
+            run_id=actual_run_id,
+            observed_at=observed_text,
+            finished_at=finished_at,
+            source_total_count=result.total_count,
+            snapshots=snapshots,
+            actionable_count=len(work_items),
+        )
+        run_started = False
+        return SyncResult(
+            run_id=actual_run_id,
+            status="succeeded",
+            dry_run=False,
+            started_at=started_text,
+            observed_at=observed_text,
+            finished_at=finished_at,
+            source_total_count=result.total_count,
+            observed_count=len(result.items),
+            actionable_count=len(work_items),
+            snapshot_count=len(snapshots),
+            history_rows_inserted=applied.history_rows_inserted,
+            events=applied.events,
+            work_items=work_items,
+            database_path=str(storage.path),
+        )
+    except Exception as error:
+        if run_started:
+            assert storage is not None
+            failed_at = utc_iso(datetime.now(UTC))
+            try:
+                storage.fail_run(
+                    run_id=actual_run_id,
+                    finished_at=failed_at,
+                    error_type=type(error).__name__,
+                    error_message=safe_error_message(error),
+                )
+            except Exception as record_error:
+                raise RuntimeError(
+                    "sync failed and the failure record could not be persisted"
+                ) from record_error
+        raise
+
+
+def sync_result_dict(result: SyncResult) -> dict[str, Any]:
+    """Return a JSON-serializable summary without snapshots or upstream secrets."""
+    return asdict(result)

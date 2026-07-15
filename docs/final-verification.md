@@ -12,6 +12,7 @@ uv run python tools/verify_no_secrets.py
 uv run python tools/verify_evidence.py
 git check-ignore -v captures/raw/auth_purchase_requisition.html
 git check-ignore -v captures/raw/20260715-login-attempt-01.cdp.json
+git check-ignore -v data/workflow-center.sqlite3
 git diff --check
 ```
 
@@ -19,9 +20,10 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P2 gate on `2026-07-15`: **121 passed**, Ruff clean, OpenAPI
+Last complete P3 gate on `2026-07-15`: **141 passed**, Ruff clean, OpenAPI
 matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, local API smoke passed, and `git diff --check` passed.
+passed, SQLite/wheel/CLI contracts passed, local API smoke passed, and
+`git diff --check` passed.
 
 ## Operator evidence check
 
@@ -79,6 +81,34 @@ Pass criteria:
 - List returns without raising
 - `delete_blocked pr.delete` and `SMOKE_OK`
 - No password or Cookie value printed
+
+## Durable sync smoke (account holder only)
+
+After the pure-HTTP login smoke succeeds:
+
+```bash
+export ISSTECH_USERNAME='...'
+export ISSTECH_PASSWORD='...'
+
+# Must not create the database
+uv run python tools/sync_work_items.py --dry-run --json
+
+# Creates one successful run and optional CSV
+uv run python tools/sync_work_items.py --json --csv
+
+sqlite3 data/workflow-center.sqlite3 \
+  'select status, observed_count, actionable_count, event_count from sync_runs order by started_at desc limit 1;'
+stat -f '%Lp %N' \
+  data/workflow-center.sqlite3 \
+  data/runs/*/summary.json \
+  data/exports/*-work-items.csv
+
+unset ISSTECH_PASSWORD ISSTECH_USERNAME
+```
+
+Pass criteria: dry-run leaves no new DB/run file; real sync is `succeeded`;
+source count is complete; all files report mode `600`; a second unchanged sync
+adds history but zero change events.
 
 ## Zero write egress check
 
@@ -159,6 +189,8 @@ bash tools/first-commit.sh
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
 | FastAPI `/v1` | Yes; runtime OpenAPI exported | Credentialed session smoke |
+| SQLite snapshot/diff | Yes; transactional and version-gated | Credentialed live sync |
+| Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 

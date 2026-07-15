@@ -13,6 +13,7 @@ from isstech_replay.auth import login
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.config import Settings
 from isstech_replay.session_store import SessionStore
+from isstech_replay.storage import WorkflowStorage
 
 FIXTURES_AUTH = Path(__file__).parent / "fixtures" / "auth"
 FIXTURES_PR = Path(__file__).parent / "fixtures" / "purchase"
@@ -126,8 +127,12 @@ def test_health() -> None:
 def test_session_required() -> None:
     app = create_app(session_store=SessionStore())
     with TestClient(app) as client:
-        for path in ("/v1/purchase-requisitions", "/v1/work-items"):
-            r = client.get(path)
+        for method, path in (
+            ("GET", "/v1/purchase-requisitions"),
+            ("GET", "/v1/work-items"),
+            ("POST", "/v1/sync/work-items"),
+        ):
+            r = client.request(method, path)
             assert r.status_code == 401
             assert r.json()["detail"]["code"] == "AUTH_EXPIRED"
 
@@ -234,6 +239,49 @@ def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
     assert "pagination incomplete" in response.json()["detail"]["message"]
 
 
+def test_manual_sync_persists_snapshots_and_replay_has_no_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        first = client.post("/v1/sync/work-items", headers=headers)
+        second = client.post("/v1/sync/work-items", headers=headers)
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "succeeded"
+    assert first.json()["observed_count"] == 2
+    assert first.json()["actionable_count"] == 1
+    assert first.json()["event_count"] == 2
+    assert second.status_code == 200
+    assert second.json()["event_count"] == 0
+    storage = WorkflowStorage(database)
+    assert storage.table_count("sync_runs") == 2
+    assert storage.table_count("workflow_current") == 2
+    assert storage.table_count("workflow_events") == 2
+
+
+def test_manual_sync_dry_run_does_not_create_database(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "dry.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    with client:
+        response = client.post(
+            "/v1/sync/work-items?dry_run=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "dry_run"
+    assert response.json()["database_path"] is None
+    assert not database.exists()
+
+
 def test_preview_delete_not_sendable() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -291,6 +339,7 @@ def test_openapi_available() -> None:
     assert "/v1/sessions" in paths
     assert "/v1/purchase-requisitions" in paths
     assert "/v1/work-items" in paths
+    assert "/v1/sync/work-items" in paths
     assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
 
 

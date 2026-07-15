@@ -18,3 +18,5 @@ captures/login_fail_*.html
 !captures/raw/.gitkeep
 !captures/redacted/**
 
+# Local workflow state and business-data exports are runtime-only.
+data/

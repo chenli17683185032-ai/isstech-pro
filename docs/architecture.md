@@ -25,6 +25,12 @@ captures/raw  --redact-->  captures/redacted (fixtures)
                                 |
                                 v
 FastAPI /v1  -->  session store  -->  IsstechClient
+     |                                   |
+     v                                   v
+sync service  --------------------> complete SearchIndex measurement
+     |
+     v
+SQLite snapshots/current/events
                                          |
                                          v
                                    EndpointPolicy
@@ -50,9 +56,12 @@ FastAPI /v1  -->  session store  -->  IsstechClient
 | `transport.py` | Sole real network egress |
 | `request_builders.py` | Offline construction of mutating requests |
 | `session_store.py` | Short-lived local Bearer handles (never return `.iPSA`) |
+| `sync.py` | Complete read, normalization, run lifecycle, and failure recording |
+| `storage.py` + `schema.sql` | Versioned SQLite snapshots, current state, and events |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
 | `routes/` | sessions, purchase-requisitions, attachments, previews, work items |
+| `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
 
 ## Safety model
 
@@ -89,3 +98,19 @@ are never returned as successful work-item output.
 Write previews stay explicitly inferred until request-stage interception plus
 abort supplies their real shape. Clean-process credential login is still a
 separate live-smoke gate because the browser capture already carried `.iPSA`.
+
+## Snapshot transaction
+
+1. Create and commit one `sync_runs` row with status `running` before the read.
+2. Fetch every SearchIndex page; incomplete pagination raises and records the run
+   as `failed` without snapshot rows.
+3. Normalize every source record into a canonical payload and SHA-256 state hash.
+4. In one SQLite transaction, append history, derive events, update current state,
+   and mark the run `succeeded`.
+5. If any item fails, rollback the whole state transaction, then mark the run
+   `failed` in a separate transaction.
+
+Absence from one measurement is not treated as completion. A `completed` event
+requires an observed transition from an active status to a terminal status.
+Derived `waiting_days` is excluded from the state hash, so the daily age increase
+does not create false workflow-change events.

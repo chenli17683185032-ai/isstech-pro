@@ -1,0 +1,573 @@
+"""Versioned SQLite storage for workflow measurements and change events."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+
+from .models.work_items import ChangeEvent, ChangeKind, WorkflowKind, WorkflowSnapshot
+
+
+SCHEMA_VERSION = 1
+DEFAULT_DATA_DIR = Path("data")
+DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_REQUIRED_TABLES = {
+    "sync_runs",
+    "workflow_snapshots",
+    "workflow_current",
+    "workflow_events",
+}
+
+
+class StorageError(RuntimeError):
+    """Base class for workflow storage failures."""
+
+
+class UnsupportedSchemaVersion(StorageError):
+    """The database requires a migration this binary does not know."""
+
+
+class SnapshotConflictError(StorageError):
+    """The same observation key was reused with different state."""
+
+
+class SnapshotOrderError(StorageError):
+    """An older measurement attempted to replace a newer current state."""
+
+
+@dataclass(frozen=True, slots=True)
+class StorageApplyResult:
+    history_rows_inserted: int
+    events: tuple[ChangeEvent, ...]
+
+
+def default_data_dir() -> Path:
+    return Path(os.getenv("ISSTECH_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
+
+
+def default_database_path() -> Path:
+    configured = os.getenv("ISSTECH_DATABASE_PATH")
+    if configured:
+        return Path(configured).expanduser()
+    return default_data_dir() / DEFAULT_DATABASE_NAME
+
+
+class WorkflowStorage:
+    """Open short SQLite connections so CLI and local API can share one file."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).expanduser()
+
+    def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.path, timeout=5.0)
+        os.chmod(self.path, 0o600)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA journal_mode = WAL")
+        return connection
+
+    def initialize(self) -> None:
+        connection = self._connect()
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version == SCHEMA_VERSION:
+                existing = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                    ).fetchall()
+                }
+                missing = sorted(_REQUIRED_TABLES - existing)
+                if missing:
+                    raise UnsupportedSchemaVersion(
+                        "database schema is incomplete; missing: " + ", ".join(missing)
+                    )
+                return
+            if version != 0:
+                raise UnsupportedSchemaVersion(
+                    f"database schema version {version} is newer than supported "
+                    f"version {SCHEMA_VERSION}"
+                )
+            existing = connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            if existing:
+                raise UnsupportedSchemaVersion(
+                    "database has unversioned tables; refusing automatic initialization"
+                )
+            schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
+            connection.executescript(schema)
+        finally:
+            connection.close()
+
+    def schema_version(self) -> int:
+        self.initialize()
+        connection = self._connect()
+        try:
+            return int(connection.execute("PRAGMA user_version").fetchone()[0])
+        finally:
+            connection.close()
+
+    def start_run(
+        self,
+        *,
+        run_id: str,
+        adapter: WorkflowKind,
+        started_at: str,
+        max_pages: int,
+    ) -> None:
+        if not run_id:
+            raise ValueError("run_id is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "INSERT INTO sync_runs "
+                    "(run_id, adapter, status, started_at, max_pages) "
+                    "VALUES (?, ?, 'running', ?, ?)",
+                    (run_id, adapter.value, started_at, max_pages),
+                )
+        finally:
+            connection.close()
+
+    def fail_run(
+        self,
+        *,
+        run_id: str,
+        finished_at: str,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE sync_runs SET status = 'failed', finished_at = ?, "
+                    "error_type = ?, error_message = ? "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (finished_at, error_type[:120], error_message[:1000], run_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(f"run is missing or not running: {run_id}")
+        finally:
+            connection.close()
+
+    def complete_run(
+        self,
+        *,
+        run_id: str,
+        observed_at: str,
+        finished_at: str,
+        source_total_count: int | None,
+        snapshots: tuple[WorkflowSnapshot, ...],
+        actionable_count: int,
+    ) -> StorageApplyResult:
+        self.initialize()
+        connection = self._connect()
+        events: list[ChangeEvent] = []
+        history_rows_inserted = 0
+        seen: set[tuple[str, str]] = set()
+        try:
+            with connection:
+                run = connection.execute(
+                    "SELECT adapter, status FROM sync_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if run is None or run["status"] != "running":
+                    raise StorageError(f"run is missing or not running: {run_id}")
+                if actionable_count != sum(snapshot.actionable for snapshot in snapshots):
+                    raise StorageError("actionable_count does not match snapshots")
+                if source_total_count is not None and source_total_count != len(snapshots):
+                    raise StorageError(
+                        f"source_total_count={source_total_count} does not match "
+                        f"snapshot_count={len(snapshots)}"
+                    )
+
+                for snapshot in snapshots:
+                    self._validate_snapshot(snapshot, observed_at=observed_at)
+                    adapter = snapshot.adapter.value
+                    if adapter != run["adapter"]:
+                        raise StorageError(
+                            f"snapshot adapter {adapter} does not match run {run['adapter']}"
+                        )
+                    identity = (adapter, snapshot.external_id)
+                    if identity in seen:
+                        raise SnapshotConflictError(
+                            f"duplicate snapshot in one run: {adapter}/{snapshot.external_id}"
+                        )
+                    seen.add(identity)
+
+                    current = connection.execute(
+                        "SELECT * FROM workflow_current "
+                        "WHERE adapter = ? AND external_id = ?",
+                        identity,
+                    ).fetchone()
+                    if current is not None and snapshot.observed_at < current["last_seen_at"]:
+                        raise SnapshotOrderError(
+                            f"snapshot {snapshot.observed_at} predates current "
+                            f"{current['last_seen_at']} for {adapter}/{snapshot.external_id}"
+                        )
+
+                    existing = connection.execute(
+                        "SELECT payload_hash FROM workflow_snapshots "
+                        "WHERE adapter = ? AND external_id = ? AND observed_at = ?",
+                        (adapter, snapshot.external_id, snapshot.observed_at),
+                    ).fetchone()
+                    if existing is not None and existing["payload_hash"] != snapshot.payload_hash:
+                        raise SnapshotConflictError(
+                            "same adapter/external_id/observed_at has a different payload"
+                        )
+                    if existing is None:
+                        self._insert_snapshot(connection, run_id, snapshot)
+                        history_rows_inserted += 1
+
+                    derived = self._derive_events(current, snapshot)
+                    for event in derived:
+                        self._insert_event(connection, run_id, current, snapshot, event)
+                        events.append(event)
+                    self._upsert_current(connection, run_id, snapshot)
+
+                cursor = connection.execute(
+                    "UPDATE sync_runs SET status = 'succeeded', observed_at = ?, "
+                    "finished_at = ?, source_total_count = ?, observed_count = ?, "
+                    "actionable_count = ?, snapshot_count = ?, history_rows_inserted = ?, "
+                    "event_count = ?, error_type = NULL, error_message = NULL "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (
+                        observed_at,
+                        finished_at,
+                        source_total_count,
+                        len(snapshots),
+                        actionable_count,
+                        len(snapshots),
+                        history_rows_inserted,
+                        len(events),
+                        run_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(f"run completion lost state: {run_id}")
+        finally:
+            connection.close()
+        return StorageApplyResult(
+            history_rows_inserted=history_rows_inserted,
+            events=tuple(events),
+        )
+
+    @staticmethod
+    def _validate_snapshot(snapshot: WorkflowSnapshot, *, observed_at: str) -> None:
+        if not snapshot.external_id.strip():
+            raise ValueError("snapshot external_id is required")
+        if snapshot.observed_at != observed_at:
+            raise ValueError("all snapshots in a run must share observed_at")
+        if not _HASH_RE.fullmatch(snapshot.payload_hash):
+            raise ValueError("snapshot payload_hash must be lowercase SHA-256")
+        actual_hash = hashlib.sha256(snapshot.payload_json.encode("utf-8")).hexdigest()
+        if actual_hash != snapshot.payload_hash:
+            raise ValueError("snapshot payload_hash does not match payload_json")
+        try:
+            payload = json.loads(snapshot.payload_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("snapshot payload_json is invalid") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("snapshot payload_json must be an object")
+
+    @staticmethod
+    def _insert_snapshot(
+        connection: sqlite3.Connection,
+        run_id: str,
+        snapshot: WorkflowSnapshot,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO workflow_snapshots "
+            "(run_id, adapter, external_id, observed_at, reference_no, project_no, "
+            "title, applicant, submitted_at, status, current_node, current_approver, "
+            "waiting_days, source_url, active, actionable, payload_json, payload_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                snapshot.adapter.value,
+                snapshot.external_id,
+                snapshot.observed_at,
+                snapshot.reference_no,
+                snapshot.project_no,
+                snapshot.title,
+                snapshot.applicant,
+                snapshot.submitted_at,
+                snapshot.status,
+                snapshot.current_node,
+                snapshot.current_approver,
+                snapshot.waiting_days,
+                snapshot.source_url,
+                int(snapshot.active),
+                int(snapshot.actionable),
+                snapshot.payload_json,
+                snapshot.payload_hash,
+            ),
+        )
+
+    @staticmethod
+    def _derive_events(
+        current: sqlite3.Row | None,
+        snapshot: WorkflowSnapshot,
+    ) -> tuple[ChangeEvent, ...]:
+        adapter = snapshot.adapter
+        common = {
+            "adapter": adapter,
+            "external_id": snapshot.external_id,
+            "observed_at": snapshot.observed_at,
+        }
+        if current is None:
+            return (
+                ChangeEvent(
+                    kind=ChangeKind.NEW,
+                    old_value=None,
+                    new_value=snapshot.status,
+                    details={
+                        "status": snapshot.status,
+                        "current_node": snapshot.current_node,
+                        "current_approver": snapshot.current_approver,
+                    },
+                    **common,
+                ),
+            )
+        if current["payload_hash"] == snapshot.payload_hash:
+            return ()
+
+        if bool(current["active"]) and not snapshot.active:
+            return (
+                ChangeEvent(
+                    kind=ChangeKind.COMPLETED,
+                    old_value=current["status"],
+                    new_value=snapshot.status,
+                    details={
+                        "old_status": current["status"],
+                        "new_status": snapshot.status,
+                    },
+                    **common,
+                ),
+            )
+
+        events: list[ChangeEvent] = []
+        if current["current_node"] != snapshot.current_node:
+            events.append(
+                ChangeEvent(
+                    kind=ChangeKind.NODE_CHANGED,
+                    old_value=current["current_node"],
+                    new_value=snapshot.current_node,
+                    details={
+                        "old_node": current["current_node"],
+                        "new_node": snapshot.current_node,
+                    },
+                    **common,
+                )
+            )
+        if current["current_approver"] != snapshot.current_approver:
+            events.append(
+                ChangeEvent(
+                    kind=ChangeKind.ASSIGNEE_CHANGED,
+                    old_value=current["current_approver"],
+                    new_value=snapshot.current_approver,
+                    details={
+                        "old_approver": current["current_approver"],
+                        "new_approver": snapshot.current_approver,
+                    },
+                    **common,
+                )
+            )
+        return tuple(events)
+
+    @staticmethod
+    def _insert_event(
+        connection: sqlite3.Connection,
+        run_id: str,
+        current: sqlite3.Row | None,
+        snapshot: WorkflowSnapshot,
+        event: ChangeEvent,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO workflow_events "
+            "(run_id, adapter, external_id, event_type, observed_at, old_value, "
+            "new_value, details_json, old_payload_hash, new_payload_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                event.adapter.value,
+                event.external_id,
+                event.kind.value,
+                event.observed_at,
+                event.old_value,
+                event.new_value,
+                json.dumps(event.details, ensure_ascii=False, sort_keys=True),
+                current["payload_hash"] if current is not None else None,
+                snapshot.payload_hash,
+            ),
+        )
+
+    @staticmethod
+    def _upsert_current(
+        connection: sqlite3.Connection,
+        run_id: str,
+        snapshot: WorkflowSnapshot,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO workflow_current "
+            "(adapter, external_id, first_seen_at, last_seen_at, last_run_id, "
+            "reference_no, project_no, title, applicant, submitted_at, status, "
+            "current_node, current_approver, waiting_days, source_url, active, "
+            "actionable, payload_json, payload_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(adapter, external_id) DO UPDATE SET "
+            "last_seen_at = excluded.last_seen_at, last_run_id = excluded.last_run_id, "
+            "reference_no = excluded.reference_no, project_no = excluded.project_no, "
+            "title = excluded.title, applicant = excluded.applicant, "
+            "submitted_at = excluded.submitted_at, status = excluded.status, "
+            "current_node = excluded.current_node, "
+            "current_approver = excluded.current_approver, "
+            "waiting_days = excluded.waiting_days, source_url = excluded.source_url, "
+            "active = excluded.active, actionable = excluded.actionable, "
+            "payload_json = excluded.payload_json, payload_hash = excluded.payload_hash",
+            (
+                snapshot.adapter.value,
+                snapshot.external_id,
+                snapshot.observed_at,
+                snapshot.observed_at,
+                run_id,
+                snapshot.reference_no,
+                snapshot.project_no,
+                snapshot.title,
+                snapshot.applicant,
+                snapshot.submitted_at,
+                snapshot.status,
+                snapshot.current_node,
+                snapshot.current_approver,
+                snapshot.waiting_days,
+                snapshot.source_url,
+                int(snapshot.active),
+                int(snapshot.actionable),
+                snapshot.payload_json,
+                snapshot.payload_hash,
+            ),
+        )
+
+    def get_run(self, run_id: str) -> dict[str, object] | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM sync_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def list_runs(self, *, limit: int = 20) -> tuple[dict[str, object], ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM sync_runs ORDER BY started_at DESC, run_id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return tuple(dict(row) for row in rows)
+        finally:
+            connection.close()
+
+    def list_events(self, run_id: str) -> tuple[ChangeEvent, ...]:
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM workflow_events WHERE run_id = ? ORDER BY event_id",
+                (run_id,),
+            ).fetchall()
+            return tuple(
+                ChangeEvent(
+                    kind=ChangeKind(row["event_type"]),
+                    adapter=WorkflowKind(row["adapter"]),
+                    external_id=row["external_id"],
+                    observed_at=row["observed_at"],
+                    old_value=row["old_value"],
+                    new_value=row["new_value"],
+                    details=json.loads(row["details_json"]),
+                )
+                for row in rows
+            )
+        finally:
+            connection.close()
+
+    def current_snapshots(
+        self,
+        *,
+        adapter: WorkflowKind | None = None,
+        actionable_only: bool = False,
+    ) -> tuple[WorkflowSnapshot, ...]:
+        self.initialize()
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if adapter is not None:
+            clauses.append("adapter = ?")
+            parameters.append(adapter.value)
+        if actionable_only:
+            clauses.append("actionable = 1")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM workflow_current"
+                + where
+                + " ORDER BY actionable DESC, waiting_days DESC, adapter, external_id",
+                parameters,
+            ).fetchall()
+            return tuple(self._snapshot_from_current(row) for row in rows)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _snapshot_from_current(row: sqlite3.Row) -> WorkflowSnapshot:
+        return WorkflowSnapshot(
+            adapter=WorkflowKind(row["adapter"]),
+            external_id=row["external_id"],
+            observed_at=row["last_seen_at"],
+            reference_no=row["reference_no"],
+            project_no=row["project_no"],
+            title=row["title"],
+            applicant=row["applicant"],
+            submitted_at=row["submitted_at"],
+            status=row["status"],
+            current_node=row["current_node"],
+            current_approver=row["current_approver"],
+            waiting_days=row["waiting_days"],
+            source_url=row["source_url"],
+            active=bool(row["active"]),
+            actionable=bool(row["actionable"]),
+            payload_json=row["payload_json"],
+            payload_hash=row["payload_hash"],
+        )
+
+    def table_count(self, table: str) -> int:
+        if table not in _REQUIRED_TABLES:
+            raise ValueError(f"unsupported table: {table}")
+        self.initialize()
+        connection = self._connect()
+        try:
+            return int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        finally:
+            connection.close()

@@ -19,6 +19,7 @@ for the authorized CTF target:
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
+| SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -44,6 +45,37 @@ uv run ruff check src tests
 uv run isstech-api
 ```
 
+### Durable manual sync
+
+Credentials are read from the current process only. They are never accepted as
+CLI arguments or written to SQLite/run summaries.
+
+```bash
+cd /Users/ethan/Documents/isstech
+export ISSTECH_USERNAME='...'
+export ISSTECH_PASSWORD='...'
+
+# Prove fetch + normalization without creating data files
+uv run python tools/sync_work_items.py --dry-run --json
+
+# Persist snapshots, print JSON, and export the current follow-up list
+uv run python tools/sync_work_items.py --json --csv
+
+unset ISSTECH_PASSWORD ISSTECH_USERNAME
+```
+
+Runtime outputs:
+
+```text
+data/workflow-center.sqlite3
+data/runs/<run-id>/summary.json
+data/exports/YYYY-MM-DD-work-items.csv
+```
+
+`data/` is gitignored. SQLite, summary, and CSV files are created with mode
+`0600`. A declared total mismatch, repeated/short page, schema mismatch, stale
+measurement, or local transaction error makes the command exit non-zero.
+
 ### Local API (examples)
 
 ```bash
@@ -63,6 +95,10 @@ curl -s 'http://127.0.0.1:8000/v1/purchase-requisitions?view=application' \
 curl -s 'http://127.0.0.1:8000/v1/work-items' \
   -H "Authorization: Bearer $TOKEN"
 
+# full read + transactional local snapshot (no upstream mutation)
+curl -s -X POST 'http://127.0.0.1:8000/v1/sync/work-items?max_pages=20' \
+  -H "Authorization: Bearer $TOKEN"
+
 # delete is preview-only
 curl -s -X POST http://127.0.0.1:8000/v1/previews/purchase-requisitions/ID/delete \
   -H "Authorization: Bearer $TOKEN"
@@ -75,13 +111,15 @@ Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`, `
 ```text
 src/isstech_replay/
   api.py policy.py transport.py client.py auth.py
-  request_builders.py session_store.py
+  request_builders.py session_store.py storage.py sync.py schema.sql
   models/ parsers/ routes/
 tests/                 # unit + API tests (redacted fixtures only)
 captures/raw/          # gitignored originals
 captures/redacted/     # commit-safe fixtures
 docs/                  # architecture, matrix, vulns, verification, openapi path list
 tools/first-commit.sh  # baseline commit helper if .git is locked in a sandbox
+tools/sync_work_items.py # manual/daily sync entry; credentials from env only
+data/                  # ignored SQLite, run summaries, and CSV exports
 ```
 
 ## Delivery order (from the handoff brief)

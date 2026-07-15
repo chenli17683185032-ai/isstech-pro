@@ -10,7 +10,14 @@ import uvicorn
 from . import __version__
 from .client import IsstechClient
 from .config import Settings
-from .routes import attachments, previews, purchase_requisitions, sessions, work_items
+from .routes import (
+    attachments,
+    previews,
+    purchase_requisitions,
+    sessions,
+    sync as sync_routes,
+    work_items,
+)
 from .session_store import SessionStore, session_ttl_from_settings
 
 
@@ -40,6 +47,7 @@ def create_app(
     application.include_router(attachments.router, prefix="/v1")
     application.include_router(previews.router, prefix="/v1")
     application.include_router(work_items.router, prefix="/v1")
+    application.include_router(sync_routes.router, prefix="/v1")
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

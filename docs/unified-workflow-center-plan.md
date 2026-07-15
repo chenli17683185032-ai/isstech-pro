@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P0-P2 已收口，准备阶段提交` |
+| 当前总阶段 | `P3 已完成，准备阶段提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -581,7 +581,7 @@ OpenAPI matches runtime
 
 ## P3 SQLite 快照、差异和同步 CLI
 
-状态：`TODO`
+状态：`DONE`
 
 ### 修改文件
 
@@ -621,6 +621,19 @@ node change produces exactly one event
 failed run is recorded and transaction remains consistent
 CSV contains no password/cookie/ticket
 ```
+
+### 实际结果（2026-07-15）
+
+- SQLite schema version 1 已建立，wheel 内含 `schema.sql`；未来版本、未版本化非空库和缺表库均拒绝打开。
+- 数据库、run JSON 和 CSV 路径位于 `data/`，全部 Git 忽略；创建文件权限为 `0600`。
+- 同步先完整读取，再在一个事务内追加历史、更新当前态、生成事件并完成 run；任一快照失败时整批回滚。
+- 失败同步和 CLI 登录失败均写 `failed` run，错误信息会脱敏 password/Cookie/ticket/token 等值。
+- 相同状态次日重放追加测量但不重复生成事件；相同观测键同 payload 复用历史，不同 payload 冲突失败。
+- 支持 `new`、`node_changed`、`assignee_changed`、`completed`；active 转终态只生成一个 completed，避免节点/责任人清空噪声。
+- 过期观测不能覆盖较新的 current；单次缺失不被猜成 completed。
+- CLI 支持 `--dry-run`、`--json`、`--csv [PATH]`、`--max-pages`，失败非零退出，CSV 防公式注入。
+- FastAPI 新增 `POST /v1/sync/work-items`，只修改本机 SQLite；`dry_run=true` 不创建数据库。
+- 全量 `pytest` 141 项、Ruff、OpenAPI、秘密扫描、证据校验、Git 忽略、diff 和本地 API 冒烟全部通过。
 
 ## P4 本地材料入库
 
@@ -819,13 +832,14 @@ failure has exit code, run record and可定位日志
 | 1 | `DONE` | P0 证据、脱敏、manifest 和文档收口 | 95 tests + 哈希/权限/秘密扫描全部通过 |
 | 2 | `DONE` | P1 复核当前未提交的只读适配器改动 | 111 tests + raw 反向校验 + 写路径全阻断 |
 | 3 | `DONE` | P2 复核 `/v1/work-items` 与全量翻页 | 121 tests + raw WorkItem 校验 + 本地 API 冒烟通过 |
-| 4 | `IN_PROGRESS` | 阶段性提交 P0-P2 | 工作树只含下一阶段明确改动 |
-| 5 | `TODO` | P3 SQLite 快照和手动同步 CLI | 幂等、差异、失败事务测试通过 |
-| 6 | `TODO` | P4 材料入库 | 原文件固化与去重闭环通过 |
-| 7 | `TODO` | P5 AI 抽取接口与来源证据 | 每个字段可追溯且低置信度被拦截 |
-| 8 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
-| 9 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 10 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 4 | `DONE` | 阶段性提交 P0-P2 | `f360595 Implement evidence-backed read-only work item flow` |
+| 5 | `DONE` | P3 SQLite 快照和手动同步 CLI | 141 tests + 幂等/差异/失败事务/API 冒烟通过 |
+| 6 | `IN_PROGRESS` | P3 阶段性提交 | 提交只包含 P3 代码、文档和测试 |
+| 7 | `TODO` | P4 材料入库 | 原文件固化与去重闭环通过 |
+| 8 | `TODO` | P5 AI 抽取接口与来源证据 | 每个字段可追溯且低置信度被拦截 |
+| 9 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
+| 10 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
+| 11 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
 ---
 
