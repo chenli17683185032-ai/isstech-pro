@@ -20,6 +20,7 @@ for the authorized CTF target:
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
 | SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
+| Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -76,6 +77,24 @@ data/exports/YYYY-MM-DD-work-items.csv
 `0600`. A declared total mismatch, repeated/short page, schema mismatch, stale
 measurement, or local transaction error makes the command exit non-zero.
 
+### Local material ingestion
+
+This path is offline and does not require iPSA credentials:
+
+```bash
+# one or more files
+uv run python tools/ingest_materials.py /path/to/file.pdf --json
+
+# all files below an incoming directory
+uv run python tools/ingest_materials.py /path/to/incoming --recursive --json
+```
+
+Original bytes are stored once at
+`data/materials/originals/<sha256>/blob` with mode `0400`. Original filenames,
+declared/detected MIME, review state, and references live in SQLite. Future OCR
+or AI output must go under `data/materials/derived/<material-id>/`; it never
+overwrites the original blob.
+
 ### Local API (examples)
 
 ```bash
@@ -99,19 +118,26 @@ curl -s 'http://127.0.0.1:8000/v1/work-items' \
 curl -s -X POST 'http://127.0.0.1:8000/v1/sync/work-items?max_pages=20' \
   -H "Authorization: Bearer $TOKEN"
 
+# local multipart upload; uses the local Bearer session, no upstream write
+curl -s -X POST http://127.0.0.1:8000/v1/materials \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'file=@/path/to/file.pdf'
+
 # delete is preview-only
 curl -s -X POST http://127.0.0.1:8000/v1/previews/purchase-requisitions/ID/delete \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`, `BAD_REQUEST`, `NOT_CAPTURED`.
+Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`,
+`BAD_REQUEST`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `LOCAL_STORAGE_ERROR`,
+`NOT_CAPTURED`.
 
 ### Layout
 
 ```text
 src/isstech_replay/
   api.py policy.py transport.py client.py auth.py
-  request_builders.py session_store.py storage.py sync.py schema.sql
+  request_builders.py session_store.py storage.py sync.py materials.py schema.sql
   models/ parsers/ routes/
 tests/                 # unit + API tests (redacted fixtures only)
 captures/raw/          # gitignored originals
@@ -119,6 +145,7 @@ captures/redacted/     # commit-safe fixtures
 docs/                  # architecture, matrix, vulns, verification, openapi path list
 tools/first-commit.sh  # baseline commit helper if .git is locked in a sandbox
 tools/sync_work_items.py # manual/daily sync entry; credentials from env only
+tools/ingest_materials.py # offline file/directory material ingestion
 data/                  # ignored SQLite, run summaries, and CSV exports
 ```
 

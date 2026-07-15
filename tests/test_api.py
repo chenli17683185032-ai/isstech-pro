@@ -131,6 +131,7 @@ def test_session_required() -> None:
             ("GET", "/v1/purchase-requisitions"),
             ("GET", "/v1/work-items"),
             ("POST", "/v1/sync/work-items"),
+            ("POST", "/v1/materials"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
@@ -282,6 +283,69 @@ def test_manual_sync_dry_run_does_not_create_database(
     assert not database.exists()
 
 
+def test_material_upload_list_detail_content_and_deduplication(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    database = data_dir / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    pdf = b"%PDF-1.7\nREDACTED API MATERIAL\n%%EOF\n"
+    files = {"file": ("proposal.pdf", pdf, "application/pdf")}
+    with client:
+        first = client.post("/v1/materials", headers=headers, files=files)
+        second = client.post("/v1/materials", headers=headers, files=files)
+        material_id = first.json()["material"]["id"]
+        listing = client.get("/v1/materials", headers=headers)
+        detail = client.get(f"/v1/materials/{material_id}", headers=headers)
+        content = client.get(f"/v1/materials/{material_id}/content", headers=headers)
+
+    assert first.status_code == 201
+    assert first.json()["material"]["status"] == "ready"
+    assert first.json()["blob_created"] is True
+    assert second.status_code == 201
+    assert second.json()["material"]["id"] == material_id
+    assert second.json()["deduplicated"] is True
+    assert listing.status_code == 200
+    assert len(listing.json()) == 1
+    assert detail.json()["sha256"] == first.json()["material"]["sha256"]
+    assert "original_path" not in detail.json()
+    assert content.status_code == 200
+    assert content.content == pdf
+
+
+def test_material_upload_size_limit_and_status_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("ISSTECH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(data_dir / "workflow.sqlite3"))
+    monkeypatch.setenv("ISSTECH_MAX_MATERIAL_BYTES", "4")
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        too_large = client.post(
+            "/v1/materials",
+            headers=headers,
+            files={"file": ("large.bin", b"12345", "application/octet-stream")},
+        )
+        bad_status = client.get(
+            "/v1/materials?ingest_status=unknown",
+            headers=headers,
+        )
+        missing = client.get("/v1/materials/missing", headers=headers)
+    assert too_large.status_code == 413
+    assert too_large.json()["detail"]["code"] == "PAYLOAD_TOO_LARGE"
+    assert bad_status.status_code == 400
+    assert bad_status.json()["detail"]["code"] == "BAD_REQUEST"
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "NOT_FOUND"
+
+
 def test_preview_delete_not_sendable() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -340,6 +404,8 @@ def test_openapi_available() -> None:
     assert "/v1/purchase-requisitions" in paths
     assert "/v1/work-items" in paths
     assert "/v1/sync/work-items" in paths
+    assert "/v1/materials" in paths
+    assert "/v1/materials/{material_id}/content" in paths
     assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
 
 

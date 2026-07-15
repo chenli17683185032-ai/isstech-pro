@@ -58,10 +58,12 @@ SQLite snapshots/current/events
 | `session_store.py` | Short-lived local Bearer handles (never return `.iPSA`) |
 | `sync.py` | Complete read, normalization, run lifecycle, and failure recording |
 | `storage.py` + `schema.sql` | Versioned SQLite snapshots, current state, and events |
+| `materials.py` | Streaming hash, MIME gate, content-addressed originals, and deduplication |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
 | `routes/` | sessions, purchase-requisitions, attachments, previews, work items |
 | `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
+| `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 
 ## Safety model
 
@@ -114,3 +116,22 @@ Absence from one measurement is not treated as completion. A `completed` event
 requires an observed transition from an active status to a terminal status.
 Derived `waiting_days` is excluded from the state hash, so the daily age increase
 does not create false workflow-change events.
+
+## Material boundary
+
+```text
+untrusted file/UploadFile
+  -> size-bounded staging file (0600)
+  -> SHA-256 + signature/MIME inspection
+  -> atomic move to originals/<sha256>/blob (0400)
+  -> SQLite blob + material reference
+  -> needs_review or ready
+
+derived/<material-id>/
+  <- parsers/OCR/AI only; never writes originals
+```
+
+Exact duplicate content/name is idempotent. Different names for the same bytes
+create separate material references but share one blob. Extension, declared
+MIME, and detected content conflicts enter `needs_review`; they are not silently
+accepted as ready.

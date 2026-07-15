@@ -48,3 +48,15 @@ def bad_request(message: str, details: dict[str, Any] | None = None) -> ApiError
 
 def not_captured(message: str, details: dict[str, Any] | None = None) -> ApiError:
     return ApiError(501, "NOT_CAPTURED", message, details=details)
+
+
+def not_found(message: str, details: dict[str, Any] | None = None) -> ApiError:
+    return ApiError(404, "NOT_FOUND", message, details=details)
+
+
+def payload_too_large(message: str, details: dict[str, Any] | None = None) -> ApiError:
+    return ApiError(413, "PAYLOAD_TOO_LARGE", message, details=details)
+
+
+def local_storage_error(message: str, details: dict[str, Any] | None = None) -> ApiError:
+    return ApiError(500, "LOCAL_STORAGE_ERROR", message, details=details)

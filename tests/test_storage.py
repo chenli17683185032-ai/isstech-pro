@@ -242,3 +242,25 @@ def test_incomplete_current_schema_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(UnsupportedSchemaVersion, match="schema is incomplete"):
         WorkflowStorage(database).initialize()
+
+
+def test_version_one_database_migrates_without_losing_runs(tmp_path: Path) -> None:
+    database = tmp_path / "version-one.sqlite3"
+    connection = sqlite3.connect(database)
+    schema = (
+        Path(__file__).parents[1] / "src" / "isstech_replay" / "schema.sql"
+    ).read_text(encoding="utf-8")
+    connection.executescript(schema)
+    connection.execute(
+        "INSERT INTO sync_runs "
+        "(run_id, adapter, status, started_at, max_pages) "
+        "VALUES ('existing-run', 'purchase_requisition', 'running', ?, 20)",
+        (T1,),
+    )
+    connection.commit()
+    connection.close()
+
+    storage = WorkflowStorage(database)
+    assert storage.schema_version() == SCHEMA_VERSION
+    assert storage.get_run("existing-run")["status"] == "running"  # type: ignore[index]
+    assert storage.table_count("materials") == 0

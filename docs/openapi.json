@@ -34,6 +34,20 @@
         "title": "AttachmentOut",
         "type": "object"
       },
+      "Body_ingest_material_v1_materials_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_ingest_material_v1_materials_post",
+        "type": "object"
+      },
       "FieldsBody": {
         "properties": {
           "fields": {
@@ -79,6 +93,86 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MaterialIngestOut": {
+        "properties": {
+          "blob_created": {
+            "title": "Blob Created",
+            "type": "boolean"
+          },
+          "deduplicated": {
+            "title": "Deduplicated",
+            "type": "boolean"
+          },
+          "material": {
+            "$ref": "#/components/schemas/MaterialOut"
+          }
+        },
+        "required": [
+          "material",
+          "deduplicated",
+          "blob_created"
+        ],
+        "title": "MaterialIngestOut",
+        "type": "object"
+      },
+      "MaterialOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "declared_mime_type": {
+            "title": "Declared Mime Type",
+            "type": "string"
+          },
+          "detected_mime_type": {
+            "title": "Detected Mime Type",
+            "type": "string"
+          },
+          "extension": {
+            "title": "Extension",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "original_name": {
+            "title": "Original Name",
+            "type": "string"
+          },
+          "review_reason": {
+            "title": "Review Reason",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "size_bytes",
+          "original_name",
+          "declared_mime_type",
+          "detected_mime_type",
+          "extension",
+          "status",
+          "review_reason",
+          "created_at"
+        ],
+        "title": "MaterialOut",
         "type": "object"
       },
       "PurchaseApprovalStepOut": {
@@ -799,6 +893,253 @@
         "summary": "Health V1",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/materials": {
+      "get": {
+        "operationId": "list_materials_v1_materials_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ingest_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ingest Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MaterialOut"
+                  },
+                  "title": "Response List Materials V1 Materials Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Materials",
+        "tags": [
+          "materials"
+        ]
+      },
+      "post": {
+        "operationId": "ingest_material_v1_materials_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_material_v1_materials_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialIngestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Material",
+        "tags": [
+          "materials"
+        ]
+      }
+    },
+    "/v1/materials/{material_id}": {
+      "get": {
+        "operationId": "get_material_v1_materials__material_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Material",
+        "tags": [
+          "materials"
+        ]
+      }
+    },
+    "/v1/materials/{material_id}/content": {
+      "get": {
+        "operationId": "get_material_content_v1_materials__material_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Material Content",
+        "tags": [
+          "materials"
         ]
       }
     },

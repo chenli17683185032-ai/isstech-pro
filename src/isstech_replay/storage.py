@@ -11,18 +11,26 @@ import re
 import sqlite3
 
 from .models.work_items import ChangeEvent, ChangeKind, WorkflowKind, WorkflowSnapshot
+from .models.materials import Material, MaterialStatus
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_REQUIRED_TABLES = {
+_WORKFLOW_TABLES = {
     "sync_runs",
     "workflow_snapshots",
     "workflow_current",
     "workflow_events",
 }
+_MATERIAL_TABLES = {"material_blobs", "materials", "material_artifacts"}
+_REQUIRED_TABLES = _WORKFLOW_TABLES | _MATERIAL_TABLES
+_REQUIRED_TABLES_BY_VERSION = {
+    1: _WORKFLOW_TABLES,
+    2: _REQUIRED_TABLES,
+}
+_MIGRATIONS = {1: "migration_002_materials.sql"}
 
 
 class StorageError(RuntimeError):
@@ -78,37 +86,63 @@ class WorkflowStorage:
         connection = self._connect()
         try:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version == SCHEMA_VERSION:
-                existing = {
-                    row[0]
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master "
-                        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-                    ).fetchall()
-                }
-                missing = sorted(_REQUIRED_TABLES - existing)
-                if missing:
-                    raise UnsupportedSchemaVersion(
-                        "database schema is incomplete; missing: " + ", ".join(missing)
-                    )
-                return
-            if version != 0:
+            if version > SCHEMA_VERSION:
                 raise UnsupportedSchemaVersion(
                     f"database schema version {version} is newer than supported "
                     f"version {SCHEMA_VERSION}"
                 )
-            existing = connection.execute(
+            if version == 0:
+                existing = self._existing_tables(connection)
+                if existing:
+                    raise UnsupportedSchemaVersion(
+                        "database has unversioned tables; refusing automatic initialization"
+                    )
+                schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
+                connection.executescript(schema)
+                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+
+            while version < SCHEMA_VERSION:
+                self._verify_tables(connection, version)
+                migration_name = _MIGRATIONS.get(version)
+                if migration_name is None:
+                    raise UnsupportedSchemaVersion(
+                        f"no migration from schema version {version}"
+                    )
+                migration = Path(__file__).with_name(migration_name).read_text(
+                    encoding="utf-8"
+                )
+                connection.executescript(migration)
+                new_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if new_version <= version:
+                    raise UnsupportedSchemaVersion(
+                        f"migration {migration_name} did not advance schema version"
+                    )
+                version = new_version
+
+            self._verify_tables(connection, SCHEMA_VERSION)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _existing_tables(connection: sqlite3.Connection) -> set[str]:
+        return {
+            row[0]
+            for row in connection.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
-            if existing:
-                raise UnsupportedSchemaVersion(
-                    "database has unversioned tables; refusing automatic initialization"
-                )
-            schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
-            connection.executescript(schema)
-        finally:
-            connection.close()
+        }
+
+    @classmethod
+    def _verify_tables(cls, connection: sqlite3.Connection, version: int) -> None:
+        required = _REQUIRED_TABLES_BY_VERSION.get(version)
+        if required is None:
+            raise UnsupportedSchemaVersion(f"unknown schema version {version}")
+        missing = sorted(required - cls._existing_tables(connection))
+        if missing:
+            raise UnsupportedSchemaVersion(
+                "database schema is incomplete; missing: " + ", ".join(missing)
+            )
 
     def schema_version(self) -> int:
         self.initialize()
@@ -571,3 +605,151 @@ class WorkflowStorage:
             return int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         finally:
             connection.close()
+
+    def register_material(
+        self,
+        *,
+        material_id: str,
+        sha256: str,
+        size_bytes: int,
+        original_path: str,
+        original_name: str,
+        declared_mime_type: str,
+        detected_mime_type: str,
+        extension: str,
+        status: MaterialStatus,
+        review_reason: str,
+        created_at: str,
+    ) -> tuple[Material, bool, bool]:
+        """Register one material reference and return material/dedup/blob-created."""
+        if not material_id or not original_name:
+            raise ValueError("material_id and original_name are required")
+        if not _HASH_RE.fullmatch(sha256):
+            raise ValueError("material sha256 must be lowercase SHA-256")
+        if size_bytes < 0:
+            raise ValueError("material size_bytes cannot be negative")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "INSERT INTO material_blobs "
+                    "(sha256, size_bytes, original_path, detected_mime_type, created_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(sha256) DO NOTHING",
+                    (
+                        sha256,
+                        size_bytes,
+                        original_path,
+                        detected_mime_type,
+                        created_at,
+                    ),
+                )
+                blob_created = cursor.rowcount == 1
+                blob = connection.execute(
+                    "SELECT * FROM material_blobs WHERE sha256 = ?",
+                    (sha256,),
+                ).fetchone()
+                if blob is None:
+                    raise StorageError("material blob registration disappeared")
+                if blob["size_bytes"] != size_bytes or blob["original_path"] != original_path:
+                    raise SnapshotConflictError(
+                        "material blob metadata conflicts with an existing SHA-256"
+                    )
+
+                existing = connection.execute(
+                    "SELECT m.*, b.size_bytes, b.original_path "
+                    "FROM materials m JOIN material_blobs b USING (sha256) "
+                    "WHERE m.sha256 = ? AND m.original_name = ?",
+                    (sha256, original_name),
+                ).fetchone()
+                if existing is not None:
+                    return self._material_from_row(existing), True, blob_created
+
+                connection.execute(
+                    "INSERT INTO materials "
+                    "(material_id, sha256, original_name, declared_mime_type, "
+                    "detected_mime_type, extension, ingest_status, review_reason, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        material_id,
+                        sha256,
+                        original_name,
+                        declared_mime_type,
+                        detected_mime_type,
+                        extension,
+                        status.value,
+                        review_reason,
+                        created_at,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT m.*, b.size_bytes, b.original_path "
+                    "FROM materials m JOIN material_blobs b USING (sha256) "
+                    "WHERE m.material_id = ?",
+                    (material_id,),
+                ).fetchone()
+                if row is None:
+                    raise StorageError("material registration disappeared")
+                return self._material_from_row(row), False, blob_created
+        finally:
+            connection.close()
+
+    def get_material(self, material_id: str) -> Material | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT m.*, b.size_bytes, b.original_path "
+                "FROM materials m JOIN material_blobs b USING (sha256) "
+                "WHERE m.material_id = ?",
+                (material_id,),
+            ).fetchone()
+            return self._material_from_row(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def list_materials(
+        self,
+        *,
+        status: MaterialStatus | None = None,
+        limit: int = 100,
+    ) -> tuple[Material, ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        self.initialize()
+        connection = self._connect()
+        try:
+            if status is None:
+                rows = connection.execute(
+                    "SELECT m.*, b.size_bytes, b.original_path "
+                    "FROM materials m JOIN material_blobs b USING (sha256) "
+                    "ORDER BY m.created_at DESC, m.material_id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT m.*, b.size_bytes, b.original_path "
+                    "FROM materials m JOIN material_blobs b USING (sha256) "
+                    "WHERE m.ingest_status = ? "
+                    "ORDER BY m.created_at DESC, m.material_id DESC LIMIT ?",
+                    (status.value, limit),
+                ).fetchall()
+            return tuple(self._material_from_row(row) for row in rows)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _material_from_row(row: sqlite3.Row) -> Material:
+        return Material(
+            id=row["material_id"],
+            sha256=row["sha256"],
+            size_bytes=row["size_bytes"],
+            original_name=row["original_name"],
+            declared_mime_type=row["declared_mime_type"],
+            detected_mime_type=row["detected_mime_type"],
+            extension=row["extension"],
+            status=MaterialStatus(row["ingest_status"]),
+            review_reason=row["review_reason"],
+            original_path=row["original_path"],
+            created_at=row["created_at"],
+        )

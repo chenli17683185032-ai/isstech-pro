@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P3 已完成，准备阶段提交` |
+| 当前总阶段 | `P4 已完成，准备阶段提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -637,7 +637,7 @@ CSV contains no password/cookie/ticket
 
 ## P4 本地材料入库
 
-状态：`TODO`
+状态：`DONE`
 
 ### 修改文件
 
@@ -662,6 +662,18 @@ duplicate ingest is idempotent
 interrupted copy leaves no valid record pointing to partial file
 original is never overwritten by derived output
 ```
+
+### 实际结果（2026-07-15）
+
+- SQLite 通过显式 migration 从 schema v1 升到 v2，已有 sync run 保留；wheel 包含 migration 和材料模块。
+- 文件/目录 CLI 与受本地 Bearer 会话保护的 multipart API 均已实现，API 还支持列表、详情和原件读取。
+- 输入按块写入同文件系统 staging，受 100 MiB 默认上限约束，完成 SHA-256 后原子移动。
+- 原件规范路径为 `data/materials/originals/<sha256>/blob`，权限 `0400`；派生产物路径固定在独立 `derived/<material-id>/`。
+- 相同内容和文件名重复投递返回同一 material；相同内容不同文件名建立不同引用但共用一个 blob。
+- PDF、OOXML、PNG/JPEG/GIF/TIFF、JSON/文本等做文件头检测；扩展名、声明 MIME、检测 MIME 冲突进入 `needs_review`。
+- 路径型文件名、符号链接、超限、流中断、损坏 blob 和 data 目录自摄入均拒绝或明确失败。
+- 离线双次 CLI 冒烟得到 `blobs=1`、`materials=1`、第二次 deduplicated、原件 mode 400、staging 空。
+- 全量 `pytest` 158 项、Ruff、OpenAPI、秘密扫描、证据校验、Git 忽略、diff 和 wheel 检查全部通过。
 
 ## P5 文档解析与 AI 字段抽取
 
@@ -834,12 +846,13 @@ failure has exit code, run record and可定位日志
 | 3 | `DONE` | P2 复核 `/v1/work-items` 与全量翻页 | 121 tests + raw WorkItem 校验 + 本地 API 冒烟通过 |
 | 4 | `DONE` | 阶段性提交 P0-P2 | `f360595 Implement evidence-backed read-only work item flow` |
 | 5 | `DONE` | P3 SQLite 快照和手动同步 CLI | 141 tests + 幂等/差异/失败事务/API 冒烟通过 |
-| 6 | `IN_PROGRESS` | P3 阶段性提交 | 提交只包含 P3 代码、文档和测试 |
-| 7 | `TODO` | P4 材料入库 | 原文件固化与去重闭环通过 |
-| 8 | `TODO` | P5 AI 抽取接口与来源证据 | 每个字段可追溯且低置信度被拦截 |
-| 9 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
-| 10 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 11 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 6 | `DONE` | P3 阶段性提交 | `63ed69e Add transactional workflow snapshot sync` |
+| 7 | `DONE` | P4 材料入库 | 158 tests + 离线双次 ingestion + wheel 检查通过 |
+| 8 | `IN_PROGRESS` | P4 阶段性提交 | 提交只包含 P4 代码、migration、文档和测试 |
+| 9 | `TODO` | P5 AI 抽取接口与来源证据 | 每个字段可追溯且低置信度被拦截 |
+| 10 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
+| 11 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
+| 12 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
 ---
 

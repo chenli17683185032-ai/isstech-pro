@@ -20,10 +20,10 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P3 gate on `2026-07-15`: **141 passed**, Ruff clean, OpenAPI
+Last complete P4 gate on `2026-07-15`: **158 passed**, Ruff clean, OpenAPI
 matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, SQLite/wheel/CLI contracts passed, local API smoke passed, and
-`git diff --check` passed.
+passed, SQLite migration/wheel/API/CLI contracts passed, offline material smoke
+passed, and `git diff --check` passed.
 
 ## Operator evidence check
 
@@ -110,6 +110,25 @@ Pass criteria: dry-run leaves no new DB/run file; real sync is `succeeded`;
 source count is complete; all files report mode `600`; a second unchanged sync
 adds history but zero change events.
 
+## Material ingestion smoke (offline)
+
+```bash
+tmp_dir="$(mktemp -d)"
+printf '%%PDF-1.7\nREDACTED\n%%%%EOF\n' > "$tmp_dir/sample.pdf"
+uv run python tools/ingest_materials.py "$tmp_dir/sample.pdf" \
+  --data-dir "$tmp_dir/data" --json
+uv run python tools/ingest_materials.py "$tmp_dir/sample.pdf" \
+  --data-dir "$tmp_dir/data" --json
+sqlite3 "$tmp_dir/data/workflow-center.sqlite3" \
+  'select (select count(*) from material_blobs), (select count(*) from materials);'
+stat -f '%Lp %N' "$tmp_dir"/data/materials/originals/*/blob
+rm -rf "$tmp_dir"
+```
+
+Pass criteria: both CLI calls exit zero; the second reports deduplicated; the
+database reports `1|1`; the original blob mode is `400`; no staging `.part`
+remains.
+
 ## Zero write egress check
 
 ```bash
@@ -191,6 +210,7 @@ bash tools/first-commit.sh
 | FastAPI `/v1` | Yes; runtime OpenAPI exported | Credentialed session smoke |
 | SQLite snapshot/diff | Yes; transactional and version-gated | Credentialed live sync |
 | Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
+| Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 
