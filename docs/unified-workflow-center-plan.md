@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P5 已完成，准备阶段提交` |
+| 当前总阶段 | `P6 人工审阅与草稿状态机` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,31 +53,8 @@
 
 ### 0.2 当前未提交工作树
 
-当前仅有 P5 的解析、字段映射、schema v3、API/CLI、测试和文档改动；不能
-丢弃或拆入 P6。主要文件：
-
-```text
-src/isstech_replay/extraction.py
-src/isstech_replay/field_mapping.py
-src/isstech_replay/ai/
-src/isstech_replay/models/extraction.py
-src/isstech_replay/routes/extractions.py
-src/isstech_replay/migration_003_extraction.sql
-src/isstech_replay/storage.py
-tools/extract_material.py
-tests/test_extraction.py
-tests/test_field_mapping.py
-tests/test_storage.py
-tests/test_api.py
-README.md
-docs/architecture.md
-docs/final-verification.md
-docs/openapi.json
-```
-
-这些改动的意图是证明“不可变原件 → 结构化文档 → 不可信 provider →
-证据/阈值门禁 → pending SQLite 字段”闭环；没有 P6 审阅状态变更，也没有
-任何上游写请求。
+P5 已提交为 `68f57b0 Add evidence-backed material field extraction`。当前只推进
+P6 人工审阅与草稿状态机；不得修改 provider 原建议，不得接入任何真实提交。
 
 ### 0.3 最近一次验证结果
 
@@ -726,7 +703,7 @@ AI output cannot directly call adapter submit
 
 ## P6 人工审阅与草稿状态机
 
-状态：`TODO`
+状态：`IN_PROGRESS`
 
 ### 修改文件
 
@@ -870,8 +847,8 @@ failure has exit code, run record and可定位日志
 | 7 | `DONE` | P4 材料入库 | 158 tests + 离线双次 ingestion + wheel 检查通过 |
 | 8 | `DONE` | P4 阶段性提交 | `8131eea Add immutable local material ingestion` |
 | 9 | `DONE` | P5 AI 抽取接口与来源证据 | 205 tests + 离线 extraction + wheel 检查通过 |
-| 10 | `IN_PROGRESS` | P5 阶段性提交 | 提交只包含 P5 代码、migration、文档和测试 |
-| 11 | `TODO` | P6 人工审阅 | 状态机和审计测试通过 |
+| 10 | `DONE` | P5 阶段性提交 | `68f57b0 Add evidence-backed material field extraction` |
+| 11 | `IN_PROGRESS` | P6 人工审阅 | 状态机和审计测试通过 |
 | 12 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
 | 13 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
