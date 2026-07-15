@@ -11,6 +11,7 @@
 - Static assets and AJAX endpoints loaded by the in-scope pages
 - Local FastAPI facade at `http://127.0.0.1:8000` (development only)
 - Local material originals, derived structured documents, extraction runs, and SQLite state
+- Local macOS Keychain items and LaunchAgent for the read-only sync CLI
 - Browser/CDP analysis limited to the authorized iPSA CTF target
 
 ## Out of scope

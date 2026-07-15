@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.isstech.workflow-center.sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ethan/Documents/isstech/.venv/bin/python</string>
+        <string>/Users/ethan/Documents/isstech/tools/scheduled_sync.py</string>
+        <string>--repo-root</string>
+        <string>/Users/ethan/Documents/isstech</string>
+        <string>--data-dir</string>
+        <string>/Users/ethan/Documents/isstech/data</string>
+        <string>--log-file</string>
+        <string>/Users/ethan/Documents/isstech/data/logs/scheduled-sync.log</string>
+        <string>--keychain-timeout-seconds</string>
+        <string>10</string>
+        <string>--sync-timeout-seconds</string>
+        <string>900</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/ethan/Documents/isstech</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    </array>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/dev/null</string>
+</dict>
+</plist>

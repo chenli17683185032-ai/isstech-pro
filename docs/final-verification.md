@@ -20,10 +20,11 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P6 gate on `2026-07-15`: **216 passed**, Ruff clean, OpenAPI
+Last complete P8 facility gate on `2026-07-15`: **226 passed**, Ruff clean, OpenAPI
 matched runtime, both verification tools passed, raw permissions/ignore checks
-passed, SQLite v3-to-v4 migration, review/state/API contracts, append-only audit,
-offline extraction smoke, and `git diff --check` passed.
+passed, scheduler timeout/redaction/rollback contracts passed, repository and
+rendered plists passed `plutil`, and `git diff --check` passed. Runtime Keychain
+provisioning and LaunchAgent bootstrap remain an account-holder gate.
 
 ## Operator evidence check
 
@@ -169,6 +170,40 @@ through `validated` to `ready`; event sequence is contiguous with draft version;
 the AI proposal/source columns remain unchanged; stale versions and direct ready
 attempts return conflicts. These checks are local and send no iPSA request.
 
+## Scheduled sync facility (offline)
+
+```bash
+uv run pytest -q tests/test_scheduled_sync.py
+plutil -lint ops/com.isstech.workflow-center.sync.plist
+tmp_plist="$(mktemp)"
+uv run python tools/install_launch_agent.py --dry-run > "$tmp_plist"
+plutil -lint "$tmp_plist"
+if plutil -p "$tmp_plist" | rg -i 'password|cookie|ticket|\.ipsa|api.key'; then
+  exit 1
+fi
+rm -f "$tmp_plist"
+```
+
+Pass criteria: focused tests prove the existing manual CLI path is invoked;
+Keychain and sync timeouts exit non-zero; private logs omit credentials/work-item
+content; failed lint/bootstrap restores the previous plist/service; both plists
+are valid and contain no credential-like values.
+
+After the account holder configures Keychain, the live activation gate is:
+
+```bash
+uv run python tools/configure_sync_keychain.py --verify-only
+uv run python tools/install_launch_agent.py
+launchctl print gui/$(id -u)/com.isstech.workflow-center.sync
+stat -f '%Lp %N' \
+  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.sync.plist"
+```
+
+Expected: agent is loaded with five weekday intervals, installed plist mode is
+`600`, no credential appears in the plist, and a later scheduled run writes a
+successful SQLite run plus one safe `scheduled-sync.log` line while the FastAPI
+app is closed. Do not activate before Keychain is configured.
+
 ## Zero write egress check
 
 ```bash
@@ -253,6 +288,7 @@ bash tools/first-commit.sh
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples; P6 human review |
 | Human review and draft state | Yes; version lock, corrected evidence, immutable proposal, audit, ready | Local UI; P7 remains write-blocked |
+| Weekday scheduled sync | Facility yes; same CLI, Keychain, timeout, private log, rollback | Account-holder Keychain setup and live bootstrap |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 

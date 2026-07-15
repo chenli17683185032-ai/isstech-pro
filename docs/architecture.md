@@ -72,12 +72,16 @@ sync service  --------------------> SQLite state/audit
 | `field_mapping.py` | Workflow field profiles plus required/evidence/confidence gates |
 | `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
 | `workflow_state.py` | Human review, exact-evidence revalidation, optimistic state transitions |
+| `scheduler.py` | Keychain reads, bounded manual-CLI child process, private outcome log |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
 | `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
+| `tools/scheduled_sync.py` | LaunchAgent entrypoint; invokes the existing manual sync CLI |
+| `tools/install_launch_agent.py` | Atomic plist render/install/rollback/uninstall |
+| `tools/configure_sync_keychain.py` | Interactive Keychain provisioning without credential CLI args |
 
 ## Safety model
 
@@ -195,3 +199,22 @@ and document issues hold the draft in `needs_review`. Human confirmation may
 resolve low model confidence, but cannot replace exact evidence. Only
 `validated -> ready` is implemented; there is no P6 route to preview, submit, or
 reach `GuardedTransport`.
+
+## Scheduled measurement loop
+
+The weekday LaunchAgent does not embed a scheduler in FastAPI and does not need
+the app window to remain open. It starts `tools/scheduled_sync.py`, which performs
+bounded Keychain reads and launches the existing `tools/sync_work_items.py`
+subprocess with credentials only in that child environment.
+
+The child still uses the exact P3 complete-read and transactional SQLite path.
+Launchd stdout/stderr go to `/dev/null`; the wrapper parses child JSON and writes
+only safe counts/outcome data to a mode `0600` JSON-lines log. Child stderr is
+redacted before failure logging. Keychain lookup, sync, `plutil`, and `launchctl`
+commands all have explicit timeouts.
+
+Installation is reversible: an existing plist is copied to a mode `0600`
+`.backup`; the new plist is atomically written and linted before the old service
+is stopped. Any later bootstrap/enable/print failure restores the old file and,
+if it had been loaded, attempts to bootstrap it again. The current deployment
+does not activate this agent until runtime credentials are configured locally.

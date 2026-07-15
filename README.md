@@ -20,6 +20,7 @@ for the authorized CTF target:
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
 | SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
+| Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
@@ -78,6 +79,51 @@ data/exports/YYYY-MM-DD-work-items.csv
 `data/` is gitignored. SQLite, summary, and CSV files are created with mode
 `0600`. A declared total mismatch, repeated/short page, schema mismatch, stale
 measurement, or local transaction error makes the command exit non-zero.
+
+### Weekday scheduled sync
+
+The committed default is Monday-Friday at 08:30 local time. The facility is not
+activated until the account holder configures Keychain and runs the installer.
+Neither tool accepts a password command-line argument.
+
+```bash
+cd /Users/ethan/Documents/isstech
+
+# /usr/bin/security presents two secure prompts: iPSA username, then password
+.venv/bin/python tools/configure_sync_keychain.py
+
+# verify values without printing them
+.venv/bin/python tools/configure_sync_keychain.py --verify-only
+
+# inspect a valid rendered plist without writing/loading it
+.venv/bin/python tools/install_launch_agent.py --dry-run | plutil -lint -
+
+# atomically install and bootstrap the default weekday 08:30 agent
+.venv/bin/python tools/install_launch_agent.py
+
+# inspect loaded schedule and private outcome log
+launchctl print gui/$(id -u)/com.isstech.workflow-center.sync
+tail -n 20 data/logs/scheduled-sync.log
+```
+
+Use `--hour H --minute M` on the installer to choose another local time. The
+installed plist is mode `0600` under `~/Library/LaunchAgents/`; it contains no
+username, password, Cookie, ticket, or API key. Scheduled execution calls the
+same `tools/sync_work_items.py --json --csv` path as manual sync, with a 10-second
+Keychain timeout and 15-minute sync timeout.
+
+The wrapper captures detailed CLI output in memory and appends only timestamp,
+run ID, status, counts, exit code, and a redacted error to
+`data/logs/scheduled-sync.log` (mode `0600`). Full run summaries and CSV remain
+under the existing private `data/runs/` and `data/exports/` paths.
+
+```bash
+# stop future runs and remove the installed plist; local data and backup remain
+.venv/bin/python tools/install_launch_agent.py --uninstall
+
+# optionally remove only the two scheduled-sync Keychain items
+.venv/bin/python tools/configure_sync_keychain.py --delete
+```
 
 ### Local material ingestion
 
@@ -228,6 +274,9 @@ captures/redacted/     # commit-safe fixtures
 docs/                  # architecture, matrix, vulns, verification, openapi path list
 tools/first-commit.sh  # baseline commit helper if .git is locked in a sandbox
 tools/sync_work_items.py # manual/daily sync entry; credentials from env only
+tools/scheduled_sync.py # Keychain-backed bounded LaunchAgent entrypoint
+tools/install_launch_agent.py # render/install/rollback/uninstall LaunchAgent
+tools/configure_sync_keychain.py # secure interactive credential provisioning
 tools/ingest_materials.py # offline file/directory material ingestion
 tools/extract_material.py # offline parse + evidence-backed field extraction
 data/                  # ignored SQLite, run summaries, and CSV exports

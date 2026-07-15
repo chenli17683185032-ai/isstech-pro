@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P8 每日只读同步调度` |
+| 当前总阶段 | `P8 调度设施已完成，准备阶段提交` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,22 +53,24 @@
 
 ### 0.2 当前未提交工作树
 
-P6 已提交为 `3c13ed8 Add audited human review draft state machine`。P7 仍为
-BLOCKED；当前只推进 P8 只读同步调度，不得增加任何上游写动作。
+P6 已提交为 `3c13ed8 Add audited human review draft state machine`。当前未提交
+工作树只包含 P8 scheduler、Keychain/LaunchAgent 工具、plist、测试和文档；
+不得加入 P7 上游写动作。真实 Keychain 配置和 bootstrap 仍未执行。
 
 ### 0.3 最近一次验证结果
 
 ```text
-pytest: 216 passed
+pytest: 226 passed
 ruff: passed
 OpenAPI: matches runtime
 secret scan: passed
 evidence hashes and permissions: passed
 git diff --check: passed
-P6 focused state/API/migration tests: passed
-schema v3 -> v4 existing extraction preservation: passed
-audit UPDATE/DELETE trigger: blocked
-stale expected_version/direct ready: conflict
+scheduled facility tests: 10 passed
+repository plist: plutil OK
+installer dry-run plist: plutil OK
+credential/work-item scheduler log leakage tests: passed
+lint/bootstrap rollback tests: passed
 ```
 
 ### 0.4 当前外部阻断
@@ -835,6 +837,7 @@ no P6 route can reach GuardedTransport or adapter submit
 
 ```text
 ops/com.isstech.workflow-center.sync.plist
+src/isstech_replay/scheduler.py
 tools/scheduled_sync.py
 tools/configure_sync_keychain.py
 tools/install_launch_agent.py
@@ -902,6 +905,28 @@ failure has exit code, run record and可定位日志
 plist/log contain no credential values
 keychain/subprocess timeout cannot hang indefinitely
 ```
+
+### 实际结果（2026-07-15，设施代码）
+
+- `src/isstech_replay/scheduler.py` 限时读取两个固定 Keychain service，并以
+  子进程环境调用现有 `tools/sync_work_items.py --json --csv`；没有复制同步逻辑。
+- wrapper 只把 run ID、状态、观测/待办/事件计数、exit code 和脱敏错误追加
+  到 mode `0600` JSONL；测试证明凭据值和 work item 内容不进入该日志。
+- Keychain 失败不启动同步；child 非零保留可解析 run ID；sync 超时返回 124；
+  其他启动错误也非零并留日志。
+- `tools/configure_sync_keychain.py` 不接受凭据参数；使用 `/usr/bin/security`
+  末位 `-w` 安全提示，支持 verify-only 和 delete。
+- 默认 plist 是周一至周五 08:30、`Umask=0077`、stdout/stderr `/dev/null`，
+  不含 username/password/Cookie/ticket/API key；仓库和 dry-run plist 均通过
+  `plutil -lint`。
+- 安装器支持 dry-run、自定义 hour/minute、write-only、bootstrap、uninstall；
+  有界调用 launchctl，不使用可能无限阻塞的 `bootout --wait`。
+- 更新前保存 mode `0600` `.backup`；lint 失败不停止旧服务，bootstrap/enable/
+  print 失败恢复旧文件，并在旧服务原已加载时尝试恢复 bootstrap。
+- P8 focused 10 项与全量 `pytest` 226 项通过；Ruff、OpenAPI、秘密扫描、
+  证据校验和 diff 检查通过。
+- 尚未执行真实 Keychain 配置和 LaunchAgent bootstrap；解除条件是账号持有人
+  在本机安全提示中输入凭据并确认默认 08:30 或指定其他时间。
 
 ## P9 第二个流程适配器
 
@@ -996,7 +1021,9 @@ keychain/subprocess timeout cannot hang indefinitely
 | 11 | `DONE` | P6 人工审阅 | 216 tests + v4 migration + API/state/audit 门禁通过 |
 | 12 | `DONE` | P6 阶段性提交 | `3c13ed8 Add audited human review draft state machine` |
 | 13 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 14 | `IN_PROGRESS` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 14 | `DONE` | P8 调度设施代码 | 226 tests + plist lint + timeout/redaction/rollback 通过 |
+| 15 | `IN_PROGRESS` | P8 阶段性提交 | 提交只包含 scheduler/plist/tools/tests/docs |
+| 16 | `BLOCKED` | P8 真实激活 | 等账号持有人配置 Keychain 并确认执行时间 |
 
 ---
 
