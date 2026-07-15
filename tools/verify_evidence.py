@@ -33,8 +33,19 @@ def verify_manifest() -> list[str]:
         actual = sha256(path)
         if actual != artifact["sha256"]:
             findings.append(f"hash mismatch: {relative}")
-        if artifact.get("sensitivity") in {"high", "medium"}:
-            mode = stat.S_IMODE(path.stat().st_mode)
+        mode = stat.S_IMODE(path.stat().st_mode)
+        expected_mode = artifact.get("expectedMode")
+        if expected_mode is not None:
+            try:
+                required = int(str(expected_mode), 8)
+            except ValueError:
+                findings.append(f"invalid expectedMode ({expected_mode}): {relative}")
+            else:
+                if mode != required:
+                    findings.append(
+                        f"permissions mismatch ({mode:04o} != {required:04o}): {relative}"
+                    )
+        elif artifact.get("sensitivity") in {"high", "medium"}:
             if mode & 0o077:
                 findings.append(f"permissions too broad ({mode:o}): {relative}")
     return findings

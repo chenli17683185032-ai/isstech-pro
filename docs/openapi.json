@@ -81,8 +81,51 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "PurchaseApprovalStepOut": {
+        "properties": {
+          "action": {
+            "default": "",
+            "title": "Action",
+            "type": "string"
+          },
+          "approver_name": {
+            "default": "",
+            "title": "Approver Name",
+            "type": "string"
+          },
+          "comment": {
+            "default": "",
+            "title": "Comment",
+            "type": "string"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          },
+          "sequence": {
+            "default": "",
+            "title": "Sequence",
+            "type": "string"
+          },
+          "timestamp": {
+            "default": "",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "title": "PurchaseApprovalStepOut",
+        "type": "object"
+      },
       "PurchaseDetailOut": {
         "properties": {
+          "approval_steps": {
+            "items": {
+              "$ref": "#/components/schemas/PurchaseApprovalStepOut"
+            },
+            "title": "Approval Steps",
+            "type": "array"
+          },
           "fields": {
             "additionalProperties": {
               "type": "string"
@@ -120,6 +163,11 @@
           },
           "id": {
             "title": "Id",
+            "type": "string"
+          },
+          "next_approver": {
+            "default": "",
+            "title": "Next Approver",
             "type": "string"
           },
           "project_name": {
@@ -351,6 +399,106 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkItemListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "synced_at": {
+            "title": "Synced At",
+            "type": "string"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total_count",
+          "synced_at"
+        ],
+        "title": "WorkItemListOut",
+        "type": "object"
+      },
+      "WorkItemOut": {
+        "properties": {
+          "applicant": {
+            "default": "",
+            "title": "Applicant",
+            "type": "string"
+          },
+          "current_approver": {
+            "default": "",
+            "title": "Current Approver",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "project_no": {
+            "default": "",
+            "title": "Project No",
+            "type": "string"
+          },
+          "reference_no": {
+            "default": "",
+            "title": "Reference No",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "default": "",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "waiting_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting Days"
+          },
+          "workflow": {
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "workflow",
+          "external_id"
+        ],
+        "title": "WorkItemOut",
         "type": "object"
       },
       "WorkflowBody": {
@@ -1059,6 +1207,26 @@
           },
           {
             "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next_approver",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Next Approver",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "page",
             "required": false,
             "schema": {
@@ -1397,6 +1565,67 @@
         "summary": "Create Session",
         "tags": [
           "sessions"
+        ]
+      }
+    },
+    "/v1/work-items": {
+      "get": {
+        "operationId": "list_work_items_v1_work_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "max_pages",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Max Pages",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItemListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Work Items",
+        "tags": [
+          "work-items"
         ]
       }
     }

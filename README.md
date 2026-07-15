@@ -13,11 +13,12 @@ for the authorized CTF target:
 | --- | --- |
 | Evidence inventory + endpoint matrix | Yes (`docs/`) |
 | Endpoint policy (deny-by-default, Delete-as-GET = write) | Yes |
-| Pure HTTP login (mocked tests; live needs credentials) | Code yes / live HAR pending |
-| Application Index list + detail + bounded attachment download | Yes (mocked; live parity pending) |
-| Approval / adjustment / revocation / search | `NOT_CAPTURED` until runtime evidence exists |
+| Browser login protocol | Captured and reproducibly redacted; browser already carried `.iPSA` |
+| Pure HTTP login | Mock-verified; clean-process live smoke still needs runtime credentials |
+| Application/Search lists + Detail + bounded attachment download | Implemented; live schema/count parity checked without printing values |
+| Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
-| FastAPI `/v1` sessions, lists, attachments, previews | Yes |
+| FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -58,6 +59,10 @@ curl -s http://127.0.0.1:8000/v1/sessions \
 curl -s 'http://127.0.0.1:8000/v1/purchase-requisitions?view=application' \
   -H "Authorization: Bearer $TOKEN"
 
+# unified follow-up list (SearchIndex-backed, read-only)
+curl -s 'http://127.0.0.1:8000/v1/work-items' \
+  -H "Authorization: Bearer $TOKEN"
+
 # delete is preview-only
 curl -s -X POST http://127.0.0.1:8000/v1/previews/purchase-requisitions/ID/delete \
   -H "Authorization: Bearer $TOKEN"
@@ -85,10 +90,10 @@ Evidence baseline → success login capture → pure HTTP login → safety polic
 endpoint matrix → read-only client → write previews → FastAPI → vulnerability
 report → clean-environment acceptance.
 
-**Remaining evidence-dependent steps:** (1) successful-login HAR under
-`captures/raw/` with redacted protocol JSON; (2) credentialed pure-HTTP smoke;
-(3) deep captures for four blocked views and intercepted write bodies; (4)
-optional second-role IDOR checks.
+**Remaining evidence-dependent steps:** (1) credentialed clean-process pure-HTTP
+smoke; (2) request-stage intercepted-and-aborted write bodies; (3) optional
+second-role read-only IDOR comparison. Browser login and the four additional
+list-view GETs are already captured and inventoried.
 
 ## License / authorization
 

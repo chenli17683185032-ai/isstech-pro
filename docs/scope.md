@@ -81,9 +81,13 @@ The repository currently has:
 - Mock-verified pure HTTP login implementation; live credential proof pending
 - Evidence-backed application Index parsing, detail/attachment parsing, and
   size-bounded attachment downloads
+- Runtime-captured Search/Approval/Adjust/Revocation GET paths, observed Search
+  filter/pagination POSTs, and Search current-approver parsing
 - Offline write request previews that cannot reach the live transport
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
-It does **not** yet have a successful-login HAR, credentialed live smoke, deep
-captures for the other four views, intercepted write bodies, or second-role
-IDOR evidence. Do not describe those conditional areas as live-complete.
+It does **not** yet have a credentialed clean-process pure-HTTP smoke,
+intercepted-and-aborted write bodies, or second-role IDOR evidence. The browser
+credential POST and authenticated Portal response are captured, but that
+browser already carried `.iPSA`; do not describe fresh ticket issuance as
+live-proven.

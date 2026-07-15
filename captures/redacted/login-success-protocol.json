@@ -1,0 +1,95 @@
+{
+  "sourceCapture": "20260715-login-attempt-01.cdp.json",
+  "capturedAt": "2026-07-15T03:51:00.798Z",
+  "stepCount": 3,
+  "steps": [
+    {
+      "method": "POST",
+      "url": "https://passport.isstech.com/?DomainUrl=http%3A%2F%2Fipsapro.isstech.com&ReturnUrl=%2FWebTP%2FPurchaseRequisition",
+      "host": "passport.isstech.com",
+      "path": "/",
+      "status": 302,
+      "location": "https://passport.isstech.com/",
+      "setCookieNames": [],
+      "postFieldNames": [
+        "emp_DomainName",
+        "emp_Password",
+        "RemeberMe",
+        "DomainUrl",
+        "ReturnUrl"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://passport.isstech.com/",
+      "host": "passport.isstech.com",
+      "path": "/",
+      "status": null,
+      "location": null,
+      "setCookieNames": []
+    },
+    {
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/portal",
+      "host": "ipsapro.isstech.com",
+      "path": "/portal",
+      "status": 200,
+      "location": null,
+      "setCookieNames": []
+    }
+  ],
+  "loginFormFieldsObserved": [
+    "emp_DomainName",
+    "emp_Password",
+    "RemeberMe",
+    "DomainUrl",
+    "ReturnUrl"
+  ],
+  "requestCookieNamesObserved": [
+    "uname",
+    "SESSION_THEME_KEY",
+    "ASP.NET_SessionId",
+    ".iPSA",
+    "DomainName",
+    "UserName",
+    "idsrv"
+  ],
+  "cookies": [
+    {
+      "name": "ASP.NET_SessionId",
+      "domain": null,
+      "path": "/",
+      "secure": false,
+      "httpOnly": true,
+      "sameSite": "Lax",
+      "session": true
+    },
+    {
+      "name": "SESSION_THEME_KEY",
+      "domain": ".isstech.com",
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": null,
+      "session": false
+    },
+    {
+      "name": "tgw_l7_route",
+      "domain": null,
+      "path": "/",
+      "secure": false,
+      "httpOnly": false,
+      "sameSite": "Lax",
+      "session": false
+    }
+  ],
+  "authenticatedPage": {
+    "url": "http://ipsapro.isstech.com/portal",
+    "status": 200
+  },
+  "notes": [
+    "Cookie values, credentials, ticket values, and unknown paths/query values are omitted.",
+    "A manual credential POST and authenticated Portal response were captured through CDP.",
+    "This browser capture does not by itself prove ticket issuance from a clean HTTP session."
+  ]
+}

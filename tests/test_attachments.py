@@ -17,25 +17,25 @@ BUSINESS = "http://ipsapro.isstech.com"
 
 
 def test_parse_attachment_rows() -> None:
-    html = (FIXTURES / "edit_detail.html").read_text(encoding="utf-8")
+    html = (FIXTURES / "detail_readonly.html").read_text(encoding="utf-8")
     items = parse_attachment_list(html, doc_id="10001")
     assert len(items) == 1
-    assert items[0].id == "9001"
-    assert items[0].file_name == "spec-redacted.pdf"
-    assert items[0].uploader_name == "USER_A"
+    assert items[0].id == "99001"
+    assert items[0].file_name == "REDACTED CONTRACT.pdf"
+    assert items[0].uploader_name == "USER_UPLOADER"
     assert items[0].upload_date == "2026-07-01"
     assert items[0].doc_id == "10001"
-    assert extract_download_ids(html) == ()
+    assert extract_download_ids(html) == ("99001",)
 
 
 def test_client_list_and_download() -> None:
-    edit_html = (FIXTURES / "edit_detail.html").read_text(encoding="utf-8")
+    detail_html = (FIXTURES / "detail_readonly.html").read_text(encoding="utf-8")
     payload = b"%PDF-REDACTED-BYTES%"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "/Edit/10001" in request.url.path:
-            return httpx.Response(200, text=edit_html, request=request)
-        if "/Attachment/Download/9001" in request.url.path:
+        if "/Detail/10001" in request.url.path:
+            return httpx.Response(200, text=detail_html, request=request)
+        if "/PurchaseRequisition/Download/9001" in request.url.path:
             return httpx.Response(
                 200,
                 content=payload,
@@ -49,7 +49,7 @@ def test_client_list_and_download() -> None:
         transport=httpx.MockTransport(handler),
     ) as client:
         items = client.list_attachments_for("10001")
-        assert items[0].id == "9001"
+        assert items[0].id == "99001"
         content = client.download_attachment("9001", keep_bytes=True)
         assert content.content_length == len(payload)
         assert content.content_type == "application/pdf"
@@ -120,4 +120,21 @@ def test_attachment_redirect_to_login_is_rejected() -> None:
         transport=httpx.MockTransport(handler),
     ) as client:
         with pytest.raises(PermissionError):
+            client.download_attachment("9001")
+
+
+def test_attachment_html_error_is_not_hashed_as_file() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="<html><body>upstream error</body></html>",
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    with IsstechClient(
+        settings=Settings(base_url=BUSINESS),
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(ValueError, match="returned HTML"):
             client.download_attachment("9001")

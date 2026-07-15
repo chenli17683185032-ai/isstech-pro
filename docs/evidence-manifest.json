@@ -1,11 +1,12 @@
 {
-  "version": 1,
+  "version": 2,
   "project": "isstech-replay",
-  "generatedAt": "2026-07-14T08:31:40Z",
+  "generatedAt": "2026-07-15T04:44:35Z",
   "notes": [
     "Hashes are SHA-256 of on-disk bytes at inventory time.",
     "Raw and login-fail artifacts are gitignored; hashes still pin them for operators with local copies.",
-    "Never store password, cookie, or ticket values in this file."
+    "Never store password, cookie, ticket, employee, project, or attachment values in this file.",
+    "Raw CDP captures are local-only, gitignored, and required to remain mode 0600."
   ],
   "artifacts": [
     {
@@ -119,6 +120,126 @@
       "description": "iPSA shell helpers; appPath=/WebTP; GoToUrl navigation"
     },
     {
+      "path": "captures/raw/20260715-login-attempt-01.cdp.json",
+      "sha256": "cf985402d4a65fca30f5c9616cb8cbcd99c1f561334f270746215717ee26face",
+      "source": "Chrome + Computer Use CDP capture of manual Passport POST and authenticated Portal response",
+      "capturedAt": "2026-07-15T03:51:00.798Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Credentials and cookies remain only in raw evidence; browser requests already carried .iPSA, so clean-session issuance is not established"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-initial-01.cdp.json",
+      "sha256": "40679d1c3284b98b55cd86adf1d05ec353c8ed287f39b8461f6e8a4e78bb23a7",
+      "source": "Authenticated Chrome CDP capture of PurchaseRequisition entry GET",
+      "capturedAt": "2026-07-15T03:56:42.980Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Runtime entry document and active page assets"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-search-index-01.cdp.json",
+      "sha256": "411753269ec8cb1149d5f408b328306ac13f93b5a94025e82b39f291a465a988",
+      "source": "Authenticated Chrome CDP capture of SearchIndex GET",
+      "capturedAt": "2026-07-15T03:59:41.590Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only search list, status, next-approver column, form, and pager structure"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-search-submit-01.cdp.json",
+      "sha256": "ded1588bf95810fd7f5381dca8b429054f0e1eec4ef1fab9f2983f5ff4d58131",
+      "source": "Authenticated Chrome CDP capture of empty SearchIndex filter POST",
+      "capturedAt": "2026-07-15T04:09:15.643Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Observed read-only POST /WebTP/PurchaseRequisition/SearchIndex with HTTP 200"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-search-page2-01.cdp.json",
+      "sha256": "f77f036b677fd20038df0eb97f307727bb7e4d1a1341b66a83c7058a35c963be",
+      "source": "Authenticated Chrome CDP capture of SearchIndex page-two POST",
+      "capturedAt": "2026-07-15T04:10:09.458Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Observed read-only POST /SearchIndex/0/1/False/2 with HTTP 200"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-detail-01.cdp.json",
+      "sha256": "ecbde993cab010cb72e1457d4f11f9fad70c59395b55ba1013c331b7daa0f0b6",
+      "source": "Authenticated Chrome CDP capture of a saved PurchaseRequisition Detail GET",
+      "capturedAt": "2026-07-15T04:11:57.183Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only Detail structure and five served attachment download identifiers"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-in-progress-detail-01.cdp.json",
+      "sha256": "4734a13146a63199fcc92151e26d16bb1df880e42b56380bdaca18505072ccf3",
+      "source": "Authenticated Chrome CDP capture of an in-progress PurchaseRequisition Detail GET",
+      "capturedAt": "2026-07-15T04:17:30.266Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only Detail fields and five-step approval trail structure"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-approval-index-01.cdp.json",
+      "sha256": "17c18133e516a49bf93a10a03f299930841c14e7f258eec8481c211503e15749",
+      "source": "Authenticated Chrome CDP capture of ApprovalIndex GET",
+      "capturedAt": "2026-07-15T04:18:49.449Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only approval-list page; current account list was empty"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-adjust-index-01.cdp.json",
+      "sha256": "f407422cbf9675fb5efcb036b579de03e8a82c53454c0033295da1089362493c",
+      "source": "Authenticated Chrome CDP capture of AdjustIndex GET",
+      "capturedAt": "2026-07-15T04:19:41.117Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only adjustment-list page and actively served form structure"
+    },
+    {
+      "path": "captures/raw/20260715-purchase-revocation-index-01.cdp.json",
+      "sha256": "988f317eb787f33ce4df8c536c0b13d186513bb537d2acc14f3867cd508273fd",
+      "source": "Authenticated Chrome CDP capture of RevocationIndex GET",
+      "capturedAt": "2026-07-15T04:20:40.328Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Read-only revocation-list page and actively served form structure"
+    },
+    {
+      "path": "captures/redacted/login-success-protocol.json",
+      "sha256": "1fdf9c7b09024cd543b44d46fb2e51b7b6a034fe1a81fcffd89f9ee9f207c8c4",
+      "source": "tools/redact_login_cdp.py applied to 20260715-login-attempt-01.cdp.json",
+      "capturedAt": "2026-07-15T03:51:00.798Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Credential field names, redacted redirect steps, Cookie names/attributes, and authenticated page signal only"
+    },
+    {
       "path": "captures/redacted/auth_cookie_metadata.json",
       "sha256": "6518015b9d0bafb555f767fb139c63d2987557e5e75c37181a8bae619929b784",
       "source": "Derived from authenticated browser cookie jar (values stripped)",
@@ -161,15 +282,19 @@
   ],
   "gaps": [
     {
-      "id": "login-success-har",
-      "neededPath": "captures/raw/YYYYMMDD-login-success.har",
-      "redactedPath": "captures/redacted/login-success-protocol.json",
-      "reason": "No successful credential POST + redirect + .iPSA set-cookie chain captured yet"
+      "id": "pure-http-live-smoke",
+      "neededPath": "runtime environment variables only; no credential artifact may be saved",
+      "reason": "Browser CDP captured a credential POST and authenticated Portal response, but the browser already carried .iPSA; a clean-process credential login still needs runtime-only credentials"
     },
     {
-      "id": "five-view-deep-capture",
-      "neededPath": "captures/redacted/purchase-*.json",
-      "reason": "Approval/Adjust/Revocation/Search views only known from nav links"
+      "id": "intercepted-write-shapes",
+      "neededPath": "redacted request templates derived from request-stage intercept-and-abort captures",
+      "reason": "Create/save/submit/approve/adjust/revoke/delete/upload request bodies remain unobserved and must never be transmitted in CTF_SAFE"
+    },
+    {
+      "id": "second-role-idor",
+      "neededPath": "a second authorized competition role plus read-only comparison evidence",
+      "reason": "Cross-role authorization behavior cannot be established with the current account; all write-side IDOR probes remain prohibited"
     }
   ]
 }

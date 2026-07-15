@@ -2,95 +2,124 @@
 
 Verification states:
 
-- `observed`: seen in live browser traffic
-- `replayed`: reproduced through direct HTTP from a clean client session
-- `static-only`: derived from served HTML/JavaScript without transmission
-- `blocked-write`: request identified as mutating and intentionally not sent
-- `pending`: known gap; not yet captured or classified
-- `superseded`: historical evidence replaced by a better capture
+- `observed`: seen in live browser traffic.
+- `replayed`: reproduced through direct HTTP from a clean client session.
+- `served-shape`: present in HTML/JavaScript served by the live target, but the
+  specific request was not transmitted.
+- `blocked-write`: identified as mutating and intentionally not sent.
+- `pending`: a known evidence gap.
+- `superseded`: historical evidence replaced by a stronger capture.
+
+Raw evidence under `captures/raw/` is mode `0600` and gitignored. This matrix
+contains no credential, Cookie value, employee identifier, project identifier,
+requisition identifier, or attachment body.
 
 ## Authentication / session
 
-| Area | UI action | Method | Endpoint | Side effect | State | Evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| Authentication | Open purchase requisition while anonymous | GET | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` | 302 to passport | observed | `captures/playwright/unauth.har` |
-| Authentication | Load passport login page | GET | `https://passport.isstech.com/?DomainUrl=http://ipsapro.isstech.com&ReturnUrl=%2fWebTP%2fPurchaseRequisition` | Sets `ASP.NET_SessionId` (HttpOnly, SameSite=Lax) | observed | `captures/playwright/unauth.har` |
-| Authentication | Login form shape | POST | `https://passport.isstech.com/?DomainUrl=…&ReturnUrl=…` | Session only | observed (form) / pending (success body) | `portal_login.html`, `captures/Login_JS_Index`, unauth HAR HTML |
-| Authentication | Failed credential POST | POST | `https://passport.isstech.com/` (form action `/` after fail) | 302 to `/`, re-render with `flag=0` | observed / superseded for success path | `captures/login_fail_response.html`, `captures/login_fail_followed.html` |
-| Authentication | Successful login | POST + 30x chain | Passport → business host, obtain `.iPSA` | Session only | pending | Needs `captures/raw/YYYYMMDD-login-success.har` |
-| Authentication | Authenticated purchase page | GET | `/WebTP/PurchaseRequisition` | None | observed | `captures/raw/auth_purchase_requisition.html`, `captures/redacted/purchase_requisition_initial_network.json` |
-| Authentication | Reuse observed browser ticket in ordinary HTTP client | GET | `/WebTP/PurchaseRequisition` | None | replayed with imported ticket | task runtime probe, `captures/redacted/auth-cookie-probe.json` |
-| Authentication | Obtain ticket from clean pure-HTTP credential login | POST + redirects | Passport → business host | Session only | pending | Requires successful-login HAR + credentialed smoke |
-
-### Login form fields (passport)
-
-| Field | Role | Notes |
-| --- | --- | --- |
-| `emp_DomainName` | Username | Text input |
-| `emp_Password` | Password | Never store values |
-| `RemeberMe` | Remember me | Typo preserved; submitted only when checked |
-| `DomainUrl` | Target host | e.g. `http://ipsapro.isstech.com` |
-| `ReturnUrl` | Post-login path | e.g. `/WebTP/PurchaseRequisition` |
-
-`flag`, `uname`, `ctip`, `etip`, and `bgstr` are page-level inputs after
-`</form>`. They affect UI/error state but are not successful browser form
-controls and must not be included in the credential POST.
-
-Failed login shows: `用户名或密码错误，请重新登陆！` and redirects with `Object moved to /`.
-
-### Session cookies (names/attrs only)
-
-See `captures/redacted/auth-cookie-probe.json` and `captures/redacted/auth_cookie_metadata.json`.
-Business auth cookie of interest: `.iPSA` on `.isstech.com` (HttpOnly, SameSite=Lax, session).
-
-## Purchase requisition — application view (`Index`)
-
-| Area | UI action | Method | Endpoint | Side effect | State | Evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| PR Application | Shell / default entry | GET | `/WebTP/PurchaseRequisition` | None | observed | auth HTML, initial network JSON |
-| PR Application | Index list | GET | `/WebTP/PurchaseRequisition/Index` | None | static-only / partial observed | auth HTML nav + form action |
-| PR Application | Filter / search (AJAX replace) | POST | `/WebTP/PurchaseRequisition` (`formPurchaseRequisitionIndex`, `data-ajax-method=Post`) | None (read filter) | static-only | auth HTML form attrs |
-| PR Application | Pagination / page size | GET (via `ajaxSubmit` url) | `/WebTP/PurchaseRequisition/Index/{a}/{b}/{c}[/{page}/{size}]` | None | static-only | pager links in auth HTML |
-| PR Application | Sort | GET | `/WebTP/PurchaseRequisition/Index/…/True/…/lastOrderField/{field}` | None | static-only | fields: `PR_RequisitionNo`, `PR_PrjNo`, `PR_PrjName`, `PR_CreaterName`, `PR_CreateDate` |
-| PR Application | Page script | GET | `/WebTP/PurchaseRequisition/JS/Index` | None | observed | `captures/raw/purchase_requisition_index.js` |
-| PR Application | New → project selection | navigation | `/WebTP/PurchaseRequisition/ProjectSelection` (via `iPSA.GoToUrl`) | write-prep UI | static-only / blocked-write if POST later | index JS |
-| PR Application | Edit row | navigation | `/WebTP/PurchaseRequisition/Edit/{id}` | write-prep UI | static-only / blocked-write if POST later | index JS `ajax-data` |
-| PR Application | Delete row | AJAX (default GET) | `/WebTP/PurchaseRequisition/Delete/{id}` | **Mutating** | blocked-write / static-only | index JS `$.ajax('/WebTP/PurchaseRequisition/Delete/'+id)` |
-
-Filter fields on Index form: `PR_PrjNo`, `PR_RequisitionNo`, `btnSearch`.
-
-Grid columns observed (labels only): 项目, 申请单编号, 操作, 单据状态.
-
-## Purchase requisition — other views (nav only so far)
-
-| View | Method | Endpoint | Side effect | State | Evidence |
+| UI action | Method | Endpoint | Side effect | State | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Approval | GET | `/WebTP/PurchaseRequisition/ApprovalIndex` | Unknown until captured | pending / live-blocked | auth HTML nav |
-| Adjustment | GET | `/WebTP/PurchaseRequisition/AdjustIndex` | Unknown until captured | pending / live-blocked | auth HTML nav |
-| Revocation | GET | `/WebTP/PurchaseRequisition/RevocationIndex` | Unknown until captured | pending / live-blocked | auth HTML nav |
-| Search | GET | `/WebTP/PurchaseRequisition/SearchIndex` | Unknown until captured | pending / live-blocked | auth HTML nav |
+| Open purchase requisition while anonymous | GET | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` | Redirect to Passport | observed | `captures/playwright/unauth.har` |
+| Load Passport login | GET | `https://passport.isstech.com/?DomainUrl=...&ReturnUrl=...` | Creates Passport session | observed | unauthenticated HAR and login HTML |
+| Submit credentials in Chrome | POST | `https://passport.isstech.com/?DomainUrl=...&ReturnUrl=...` | Browser session transition | observed | `captures/raw/20260715-login-attempt-01.cdp.json`, redacted protocol JSON |
+| Reach authenticated Portal | GET | `http://ipsapro.isstech.com/portal` | None | observed, HTTP 200 | same CDP capture |
+| Reuse an observed browser ticket with `httpx` | GET | `/WebTP/PurchaseRequisition` | None | replayed with imported ticket | `captures/redacted/auth-cookie-probe.json` |
+| Obtain a ticket using credentials in a clean HTTP process | POST + redirects | Passport to business host | Creates HTTP client session | pending | Run `tools/live_smoke.py` with runtime-only environment variables |
+
+The captured browser credential POST contained these form fields only:
+
+```text
+emp_DomainName
+emp_Password
+RemeberMe
+DomainUrl
+ReturnUrl
+```
+
+`flag`, `uname`, `ctip`, `etip`, and `bgstr` are page-level values outside the
+form and must not be added to the credential POST.
+
+The CDP summary proves a manual credential POST followed by an authenticated
+Portal response. It also records that `.iPSA` was already among the browser's
+request Cookie names, while no `.iPSA` Set-Cookie was observed in that chain.
+Therefore this capture does **not** prove fresh ticket issuance. The clean
+pure-HTTP live smoke remains a separate gate.
+
+## Purchase requisition application view
+
+| UI action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Default entry | GET | `/WebTP/PurchaseRequisition` | None | observed, HTTP 200 | `20260715-purchase-initial-01.cdp.json` |
+| Explicit Index | GET | `/WebTP/PurchaseRequisition/Index` | None | served-shape | authenticated form action and pager assets |
+| Filter | POST | `/WebTP/PurchaseRequisition` | Read-only filter | served-shape | live form has `data-ajax-method=Post` |
+| Page/sort | GET | `/WebTP/PurchaseRequisition/Index/{route-values}` | Read-only page/sort | served-shape | live pager links and Index JavaScript |
+| Page script | GET | `/WebTP/PurchaseRequisition/JS/Index` | None | observed | initial CDP and saved script |
+| New/project selection | navigation | `/WebTP/PurchaseRequisition/ProjectSelection` | Write preparation | served-shape; transport blocked in `CTF_SAFE` | Index JavaScript |
+| Edit | navigation | `/WebTP/PurchaseRequisition/Edit/{id}` | Write preparation | served-shape; transport blocked in `CTF_SAFE` | Index JavaScript |
+| Delete | GET AJAX | `/WebTP/PurchaseRequisition/Delete/{id}` | **Mutating** | blocked-write | Index JavaScript; policy tests prove zero transport hits |
+
+## Read-only runtime views
+
+| View/action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Search initial list | GET | `/WebTP/PurchaseRequisition/SearchIndex` | None | observed, HTTP 200 | `20260715-purchase-search-index-01.cdp.json` |
+| Search empty filter | POST | `/WebTP/PurchaseRequisition/SearchIndex` | Read-only filter | observed, HTTP 200 | `20260715-purchase-search-submit-01.cdp.json` |
+| Search page 2 | POST | `/WebTP/PurchaseRequisition/SearchIndex/0/1/False/2` | Read-only pagination | observed, HTTP 200 | `20260715-purchase-search-page2-01.cdp.json` |
+| Approval list | GET | `/WebTP/PurchaseRequisition/ApprovalIndex` | None | observed, HTTP 200; list empty for current account | `20260715-purchase-approval-index-01.cdp.json` |
+| Adjustment list | GET | `/WebTP/PurchaseRequisition/AdjustIndex` | None | observed, HTTP 200 | `20260715-purchase-adjust-index-01.cdp.json` |
+| Revocation list | GET | `/WebTP/PurchaseRequisition/RevocationIndex` | None | observed, HTTP 200 | `20260715-purchase-revocation-index-01.cdp.json` |
+| Approval/adjustment/revocation filter forms | POST | Corresponding exact `*Index` path | Expected read-only filter | served-shape, not replayed | forms in actively served pages |
+
+Observed `SearchIndex` runtime facts, recorded only as counts and schema:
+
+```text
+total_count = 78
+first_page_items = 10
+columns include status and next approver
+```
+
+## Detail and approval trail
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Open saved detail | GET | `/WebTP/PurchaseRequisition/Detail/{id}` | None | observed, HTTP 200 | `20260715-purchase-detail-01.cdp.json` |
+| Open in-progress detail | GET | `/WebTP/PurchaseRequisition/Detail/{id}` | None | observed, HTTP 200 | `20260715-purchase-in-progress-detail-01.cdp.json` |
+| Detail script | GET | `/WebTP/PurchaseRequisition/JS/Detail` | None | observed | both Detail captures |
+
+The in-progress Detail page yielded 11 basic fields and five approval-trail rows.
+Approval-trail columns are sequence, time, approver, position, action, and
+comment. Values remain in raw evidence only.
 
 ## Attachments
 
-| Area | UI action | Method | Endpoint | Side effect | State | Evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| Attachment | Upload script | GET | `/WebTP/Attachment/js/Upload` | None | observed (script load) | auth HTML, `captures/raw/attachment_upload.js` |
-| Attachment | Upload | POST | `/WebTP/Attachment/Upload/` | **Mutating** | blocked-write / static-only | attachment_upload.js |
-| Attachment | Delete | (from script) | `/WebTP/Attachment/Delete/` | **Mutating** | blocked-write / static-only | attachment_upload.js |
-| Attachment | Download | GET | `/WebTP/Attachment/Download/` | None (read content) | static-only | attachment_upload.js |
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Detail download | GET | `/WebTP/PurchaseRequisition/Download/{id}` | Read attachment | served-shape from live Detail; not transmitted in capture | saved Detail CDP; five IDs parsed without outputting values |
+| Legacy generic download | GET | `/WebTP/Attachment/Download/{id}` | Read attachment | served-shape only | attachment JavaScript |
+| Upload | POST | `/WebTP/Attachment/Upload/{route-values}` | **Mutating** | blocked-write | attachment JavaScript and policy tests |
+| Delete | any | `/WebTP/Attachment/Delete/{route-values}` | **Mutating** | blocked-write | attachment JavaScript and policy tests |
 
-## Shared client libraries
+## Write actions
 
-| Asset | Role | State | Evidence |
-| --- | --- | --- | --- |
-| `/WebTP/Scripts/iPSA_elle.min.js` | `iPSA.GoToUrl`, dialogs, appPath=`/WebTP` | observed | `captures/raw/ipsa_elle.min.js` |
-| `/WebTP/Scripts/jquery.form.min.js` | `ajaxSubmit` for filters/pager | observed | `captures/Scripts_jquery.form.min.js` |
-| `/WebTP/Scripts/MicrosoftAjax.js` | ASP.NET AJAX | observed | `captures/Scripts_MicrosoftAjax.js` |
+| Action family | Example path | State |
+| --- | --- | --- |
+| Create/save/edit | `/WebTP/PurchaseRequisition/Edit/...` or form save action | blocked-write / preview only |
+| Delete | `/WebTP/PurchaseRequisition/Delete/{id}` | blocked-write, including GET |
+| Submit/approve | paths containing `Submit` or `Approve` | blocked-write / preview only |
+| Adjust/revoke | mutating action paths containing `Adjust` or `Revocation` | blocked-write / preview only |
+| Attachment upload/delete | `/WebTP/Attachment/Upload/...`, `/Delete/...` | blocked-write |
+
+Request bodies for these actions have not been transmitted or captured. Any
+future shape discovery must use request-stage pause plus abort and remain in
+`CTF_SAFE`.
 
 ## Safety notes for implementers
 
-1. `GET /WebTP/PurchaseRequisition/Delete/{id}` is a **write**. Policy must block it from live transport.
-2. Unknown endpoints default to deny until classified.
-3. Successful login capture is the next required evidence gap; failed-login artifacts are marked `superseded` for the success path only (still useful for error UX).
-4. Do not put cookie values, passwords, employee names, project numbers, or attachment bodies in this matrix.
-5. Only the application `Index` view is live-enabled. The other four views return `NOT_CAPTURED` until runtime evidence exists.
+1. Classify by exact origin, method, and normalized path. HTTP method alone is
+   insufficient: Search uses read-only POST, while Delete is a mutating GET.
+2. Mutating path rules must run before read allow rules.
+3. Unknown origins, methods, paths, encoded separators, dot segments, and
+   userinfo default to deny.
+4. Live enablement is limited to the exact read paths above. Do not infer a
+   broader controller-prefix allowlist.
+5. The remaining auth gap is clean-process pure-HTTP login, not browser login
+   capture. The remaining protocol gap is intercepted-and-aborted write shape.

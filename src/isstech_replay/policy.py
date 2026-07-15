@@ -116,110 +116,7 @@ def _default_rules() -> tuple[EndpointRule, ...]:
             request_class=RequestClass.ALLOW_LIVE,
             description="Passport static assets",
         ),
-        # --- purchase requisition reads ---
-        EndpointRule(
-            rule_id="pr.entry",
-            action="pr.entry",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(r"^/WebTP/PurchaseRequisition/?$"),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-        ),
-        EndpointRule(
-            rule_id="pr.list_views",
-            action="pr.list",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(
-                r"^/WebTP/PurchaseRequisition/Index"
-                r"(?:/0/1/(?:True|False)"
-                r"(?:/[1-9]\d*/(?:10|15|20|30|50|100)"
-                r"(?:/lastOrderField/(?:PR_RequisitionNo|PR_PrjNo|PR_PrjName|"
-                r"PR_CreaterName|PR_CreateDate))?"
-                r")?"
-                r")?/?$"
-            ),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-            description="List/filter/pager/sort for five PR views",
-        ),
-        EndpointRule(
-            rule_id="pr.filter_post",
-            action="pr.filter",
-            methods=frozenset({"POST"}),
-            host_suffixes=business,
-            path_pattern=_compile(
-                r"^/WebTP/PurchaseRequisition/?$"
-                r"|^/WebTP/PurchaseRequisition/Index/?$"
-            ),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-            description="AJAX filter form posts that only replace list HTML",
-        ),
-        EndpointRule(
-            rule_id="pr.detail_get",
-            action="pr.detail",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(
-                r"^/WebTP/PurchaseRequisition/"
-                r"(?:Details|Detail|View|Display)/[A-Za-z0-9_-]+/?$"
-            ),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-            description="Read-only detail pages when present",
-        ),
-        EndpointRule(
-            rule_id="pr.js",
-            action="pr.script",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(r"^/WebTP/PurchaseRequisition/JS/.+$"),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-        ),
-        EndpointRule(
-            rule_id="webtp.static",
-            action="webtp.static",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(
-                r"^/WebTP/(?:Content|Scripts|fonts)/.+$"
-            ),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-        ),
-        EndpointRule(
-            rule_id="portal.entry",
-            action="portal.entry",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(r"^/Portal/?$"),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-            description="Portal shell entry used for SSO verification",
-        ),
-        # Attachments — download is read; upload/delete are writes
-        EndpointRule(
-            rule_id="attachment.download",
-            action="attachment.download",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(r"^/WebTP/Attachment/Download/[A-Za-z0-9_-]+/?$"),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-        ),
-        EndpointRule(
-            rule_id="attachment.script",
-            action="attachment.script",
-            methods=frozenset({"GET", "HEAD"}),
-            host_suffixes=business,
-            path_pattern=_compile(r"^/WebTP/Attachment/js/.+$"),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-        ),
-        # --- mutating / build-only ---
+        # --- mutating / write-preparation paths (must precede read rules) ---
         EndpointRule(
             rule_id="pr.delete",
             action="pr.delete",
@@ -239,9 +136,9 @@ def _default_rules() -> tuple[EndpointRule, ...]:
                 r"^/WebTP/PurchaseRequisition/"
                 r"(?:Edit/[A-Za-z0-9_-]+|ProjectSelection)/?$"
             ),
-            side_effect=SideEffect.NONE,
-            request_class=RequestClass.ALLOW_LIVE,
-            description="Edit/project-selection page loads are read; subsequent POST is separate",
+            side_effect=SideEffect.UNKNOWN,
+            request_class=RequestClass.BUILD_ONLY,
+            description="Write-preparation UI is outside the CTF_SAFE read-only flow",
         ),
         EndpointRule(
             rule_id="pr.write_post",
@@ -273,6 +170,128 @@ def _default_rules() -> tuple[EndpointRule, ...]:
             path_pattern=_compile(r"^/WebTP/Attachment/Delete(?:/.*)?$"),
             side_effect=SideEffect.MUTATING,
             request_class=RequestClass.BUILD_ONLY,
+        ),
+        # --- purchase requisition reads ---
+        EndpointRule(
+            rule_id="pr.entry",
+            action="pr.entry",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(r"^/WebTP/PurchaseRequisition/?$"),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+        ),
+        EndpointRule(
+            rule_id="pr.list_views",
+            action="pr.list",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/PurchaseRequisition/"
+                r"(?:Index|ApprovalIndex|AdjustIndex|RevocationIndex|SearchIndex)"
+                r"(?:/0/[1-9]\d*/(?:True|False)"
+                r"(?:/[1-9]\d*(?:/(?:10|15|20|30|50|100))?"
+                r"(?:/lastOrderField/(?:PR_RequisitionNo|PR_PrjNo|PR_PrjName|"
+                r"PR_CreaterName|PR_CreateDate))?"
+                r")?"
+                r")?/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="List/filter/pager/sort for five PR views",
+        ),
+        EndpointRule(
+            rule_id="pr.filter_post",
+            action="pr.filter",
+            methods=frozenset({"POST"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/PurchaseRequisition/?$"
+                r"|^/WebTP/PurchaseRequisition/"
+                r"(?:Index|ApprovalIndex|AdjustIndex|RevocationIndex|SearchIndex)"
+                r"(?:/0/[1-9]\d*/(?:True|False)"
+                r"(?:/[1-9]\d*(?:/(?:10|15|20|30|50|100))?"
+                r"(?:/lastOrderField/(?:PR_RequisitionNo|PR_PrjNo|PR_PrjName|"
+                r"PR_CreaterName|PR_CreateDate))?"
+                r")?"
+                r")?/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="AJAX filter form posts that only replace list HTML",
+        ),
+        EndpointRule(
+            rule_id="pr.detail_get",
+            action="pr.detail",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/PurchaseRequisition/Detail/[A-Za-z0-9_-]+/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="Observed read-only Detail page",
+        ),
+        EndpointRule(
+            rule_id="pr.js",
+            action="pr.script",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(r"^/WebTP/PurchaseRequisition/(?:JS|js)/.+$"),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+        ),
+        EndpointRule(
+            rule_id="webtp.static",
+            action="webtp.static",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/(?:Content|Scripts|fonts)/.+$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+        ),
+        EndpointRule(
+            rule_id="portal.entry",
+            action="portal.entry",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(r"^/Portal/?$"),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="Portal shell entry used for SSO verification",
+        ),
+        # Attachments — download is read; upload/delete are writes
+        EndpointRule(
+            rule_id="pr.download",
+            action="attachment.download",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/PurchaseRequisition/Download/[A-Za-z0-9_-]+/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="Observed read-only attachment download route from Detail",
+        ),
+        EndpointRule(
+            rule_id="attachment.download",
+            action="attachment.download",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(r"^/WebTP/Attachment/Download/[A-Za-z0-9_-]+/?$"),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+        ),
+        EndpointRule(
+            rule_id="attachment.script",
+            action="attachment.script",
+            methods=frozenset({"GET", "HEAD"}),
+            host_suffixes=business,
+            path_pattern=_compile(r"^/WebTP/Attachment/js/.+$"),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
         ),
         # catch-all for other hosts in the isstech family still defaults deny
         EndpointRule(

@@ -45,14 +45,14 @@ FastAPI /v1  -->  session store  -->  IsstechClient
 | `api.py` | FastAPI app assembly and `/health` |
 | `config.py` | Base URLs, timeouts, session TTL |
 | `auth.py` | Pure HTTP login and auth detection |
-| `client.py` | Upstream business client |
+| `client.py` | Upstream business client, exact read methods, and bounded pagination |
 | `policy.py` | Method + host + path + side-effect policy |
 | `transport.py` | Sole real network egress |
 | `request_builders.py` | Offline construction of mutating requests |
 | `session_store.py` | Short-lived local Bearer handles (never return `.iPSA`) |
-| `models/` | Auth, purchase, attachment, preview models |
+| `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / purchase / attachment HTML parsers |
-| `routes/` | sessions, purchase-requisitions, attachments, previews |
+| `routes/` | sessions, purchase-requisitions, attachments, previews, work items |
 
 ## Safety model
 
@@ -62,9 +62,11 @@ FastAPI /v1  -->  session store  -->  IsstechClient
    userinfo, unexpected schemes/ports, and unknown endpoints default to deny.
 3. `GET /WebTP/PurchaseRequisition/Delete/{id}` is a **write** (observed as
    `$.ajax('/WebTP/PurchaseRequisition/Delete/'+id)` with no method override).
-4. Mutating builders return a redacted `httpx.Request` preview and never call
+4. `Edit/{id}` and `ProjectSelection` are write-preparation UIs and remain
+   transport-blocked in `CTF_SAFE`, even though page navigation itself is GET.
+5. Mutating builders return a redacted `httpx.Request` preview and never call
    `.send()`.
-5. Local API sessions are random Bearer tokens mapping to in-memory upstream
+6. Local API sessions are random Bearer tokens mapping to in-memory upstream
    cookie jars. Upstream `.iPSA` is never returned to API clients.
 
 ## Evidence pipeline
@@ -77,7 +79,13 @@ FastAPI /v1  -->  session store  -->  IsstechClient
 
 ## Evidence gates
 
-Only the application `Index` view is currently live-enabled. Approval,
-adjustment, revocation, and search return `NOT_CAPTURED` until each has a
-runtime capture and view-specific parser fixture. Write previews remain
-explicitly inferred until request-stage interception supplies their real shape.
+Exact GET paths for application, approval, adjustment, revocation, search, and
+Detail are runtime-captured and live-enabled. Search filter and pagination POST
+shapes are captured; the other list forms are restricted to their exact served
+read-only paths. Write-preparation pages and all mutating actions remain blocked.
+Full-list reads fail closed when a declared total cannot be satisfied, a page
+repeats, totals drift, or the configured page ceiling is reached; partial lists
+are never returned as successful work-item output.
+Write previews stay explicitly inferred until request-stage interception plus
+abort supplies their real shape. Clean-process credential login is still a
+separate live-smoke gate because the browser capture already carried `.iPSA`.

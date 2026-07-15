@@ -1,102 +1,126 @@
-# Successful login capture runbook (step 2)
+# Login evidence and clean-HTTP validation runbook
 
-**Goal:** Capture one clean successful login protocol without committing secrets.
+## Purpose
 
-**Output files (do not overwrite existing raw files):**
+Keep three distinct claims separate:
 
-- `captures/raw/YYYYMMDD-login-success.har` (mode `0600`)
-- `captures/redacted/login-success-protocol.json` (no password, no cookie/ticket values)
-- Update `docs/evidence-manifest.json` with SHA-256 and status
+1. The Passport login form and credential POST shape are known.
+2. A manual Chrome credential POST followed by an authenticated Portal response
+   was captured on `2026-07-15`.
+3. A new pure-HTTP process can obtain its own valid business ticket using runtime
+   credentials.
 
-## Preconditions
+Claims 1 and 2 are complete. Claim 3 remains pending because the captured Chrome
+request already carried a Cookie named `.iPSA`; the capture did not observe a new
+`.iPSA` Set-Cookie in that redirect chain.
 
-- Use a **fresh browser profile** or clear site data for `isstech.com` / `passport.isstech.com`.
-- Account holder enters credentials **manually** (never paste into chat, git, or fixtures).
-- Chrome DevTools → Network: enable **Preserve log**, **Disable cache**.
-- Optional: CDP `Fetch.enable` with request-stage pause for any unexpected POST to business write paths (should not fire during login-only flow).
+## Current evidence
 
-## Capture sequence
+| Artifact | Storage | Rules |
+| --- | --- | --- |
+| Raw CDP login capture | `captures/raw/20260715-login-attempt-01.cdp.json` | Local only, mode `0600`, gitignored |
+| Redacted protocol | `captures/redacted/login-success-protocol.json` | Commit eligible after secret scan |
+| Inventory | `docs/evidence-manifest.json` | Contains hashes and metadata, never values |
 
-1. Open DevTools Network **before** navigation.
-2. Visit: `http://ipsapro.isstech.com/WebTP/PurchaseRequisition`
-3. Confirm 302 → `https://passport.isstech.com/?DomainUrl=...&ReturnUrl=%2fWebTP%2fPurchaseRequisition`
-4. Manually submit valid credentials once.
-5. Wait until the authenticated Purchase Requisition shell loads (title contains `软通智慧科技专业服务系统`, form `formPurchaseRequisitionIndex` present).
-6. Export HAR: save as  
-   `captures/raw/$(date +%Y%m%d)-login-success.har`
-7. Immediately: `chmod 600 captures/raw/*login-success*.har`
+The redacted protocol stores only capture time, allowed URL shapes, methods,
+status codes, form field names, Cookie names/attributes, and the authenticated
+page signal. It never stores credential or Cookie values.
 
-## Redact into protocol JSON
+## Reproduce the redacted protocol
 
-Record **only**:
-
-| Item | What to store |
-| --- | --- |
-| Request chain | method, URL template, status, redirect Location **host+path** (strip query ticket values if any) |
-| Form | action URL template, field **names** |
-| Cookies set | name, domain, path, secure, httpOnly, sameSite, session/persistent — **never values** |
-| Success signals | final business URL path, presence of `.iPSA` name, absence of login form markers |
-| Timing | ISO timestamp |
-
-Suggested shape (fill from HAR with a local script; do not commit intermediate dumps with values):
-
-```json
-{
-  "capturedAt": "YYYY-MM-DDTHH:MM:SSZ",
-  "sourceHar": "captures/raw/YYYYMMDD-login-success.har",
-  "steps": [
-    {"method": "GET", "url": "http://ipsapro.isstech.com/WebTP/PurchaseRequisition", "status": 302, "locationHost": "passport.isstech.com"},
-    {"method": "GET", "url": "https://passport.isstech.com/?DomainUrl=...&ReturnUrl=...", "status": 200},
-    {"method": "POST", "url": "https://passport.isstech.com/...", "status": 302, "setCookieNames": ["..."]},
-    {"method": "GET", "url": "http://ipsapro.isstech.com/...", "status": 200, "authenticatedPage": true}
-  ],
-  "loginForm": {
-    "actionTemplate": "...",
-    "fields": ["emp_DomainName", "emp_Password", "DomainUrl", "ReturnUrl", "RemeberMe (if checked)"],
-    "pageOnlyFieldsOutsideForm": ["flag", "uname", "ctip", "etip", "bgstr"]
-  },
-  "cookies": [],
-  "notes": []
-}
-```
-
-Helper (run locally after HAR exists; prints names only):
+Run from the repository root:
 
 ```bash
 cd /Users/ethan/Documents/isstech
-uv run python tools/redact_login_har.py captures/raw/YYYYMMDD-login-success.har \
-  > captures/redacted/login-success-protocol.json
-chmod 600 captures/raw/*login-success*.har
-shasum -a 256 captures/raw/*login-success*.har captures/redacted/login-success-protocol.json
+tmp_file="$(mktemp)"
+.venv/bin/python tools/redact_login_cdp.py \
+  captures/raw/20260715-login-attempt-01.cdp.json > "$tmp_file"
+cmp "$tmp_file" captures/redacted/login-success-protocol.json
+rm -f "$tmp_file"
+shasum -a 256 \
+  captures/raw/20260715-login-attempt-01.cdp.json \
+  captures/redacted/login-success-protocol.json
 ```
 
-## Live pure-HTTP smoke (after capture)
+Expected SHA-256 values are pinned in `docs/evidence-manifest.json`. `cmp` must
+produce no output and exit zero.
+
+## Run the clean pure-HTTP smoke
+
+The account holder must place credentials only in the current terminal process.
+Do not put them in chat, shell history, source files, `.env`, fixtures, or logs.
 
 ```bash
-export ISSTECH_USERNAME='...'   # runtime only
+cd /Users/ethan/Documents/isstech
+export ISSTECH_USERNAME='...'
 export ISSTECH_PASSWORD='...'
-uv run python - <<'PY'
-import os
-from isstech_replay.auth import login_with_settings
-from isstech_replay.models.purchase import PurchaseView
-client, result = login_with_settings(os.environ["ISSTECH_USERNAME"], os.environ["ISSTECH_PASSWORD"])
-assert result.success and result.session.has_ipsa_cookie
-listing = client.list_view(PurchaseView.APPLICATION)
-print("items", len(listing.items), "total", listing.total_count)
-# prove write still blocked
-from isstech_replay.policy import PolicyViolation
-try:
-    client.get(client.settings.base_url + "/WebTP/PurchaseRequisition/Delete/0")
-except PolicyViolation as e:
-    print("delete_blocked", e.decision.rule_id)
-client.close()
-print("OK")
-PY
-unset ISSTECH_PASSWORD
+.venv/bin/python tools/live_smoke.py
+unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
-## Do not
+Pass signals:
 
-- Commit the HAR or any file containing `emp_Password=...` / `.iPSA=...` values.
-- Re-use failed-login HTML as success evidence (`superseded` for success path).
-- Click delete/submit/approve during this capture.
+```text
+login_success True
+has_ipsa True
+list_items <count>
+delete_blocked pr.delete
+SMOKE_OK
+```
+
+The tool prints Cookie names and aggregate counts only. It starts a new `httpx`
+session, performs one read-only list request, and proves that a Delete URL is
+blocked before reaching transport. Failure exits non-zero.
+
+## Optional clean-browser recapture
+
+This is needed only if a clean browser issuance trace is required in addition to
+the pure-HTTP smoke.
+
+### Website and tools
+
+| Purpose | Value |
+| --- | --- |
+| Start URL | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` |
+| Login host | `https://passport.isstech.com/` |
+| Success host/path | `http://ipsapro.isstech.com/portal` or the requested PurchaseRequisition path |
+| Browser | Chrome with a fresh profile or cleared site data |
+| Capture | Chrome DevTools Network or CDP |
+| UI operation | Computer Use is allowed for navigation and read-only checks; the account holder enters credentials |
+
+### Sequence
+
+1. Create a fresh Chrome profile or clear site data for `isstech.com` and
+   `passport.isstech.com`.
+2. Open DevTools Network before navigation; enable **Preserve log** and
+   **Disable cache**.
+3. Navigate to the PurchaseRequisition start URL and confirm the Passport
+   redirect.
+4. The account holder enters credentials once.
+5. Stop when the authenticated Portal or PurchaseRequisition shell loads.
+6. Export to a new filename under `captures/raw/`; never overwrite existing raw
+   evidence.
+7. Immediately run `chmod 600 captures/raw/<new-file>`.
+8. Redact locally, inspect names-only output, update the manifest hash, then run
+   both verification tools.
+
+For a HAR capture use:
+
+```bash
+.venv/bin/python tools/redact_login_har.py \
+  captures/raw/YYYYMMDD-login-success.har \
+  > /tmp/login-success-protocol.json
+```
+
+Review `/tmp/login-success-protocol.json` before replacing the committed CDP
+summary. The CDP summary remains the baseline unless the new evidence is both
+cleaner and reproducible.
+
+## Prohibited actions
+
+- Do not commit HAR/CDP, credentials, Cookie values, ticket values, or business
+  record contents.
+- Do not click create, save, submit, approve, adjust, revoke, delete, or upload.
+- Do not broaden the endpoint allowlist to make a smoke test pass.
+- Do not treat an authenticated page from an existing browser session as proof
+  that a clean HTTP client can log in.

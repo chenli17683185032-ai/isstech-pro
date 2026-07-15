@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from isstech_replay.api import create_app
 from isstech_replay.auth import login
-from isstech_replay.client import IsstechClient
+from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.config import Settings
 from isstech_replay.session_store import SessionStore
 
@@ -33,7 +33,15 @@ def _list_html() -> str:
 
 
 def _edit_html() -> str:
-    return (FIXTURES_PR / "edit_detail.html").read_text(encoding="utf-8")
+    return (FIXTURES_PR / "detail_readonly.html").read_text(encoding="utf-8")
+
+
+def _search_html() -> str:
+    return (FIXTURES_PR / "list_search.html").read_text(encoding="utf-8")
+
+
+def _approval_html() -> str:
+    return (FIXTURES_PR / "list_approval_empty.html").read_text(encoding="utf-8")
 
 
 def _upstream_handler(request: httpx.Request) -> httpx.Response:
@@ -65,17 +73,23 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
             },
             request=request,
         )
-    if host == "ipsapro.isstech.com" and "/WebTP/PurchaseRequisition/" in path:
-        if path.endswith("/Edit/10001") or "/Edit/" in path:
-            return httpx.Response(200, text=_edit_html(), request=request)
-        return httpx.Response(200, text=_list_html(), request=request)
-    if host == "ipsapro.isstech.com" and path.startswith("/WebTP/Attachment/Download/"):
+    if host == "ipsapro.isstech.com" and path.startswith(
+        "/WebTP/PurchaseRequisition/Download/"
+    ):
         return httpx.Response(
             200,
             content=b"FILEBYTES",
             headers={"content-type": "application/pdf"},
             request=request,
         )
+    if host == "ipsapro.isstech.com" and "/WebTP/PurchaseRequisition/" in path:
+        if "/Detail/" in path:
+            return httpx.Response(200, text=_edit_html(), request=request)
+        if "/ApprovalIndex" in path:
+            return httpx.Response(200, text=_approval_html(), request=request)
+        if "/SearchIndex" in path:
+            return httpx.Response(200, text=_search_html(), request=request)
+        return httpx.Response(200, text=_list_html(), request=request)
     return httpx.Response(404, text=f"no {host}{path}", request=request)
 
 
@@ -112,9 +126,10 @@ def test_health() -> None:
 def test_session_required() -> None:
     app = create_app(session_store=SessionStore())
     with TestClient(app) as client:
-        r = client.get("/v1/purchase-requisitions")
-        assert r.status_code == 401
-        assert r.json()["detail"]["code"] == "AUTH_EXPIRED"
+        for path in ("/v1/purchase-requisitions", "/v1/work-items"):
+            r = client.get(path)
+            assert r.status_code == 401
+            assert r.json()["detail"]["code"] == "AUTH_EXPIRED"
 
 
 def test_create_session_route_returns_local_token_without_upstream_ticket() -> None:
@@ -136,15 +151,16 @@ def test_create_session_route_returns_local_token_without_upstream_ticket() -> N
     assert "TEST_TICKET" not in serialized
 
 
-def test_uncaptured_view_returns_not_captured() -> None:
+def test_captured_views_are_available() -> None:
     client, token = _authed_client()
     with client:
         r = client.get(
             "/v1/purchase-requisitions?view=approval",
             headers={"Authorization": f"Bearer {token}"},
         )
-    assert r.status_code == 501
-    assert r.json()["detail"]["code"] == "NOT_CAPTURED"
+    assert r.status_code == 200
+    assert r.json()["view"] == "approval"
+    assert r.json()["items"] == []
 
 
 def test_list_and_detail_and_attachments() -> None:
@@ -166,17 +182,56 @@ def test_list_and_detail_and_attachments() -> None:
 
         r = client.get("/v1/purchase-requisitions/10001", headers=headers)
         assert r.status_code == 200
-        assert r.json()["fields"]["PR_ID"] == "10001"
+        assert r.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
+        assert len(r.json()["approval_steps"]) == 2
 
         r = client.get("/v1/purchase-requisitions/10001/attachments", headers=headers)
         assert r.status_code == 200
-        assert r.json()[0]["id"] == "9001"
+        assert r.json()[0]["id"] == "99001"
 
-        r = client.get("/v1/attachments/9001/content?meta_only=true", headers=headers)
+        r = client.get("/v1/attachments/99001/content?meta_only=true", headers=headers)
         assert r.status_code == 200
         meta = r.json()
         assert meta["sha256"]
         assert meta["content_length"] == len(b"FILEBYTES")
+
+
+def test_unified_work_items_returns_only_pending_named_approvers() -> None:
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        r = client.get("/v1/work-items", headers=headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_count"] == 1
+    assert body["items"][0]["workflow"] == "purchase_requisition"
+    assert body["items"][0]["external_id"] == "20001"
+    assert body["items"][0]["current_approver"] == "USER_APPROVER"
+    assert body["items"][0]["status"] == "审批中"
+    assert body["items"][0]["source_url"].endswith(
+        "/WebTP/PurchaseRequisition/Detail/20001"
+    )
+    assert isinstance(body["items"][0]["waiting_days"], int)
+
+
+def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
+    client, token = _authed_client()
+    record = client.app.state.session_store.get(token)
+    assert record is not None
+
+    def fail_sync(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise PaginationIncompleteError("pagination incomplete")
+
+    record.client.list_all_purchase_requisitions = fail_sync  # type: ignore[method-assign]
+    with client:
+        response = client.get(
+            "/v1/work-items",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "UPSTREAM_ERROR"
+    assert "pagination incomplete" in response.json()["detail"]["message"]
 
 
 def test_preview_delete_not_sendable() -> None:
@@ -233,9 +288,10 @@ def test_openapi_available() -> None:
         r = client.get("/openapi.json")
         assert r.status_code == 200
         paths = r.json()["paths"]
-        assert "/v1/sessions" in paths
-        assert "/v1/purchase-requisitions" in paths
-        assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
+    assert "/v1/sessions" in paths
+    assert "/v1/purchase-requisitions" in paths
+    assert "/v1/work-items" in paths
+    assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
 
 
 def test_committed_openapi_matches_runtime() -> None:

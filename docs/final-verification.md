@@ -6,16 +6,22 @@
 cd /Users/ethan/Documents/isstech
 uv sync --extra dev
 uv run pytest -q
-uv run ruff check .
+uv run ruff check src tests tools
 uv run python tools/export_openapi.py --check
 uv run python tools/verify_no_secrets.py
+uv run python tools/verify_evidence.py
 git check-ignore -v captures/raw/auth_purchase_requisition.html
+git check-ignore -v captures/raw/20260715-login-attempt-01.cdp.json
+git diff --check
 ```
 
 Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
-the runtime schema, the secret scanner exits zero, and raw paths are ignored.
-Last operator run before the baseline commit: **81 passed**, Ruff clean, no
-warnings.
+the runtime schema, both verification tools exit zero, every raw path is
+ignored, and the diff has no whitespace errors.
+
+Last complete P2 gate on `2026-07-15`: **121 passed**, Ruff clean, OpenAPI
+matched runtime, both verification tools passed, raw permissions/ignore checks
+passed, local API smoke passed, and `git diff --check` passed.
 
 ## Operator evidence check
 
@@ -26,6 +32,19 @@ is not expected to contain those files:
 uv run python tools/verify_evidence.py
 ```
 
+Reproduce the committed login protocol from ignored raw evidence:
+
+```bash
+tmp_file="$(mktemp)"
+uv run python tools/redact_login_cdp.py \
+  captures/raw/20260715-login-attempt-01.cdp.json > "$tmp_file"
+cmp "$tmp_file" captures/redacted/login-success-protocol.json
+rm -f "$tmp_file"
+```
+
+Pass criteria: every manifest hash matches, sensitive artifacts satisfy their
+permission gate, and `cmp` exits zero without output.
+
 ## Local API smoke (no upstream credentials)
 
 ```bash
@@ -35,9 +54,11 @@ curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/openapi.json | head
 # unauthenticated business call must 401
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/v1/purchase-requisitions
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/v1/work-items
 ```
 
-Expected: health `ok`; openapi lists `/v1/*`; list returns **401** with `AUTH_EXPIRED`.
+Expected: health `ok`; OpenAPI lists `/v1/*`; both business calls return **401**
+with `AUTH_EXPIRED`.
 
 ## Pure HTTP login smoke (account holder only)
 
@@ -47,30 +68,17 @@ write them to files under the repo.
 ```bash
 export ISSTECH_USERNAME='...'
 export ISSTECH_PASSWORD='...'
-uv run python - <<'PY'
-import os
-from isstech_replay.auth import login_with_settings
-user = os.environ["ISSTECH_USERNAME"]
-password = os.environ["ISSTECH_PASSWORD"]
-client, result = login_with_settings(user, password)
-print("success", result.success)
-print("cookie_names", result.session.cookie_names_present)
-print("has_ipsa", result.session.has_ipsa_cookie)
-print("final_url_host_only", result.final_url.split('/')[2] if '//' in result.final_url else result.final_url)
-# read-only list
-from isstech_replay.models.purchase import PurchaseListQuery, PurchaseView
-listing = client.list_view(PurchaseView.APPLICATION)
-print("count_items", len(listing.items), "total", listing.total_count)
-client.close()
-PY
+uv run python tools/live_smoke.py
+unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
 Pass criteria:
 
 - New process, **no** Chrome cookie import
-- `has_ipsa` true after login
+- `has_ipsa True` after login
 - List returns without raising
-- No password printed
+- `delete_blocked pr.delete` and `SMOKE_OK`
+- No password or Cookie value printed
 
 ## Zero write egress check
 
@@ -113,16 +121,22 @@ The scanner excludes raw/Playwright evidence and fails on likely live API keys,
 `.iPSA` values, and credential form values. Explicit `TEST_` placeholders are
 allowed for synthetic tests.
 
-## Browser capture still required (not automatable here)
+## Remaining evidence-dependent checks
 
 | Capture | Path | Why |
 | --- | --- | --- |
-| Successful login | `captures/raw/YYYYMMDD-login-success.har` + redacted protocol JSON | Completes auth evidence; failed logins are `superseded` for success path |
-| Five views | `captures/redacted/purchase-*.json` | Approval/Adjust/Revocation/Search still nav-only |
-| Intercepted writes | redacted request templates | Upgrade builder notes from `inferred` → `observed` |
+| Clean pure-HTTP login | Runtime-only credentials; no saved credential artifact | Proves ticket issuance in a new process without Chrome Cookie import |
+| Intercepted writes | Redacted request templates | Upgrade builder notes from `inferred` to `observed`; capture must pause and abort before send |
+| Second role | Read-only comparison evidence | Evaluate read-side IDOR without modifying target state |
 
-Procedure reminder: enable CDP/Fetch abort **before** clicking delete/submit;
-unknown requests default abort; raw files mode `0600`; never commit values.
+Successful Chrome credential POST, Portal response, Search GET/POST/pagination,
+Detail, ApprovalIndex, AdjustIndex, and RevocationIndex were captured on
+`2026-07-15` and are inventoried. No additional browser navigation is required
+for P0-P2.
+
+For future write-shape evidence, enable CDP/Fetch pause and abort **before** any
+click. Unknown requests default abort; raw files remain mode `0600`; never commit
+values.
 
 ## Git baseline commit (if still uncommitted)
 
@@ -138,13 +152,16 @@ bash tools/first-commit.sh
 | --- | --- | --- |
 | Evidence baseline docs | Yes | — |
 | Policy + transport | Yes, including adversarial URL tests | — |
-| Pure HTTP login code | Yes (mocked) | Success HAR + live smoke |
-| Application Index/detail/attachment | Yes (mocked) | Live field parity check |
-| Other four views | Live-blocked (`NOT_CAPTURED`) | View-specific captures |
+| Browser login protocol | Yes, redacted CDP is reproducible | Capture does not prove clean-session ticket issuance |
+| Pure HTTP login code | Yes (mocked) | Runtime credentialed live smoke |
+| Application/Search list and Detail | Yes, with live schema/count parity | Pure-HTTP live smoke |
+| Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
+| Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
-| FastAPI /v1 | Yes; runtime OpenAPI exported | Live session smoke |
+| FastAPI `/v1` | Yes; runtime OpenAPI exported | Credentialed session smoke |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated parts | Credentialed smoke |
 
-Do **not** describe the project as “fully production-finished against live iPSA”
-until the credentialed smoke rows pass and the success-login HAR is inventoried.
+Do **not** describe the project as fully production-finished against live iPSA
+until the credentialed pure-HTTP smoke passes and P3 persistence/diff recovery is
+complete.

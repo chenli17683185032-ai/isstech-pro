@@ -6,6 +6,7 @@ self-declare READ_ONLY to bypass classification.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 from typing import Any
 from urllib.parse import urljoin
@@ -32,6 +33,7 @@ from .validation import require_path_segment
 __all__ = [
     "EvidenceGapError",
     "IsstechClient",
+    "PaginationIncompleteError",
     "PolicyViolation",
     "UnsafeRequestError",
 ]
@@ -39,6 +41,10 @@ __all__ = [
 
 class EvidenceGapError(RuntimeError):
     """Raised when runtime evidence is insufficient to expose a live operation."""
+
+
+class PaginationIncompleteError(RuntimeError):
+    """Raised instead of returning a list that cannot be proven complete."""
 
 
 class IsstechClient:
@@ -111,21 +117,33 @@ class IsstechClient:
         query: PurchaseListQuery | None = None,
     ) -> PurchaseListResult:
         query = query or PurchaseListQuery()
-        if query.view is not PurchaseView.APPLICATION:
-            raise EvidenceGapError(
-                f"{query.view.value} view has not been captured and is not live-enabled"
-            )
         path = query.path()
         url = self._url(path)
-        if query.project_no or query.requisition_no:
-            # AJAX filter posts to the module root (observed form action)
+        if query.view is PurchaseView.APPLICATION and query.has_filters:
+            # Application Index posts filters to the module root.
             response = self.post(
                 self._url("/WebTP/PurchaseRequisition"),
                 data=query.filter_form(),
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            )
+        elif query.view is not PurchaseView.APPLICATION and (
+            query.has_filters or query.has_navigation_state
+        ):
+            # Captured views use ajaxSubmit POST for filters, sort, and pagination.
+            response = self.post(
+                url,
+                data=query.filter_form(navigation=query.has_navigation_state),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
             )
         else:
             response = self.get(url)
+        response.raise_for_status()
         self._ensure_not_login(response)
         return parse_purchase_list(
             response.text,
@@ -135,13 +153,105 @@ class IsstechClient:
             page_size=query.page_size,
         )
 
+    def list_all_purchase_requisitions(
+        self,
+        query: PurchaseListQuery | None = None,
+        *,
+        max_pages: int = 100,
+    ) -> PurchaseListResult:
+        """Read every page with duplicate and page-count guards."""
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        query = query or PurchaseListQuery()
+        items = []
+        seen: set[tuple[str, ...]] = set()
+        first_result: PurchaseListResult | None = None
+        expected_total: int | None = None
+
+        for page in range(1, max_pages + 1):
+            result = self.list_purchase_requisitions(replace(query, page=page))
+            if first_result is None:
+                first_result = result
+            if result.total_count is not None:
+                if expected_total is None:
+                    expected_total = result.total_count
+                elif result.total_count != expected_total:
+                    raise PaginationIncompleteError(
+                        "upstream total changed during pagination: "
+                        f"{expected_total} -> {result.total_count}"
+                    )
+
+            added = 0
+            for item in result.items:
+                if item.id:
+                    key = ("id", item.id)
+                elif item.requisition_no:
+                    key = ("reference", item.requisition_no, item.project_no)
+                else:
+                    raise PaginationIncompleteError(
+                        f"page {page} contains a record without a stable identity"
+                    )
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(item)
+                added += 1
+
+            if expected_total is not None and len(items) > expected_total:
+                raise PaginationIncompleteError(
+                    f"collected {len(items)} records but upstream reported {expected_total}"
+                )
+            if expected_total is not None and len(items) == expected_total:
+                break
+            if not result.items:
+                if expected_total is None:
+                    break
+                raise PaginationIncompleteError(
+                    f"empty page {page} before reported total {expected_total}; "
+                    f"collected {len(items)}"
+                )
+            if added == 0:
+                raise PaginationIncompleteError(
+                    f"page {page} repeated without progress; collected {len(items)}"
+                )
+            if len(result.items) < query.page_size:
+                if expected_total is not None:
+                    raise PaginationIncompleteError(
+                        f"short page {page} before reported total {expected_total}; "
+                        f"collected {len(items)}"
+                    )
+                break
+        else:
+            raise PaginationIncompleteError(
+                f"pagination reached max_pages={max_pages} before completion; "
+                f"collected {len(items)}"
+            )
+
+        if first_result is None:
+            return PurchaseListResult(
+                view=query.view,
+                items=(),
+                page=1,
+                page_size=query.page_size,
+            )
+        return PurchaseListResult(
+            view=query.view,
+            items=tuple(items),
+            total_text=first_result.total_text,
+            total_count=expected_total,
+            page=1,
+            page_size=query.page_size,
+            source_url=first_result.source_url,
+        )
+
     def list_view(self, view: PurchaseView, **kwargs: Any) -> PurchaseListResult:
         return self.list_purchase_requisitions(PurchaseListQuery(view=view, **kwargs))
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:
-        """Load edit page as a read-only field dump (GET Edit/{id} is allowed)."""
+        """Load the captured read-only Detail page."""
         requisition_id = require_path_segment(requisition_id, "requisition_id")
-        response = self.get(self._url(f"/WebTP/PurchaseRequisition/Edit/{requisition_id}"))
+        response = self.get(self._url(f"/WebTP/PurchaseRequisition/Detail/{requisition_id}"))
+        response.raise_for_status()
         self._ensure_not_login(response)
         return parse_purchase_detail(response.text, requisition_id=requisition_id)
 
@@ -151,13 +261,14 @@ class IsstechClient:
 
     def list_attachments_for(self, requisition_id: str) -> tuple[AttachmentMeta, ...]:
         requisition_id = require_path_segment(requisition_id, "requisition_id")
-        response = self.get(self._url(f"/WebTP/PurchaseRequisition/Edit/{requisition_id}"))
+        response = self.get(self._url(f"/WebTP/PurchaseRequisition/Detail/{requisition_id}"))
+        response.raise_for_status()
         self._ensure_not_login(response)
         return parse_attachment_list(response.text, doc_id=requisition_id)
 
     def download_attachment(self, attachment_id: str, *, keep_bytes: bool = False) -> AttachmentContent:
         attachment_id = require_path_segment(attachment_id, "attachment_id")
-        url = self._url(f"/WebTP/Attachment/Download/{attachment_id}")
+        url = self._url(f"/WebTP/PurchaseRequisition/Download/{attachment_id}")
         digest = hashlib.sha256()
         data = bytearray() if keep_bytes else None
         total = 0
@@ -190,6 +301,8 @@ class IsstechClient:
                 html_probe.decode(response.encoding or "utf-8", errors="replace")
             ):
                 raise PermissionError("Upstream returned passport login page")
+            if html_probe is not None:
+                raise ValueError("Attachment download returned HTML instead of a file")
         return AttachmentContent(
             id=attachment_id,
             content_type=content_type,

@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <body>
+    <form id="formSearchIndex" method="post" action="/WebTP/PurchaseRequisition/SearchIndex">
+      <input name="PR_PrjNo" value="">
+      <input name="PR_RequisitionNo" value="">
+      <select name="PR_Status"><option value="" selected>全部</option></select>
+      <input name="NextApproverName" value="">
+      <input name="btnSearch" type="submit" value="查询">
+    </form>
+    <p>总共2条记录，共1页，当前第1页</p>
+    <table class="data-grid">
+      <thead>
+        <tr>
+          <th>操作</th>
+          <th>申请单编号</th>
+          <th>项目编号</th>
+          <th>项目名称</th>
+          <th>申请人</th>
+          <th>申请时间</th>
+          <th>单据状态</th>
+          <th>下一级审批人</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="javascript:;" class="View" ajax-data="20001">查看</a></td>
+          <td>XQ-REDACTED-101</td>
+          <td>PRJ-REDACTED-X</td>
+          <td><span title="REDACTED PROJECT X">REDACTED...</span></td>
+          <td>USER_REQUESTER</td>
+          <td>2026-07-01</td>
+          <td>审批中</td>
+          <td>USER_APPROVER</td>
+        </tr>
+        <tr>
+          <td><a href="javascript:;" class="View" ajax-data="20002">查看</a></td>
+          <td>XQ-REDACTED-102</td>
+          <td>PRJ-REDACTED-Y</td>
+          <td>REDACTED PROJECT Y</td>
+          <td>USER_DONE</td>
+          <td>2026-06-20</td>
+          <td>审批通过</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

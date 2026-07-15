@@ -32,6 +32,7 @@ class PurchaseItemOut(BaseModel):
     creator_name: str = ""
     create_date: str = ""
     status: str = ""
+    next_approver: str = ""
 
 
 class PurchaseListOut(BaseModel):
@@ -44,10 +45,20 @@ class PurchaseListOut(BaseModel):
     source_url: str = ""
 
 
+class PurchaseApprovalStepOut(BaseModel):
+    sequence: str = ""
+    timestamp: str = ""
+    approver_name: str = ""
+    role: str = ""
+    action: str = ""
+    comment: str = ""
+
+
 class PurchaseDetailOut(BaseModel):
     id: str
     fields: dict[str, str] = Field(default_factory=dict)
     html_title: str = ""
+    approval_steps: list[PurchaseApprovalStepOut] = Field(default_factory=list)
 
 
 @router.get("/purchase-requisitions", response_model=PurchaseListOut)
@@ -56,6 +67,8 @@ def list_purchase_requisitions(
     view: str = Query(default="application"),
     project_no: str = Query(default=""),
     requisition_no: str = Query(default=""),
+    status: str = Query(default=""),
+    next_approver: str = Query(default=""),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     sort_field: str | None = Query(default=None),
@@ -72,6 +85,8 @@ def list_purchase_requisitions(
         view=pview,
         project_no=project_no,
         requisition_no=requisition_no,
+        status=status,
+        next_approver=next_approver,
         page=page,
         page_size=page_size,
         sort_field=sort_field,
@@ -95,6 +110,7 @@ def list_purchase_requisitions(
                 creator_name=i.creator_name,
                 create_date=i.create_date,
                 status=i.status,
+                next_approver=i.next_approver,
             )
             for i in result.items
         ]
@@ -129,4 +145,15 @@ def get_purchase_requisition(
         id=detail.id,
         fields=detail.fields,
         html_title=detail.html_title,
+        approval_steps=[
+            PurchaseApprovalStepOut(
+                sequence=step.sequence,
+                timestamp=step.timestamp,
+                approver_name=step.approver_name,
+                role=step.role,
+                action=step.action,
+                comment=step.comment,
+            )
+            for step in detail.approval_steps
+        ],
     )

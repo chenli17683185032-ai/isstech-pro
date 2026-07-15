@@ -34,7 +34,7 @@ class _AttachmentParser(HTMLParser):
             return
         if self._in_row and tag == "a":
             onclick = ad.get("onclick", "")
-            m = re.search(r"download\((\d+)", onclick)
+            m = re.search(r"download\(\s*['\"]?([A-Za-z0-9_-]+)", onclick)
             if m and not self._row_id:
                 self._row_id = m.group(1)
 
@@ -87,8 +87,11 @@ def parse_attachment_list(html: str, *, doc_id: str = "") -> tuple[AttachmentMet
     return tuple(items)
 
 
-_DOWNLOAD_PATH = re.compile(r"/WebTP/Attachment/Download/([^\"'?\s]+)")
+_DOWNLOAD_PATH = re.compile(
+    r"/WebTP/(?:Attachment|PurchaseRequisition)/Download/([^\"'?\s]+)"
+)
+_DOWNLOAD_ONCLICK = re.compile(r"download\(\s*['\"]?([A-Za-z0-9_-]+)")
 
 
 def extract_download_ids(html: str) -> tuple[str, ...]:
-    return tuple(_DOWNLOAD_PATH.findall(html))
+    return tuple(dict.fromkeys((*_DOWNLOAD_PATH.findall(html), *_DOWNLOAD_ONCLICK.findall(html))))

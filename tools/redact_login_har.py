@@ -20,6 +20,8 @@ SAFE_EXACT_PATHS = {
     "/",
     "/Portal",
     "/Portal/",
+    "/portal",
+    "/portal/",
     "/WebTP/PurchaseRequisition",
     "/WebTP/PurchaseRequisition/",
     "/WebTP/PurchaseRequisition/Index",

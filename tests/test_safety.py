@@ -63,6 +63,11 @@ def test_purchase_entry_get_is_allowed() -> None:
         "/WebTP/PurchaseRequisition/Index",
         "/WebTP/PurchaseRequisition/Index/0/1/False/1/15",
         "/WebTP/PurchaseRequisition/Index/0/1/True/1/10/lastOrderField/PR_PrjNo",
+        "/WebTP/PurchaseRequisition/ApprovalIndex",
+        "/WebTP/PurchaseRequisition/AdjustIndex",
+        "/WebTP/PurchaseRequisition/RevocationIndex",
+        "/WebTP/PurchaseRequisition/SearchIndex",
+        "/WebTP/PurchaseRequisition/SearchIndex/0/1/False/2",
     ],
 )
 def test_list_views_are_allowed(path: str) -> None:
@@ -79,14 +84,14 @@ def test_list_views_are_allowed(path: str) -> None:
         "/WebTP/PurchaseRequisition/AdjustIndex",
         "/WebTP/PurchaseRequisition/RevocationIndex",
         "/WebTP/PurchaseRequisition/SearchIndex",
+        "/WebTP/PurchaseRequisition/SearchIndex/0/1/False/2",
     ],
 )
-def test_uncaptured_views_are_blocked(path: str) -> None:
+def test_captured_view_filter_posts_are_allowed(path: str) -> None:
     transport, seen = _tracking_transport()
     with IsstechClient(transport=transport) as client:
-        with pytest.raises(PolicyViolation):
-            client.get(f"{BUSINESS}{path}")
-    assert seen == []
+        client.post(f"{BUSINESS}{path}", data={"btnSearch": "查询"})
+    assert len(seen) == 1
 
 
 def test_filter_post_on_entry_is_allowed() -> None:
@@ -122,10 +127,17 @@ def test_attachment_upload_blocked() -> None:
     assert seen == []
 
 
-def test_attachment_download_allowed() -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/WebTP/Attachment/Download/file-id",
+        "/WebTP/PurchaseRequisition/Download/file-id",
+    ],
+)
+def test_attachment_download_allowed(path: str) -> None:
     transport, seen = _tracking_transport()
     with IsstechClient(transport=transport) as client:
-        client.get(f"{BUSINESS}/WebTP/Attachment/Download/file-id")
+        client.get(f"{BUSINESS}{path}")
     assert len(seen) == 1
 
 
@@ -147,13 +159,57 @@ def test_write_submit_post_blocked() -> None:
     assert seen == []
 
 
-def test_edit_page_get_allowed_but_edit_post_blocked() -> None:
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/WebTP/PurchaseRequisition/Delete/1"),
+        ("POST", "/WebTP/PurchaseRequisition/Submit/1"),
+        ("POST", "/WebTP/PurchaseRequisition/Approve/1"),
+        ("POST", "/WebTP/PurchaseRequisition/Adjust/1"),
+        ("POST", "/WebTP/PurchaseRequisition/Revocation/1"),
+        ("POST", "/WebTP/Attachment/Upload/1"),
+        ("GET", "/WebTP/Attachment/Delete/1"),
+    ],
+)
+def test_all_known_write_families_are_build_only_before_transport(
+    method: str,
+    path: str,
+) -> None:
+    transport, seen = _tracking_transport()
+    policy = EndpointPolicy()
+    decision = policy.decide(method, f"{BUSINESS}{path}")
+    assert decision.request_class is RequestClass.BUILD_ONLY
+    assert decision.side_effect is SideEffect.MUTATING
+
+    with IsstechClient(transport=transport, policy=policy) as client:
+        with pytest.raises(PolicyViolation):
+            client.request(method, f"{BUSINESS}{path}")
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/WebTP/PurchaseRequisition/Edit/1"),
+        ("HEAD", "/WebTP/PurchaseRequisition/ProjectSelection"),
+        ("POST", "/WebTP/PurchaseRequisition/Edit/1"),
+    ],
+)
+def test_write_preparation_pages_are_blocked(method: str, path: str) -> None:
     transport, seen = _tracking_transport()
     with IsstechClient(transport=transport) as client:
-        client.get(f"{BUSINESS}/WebTP/PurchaseRequisition/Edit/1")
         with pytest.raises(PolicyViolation):
-            client.post(f"{BUSINESS}/WebTP/PurchaseRequisition/Edit/1", data={"x": "1"})
-    assert len(seen) == 1
+            client.request(method, f"{BUSINESS}{path}", data={"x": "1"})
+    assert seen == []
+
+
+@pytest.mark.parametrize("alias", ["Details", "View", "Display"])
+def test_unobserved_detail_aliases_are_denied(alias: str) -> None:
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.get(f"{BUSINESS}/WebTP/PurchaseRequisition/{alias}/1")
+    assert seen == []
 
 
 def test_guarded_transport_is_sole_egress() -> None:
