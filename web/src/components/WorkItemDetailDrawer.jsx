@@ -16,6 +16,13 @@ const DETAIL_FIELDS = [
   ["PR_ProcurementManagerName", "采购经理"],
   ["PR_Remark", "备注"],
 ];
+const RELATION_LABELS = {
+  applicant: "发起人",
+  submitter: "提交人",
+  project_manager: "项目经理",
+  procurement_manager: "采购经理",
+  approver: "审批人",
+};
 
 function fieldValue(detail, item, key) {
   const value = detail?.fields?.[key];
@@ -52,6 +59,9 @@ export default function WorkItemDetailDrawer({
 
   const summary = detail?.item || item;
   const steps = detail?.approval_steps || [];
+  const relations = (summary.relations || []).map(
+    (relation) => RELATION_LABELS[relation] || relation,
+  );
 
   return (
     <div
@@ -71,6 +81,12 @@ export default function WorkItemDetailDrawer({
             <span>采购立项申请</span>
             <h2 id="work-detail-title">{summary.reference_no || summary.external_id}</h2>
             <small>{summary.title || "未命名项目"}</small>
+            <div className="work-detail-relations" aria-label="我的关系">
+              <span>我的关系</span>
+              {relations.length
+                ? relations.map((relation) => <strong key={relation}>{relation}</strong>)
+                : <strong>待确认</strong>}
+            </div>
           </div>
           <div className="work-detail-header__actions">
             <StatusTag

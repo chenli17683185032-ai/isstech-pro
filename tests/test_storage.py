@@ -12,12 +12,18 @@ import threading
 
 import pytest
 
-from isstech_replay.models.work_items import ChangeKind, WorkflowKind, WorkflowSnapshot
+from isstech_replay.models.work_items import (
+    ChangeKind,
+    WorkItemRelation,
+    WorkflowKind,
+    WorkflowSnapshot,
+)
 from isstech_replay.storage import (
     SCHEMA_VERSION,
     SnapshotOrderError,
     UnsupportedSchemaVersion,
     WorkflowStorage,
+    cached_workflow_detail,
 )
 
 
@@ -88,6 +94,23 @@ def _apply(
         source_total_count=len(snapshots),
         snapshots=snapshots,
         actionable_count=sum(snapshot.actionable for snapshot in snapshots),
+    )
+
+
+def _with_payload(
+    snapshot: WorkflowSnapshot,
+    payload: dict[str, object],
+) -> WorkflowSnapshot:
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return replace(
+        snapshot,
+        payload_json=payload_json,
+        payload_hash=hashlib.sha256(payload_json.encode()).hexdigest(),
     )
 
 
@@ -165,6 +188,89 @@ def test_current_snapshot_lookup_is_scoped_by_adapter_and_external_id(
         )
         is None
     )
+
+
+def test_payload_v2_restores_relations_and_cached_detail(tmp_path: Path) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    snapshot = _with_payload(
+        _snapshot(T1, external_id="participant-1"),
+        {
+            "payload_version": 2,
+            "relations": ["applicant", "project_manager", "unknown", "applicant"],
+            "detail": {
+                "fields": {"PR_PrjName": "REDACTED PROJECT"},
+                "html_title": "REDACTED DETAIL",
+                "approval_steps": [
+                    {
+                        "sequence": "1",
+                        "timestamp": "2026-07-01 09:00",
+                        "approver_name": "USER_REQUESTER",
+                        "role": "项目经理",
+                        "action": "提交",
+                        "comment": "REDACTED",
+                    }
+                ],
+            },
+        },
+    )
+    _apply(storage, "v2-run", T1, (snapshot,))
+
+    restored = storage.get_current_snapshot(
+        WorkflowKind.PURCHASE_REQUISITION,
+        "participant-1",
+    )
+    assert restored is not None
+    assert restored.relations == (
+        WorkItemRelation.APPLICANT,
+        WorkItemRelation.PROJECT_MANAGER,
+    )
+    detail = cached_workflow_detail(restored)
+    assert detail is not None
+    assert detail.fields == {"PR_PrjName": "REDACTED PROJECT"}
+    assert detail.html_title == "REDACTED DETAIL"
+    assert detail.approval_steps[0].action == "提交"
+
+
+def test_payload_v1_remains_readable_without_relations_or_cached_detail(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    _apply(storage, "v1-run", T1, (_snapshot(T1),))
+
+    restored = storage.current_snapshots()[0]
+
+    assert restored.relations == ()
+    assert cached_workflow_detail(restored) is None
+
+
+def test_complete_measurement_reconciles_current_without_deleting_history(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    _apply(
+        storage,
+        "run-1",
+        T1,
+        (
+            _snapshot(T1, external_id="1"),
+            _snapshot(T1, external_id="2"),
+        ),
+    )
+
+    _apply(storage, "run-2", T2, (_snapshot(T2, external_id="2"),))
+
+    assert [snapshot.external_id for snapshot in storage.current_snapshots()] == ["2"]
+    assert storage.table_count("workflow_snapshots") == 3
+
+
+def test_successful_empty_measurement_clears_adapter_current(tmp_path: Path) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    _apply(storage, "run-1", T1, (_snapshot(T1),))
+
+    _apply(storage, "run-empty", T2, ())
+
+    assert storage.current_snapshots() == ()
+    assert storage.table_count("workflow_snapshots") == 1
 
 
 def test_source_candidate_count_may_exceed_owned_snapshot_count(tmp_path: Path) -> None:

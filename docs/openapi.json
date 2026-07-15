@@ -71,7 +71,7 @@
             "type": "integer"
           },
           "ownership_scope": {
-            "default": "applicant",
+            "default": "participant",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -1823,6 +1823,13 @@
             "title": "Reference No",
             "type": "string"
           },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemRelation"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
           "source_url": {
             "default": "",
             "title": "Source Url",
@@ -1866,6 +1873,17 @@
         ],
         "title": "WorkItemOut",
         "type": "object"
+      },
+      "WorkItemRelation": {
+        "enum": [
+          "applicant",
+          "submitter",
+          "project_manager",
+          "procurement_manager",
+          "approver"
+        ],
+        "title": "WorkItemRelation",
+        "type": "string"
       },
       "WorkflowBody": {
         "properties": {

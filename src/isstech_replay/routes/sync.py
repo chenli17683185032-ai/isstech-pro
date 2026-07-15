@@ -172,6 +172,7 @@ def sync_work_items(
                 waiting_days=item.waiting_days,
                 source_url=item.source_url,
                 category=item.category,
+                relations=list(item.relations),
             )
             for item in result.work_items
         ],

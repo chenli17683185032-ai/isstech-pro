@@ -32,7 +32,10 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "javascript" in js.headers["content-type"]
     assert "待催办" in js.text
     assert "已过审" in js.text
-    assert "范围：我发起的" in js.text
+    assert "范围：我参与的" in js.text
+    assert "我的关系" in js.text
+    assert "项目经理" in js.text
+    assert "localStorage" in js.text
     assert "查看本地详情" in js.text
     assert "审批轨迹" in js.text
     assert "data-selection-source" in js.text

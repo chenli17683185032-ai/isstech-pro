@@ -12,13 +12,14 @@ from isstech_replay.account_scope import account_database_path
 from isstech_replay.errors import local_storage_error, not_found, upstream_error
 from isstech_replay.models.work_items import (
     WorkItemCategory,
+    WorkItemRelation,
     WorkflowKind,
     WorkflowSnapshot,
 )
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
-from isstech_replay.storage import WorkflowStorage
-from isstech_replay.sync import read_account_purchase_requisitions, safe_error_message
+from isstech_replay.storage import WorkflowStorage, cached_workflow_detail
+from isstech_replay.sync import read_account_purchase_measurement, safe_error_message
 from isstech_replay.work_items import purchase_center_items, purchase_item_category
 
 router = APIRouter(tags=["work-items"])
@@ -38,6 +39,7 @@ class WorkItemOut(BaseModel):
     waiting_days: int | None = None
     source_url: str = ""
     category: WorkItemCategory = WorkItemCategory.FOLLOW_UP
+    relations: list[WorkItemRelation] = Field(default_factory=list)
 
 
 class WorkItemListOut(BaseModel):
@@ -55,7 +57,7 @@ class CurrentWorkItemListOut(BaseModel):
     approved_count: int
     synced_at: str | None = None
     source: str = "sqlite_current"
-    ownership_scope: str = "applicant"
+    ownership_scope: str = "participant"
     source_total_count: int | None = None
     matched_count: int = 0
 
@@ -102,6 +104,7 @@ def _snapshot_out(
         ),
         source_url=snapshot.source_url,
         category=category,
+        relations=list(snapshot.relations),
     )
 
 
@@ -183,12 +186,19 @@ def get_work_item_detail(
     if snapshot is None or category is None:
         raise not_found("Work item not found in the current account scope")
 
-    try:
-        detail = session.client.get_purchase_requisition(normalized_id)
-    except PermissionError as exc:
-        raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
-    except Exception as exc:
-        raise upstream_error(f"work-item detail failed: {safe_error_message(exc)}") from exc
+    detail = cached_workflow_detail(snapshot)
+    if detail is None:
+        try:
+            detail = session.client.get_purchase_requisition(normalized_id)
+        except PermissionError as exc:
+            raise upstream_error(
+                str(exc),
+                details={"code_hint": "AUTH_EXPIRED"},
+            ) from exc
+        except Exception as exc:
+            raise upstream_error(
+                f"work-item detail failed: {safe_error_message(exc)}"
+            ) from exc
 
     return WorkItemDetailOut(
         item=_snapshot_out(snapshot, category),
@@ -214,13 +224,17 @@ def list_work_items(
     max_pages: int = Query(default=20, ge=1, le=100),
 ) -> WorkItemListOut:
     try:
-        result = read_account_purchase_requisitions(
+        measurement = read_account_purchase_measurement(
             session.client,
             max_pages=max_pages,
         )
         items = purchase_center_items(
-            result,
+            measurement.result,
             base_url=session.client.settings.base_url,
+            relations_by_id={
+                record.summary.id: record.relations
+                for record in measurement.records
+            },
         )
     except PermissionError as exc:
         raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
@@ -243,6 +257,7 @@ def list_work_items(
                 waiting_days=item.waiting_days,
                 source_url=item.source_url,
                 category=item.category,
+                relations=list(item.relations),
             )
             for item in items
         ],

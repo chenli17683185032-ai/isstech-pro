@@ -25,6 +25,30 @@ def normalize_display_name(value: str) -> str:
     return normalized.casefold()
 
 
+def display_name_matches(value: str, identity: str) -> bool:
+    """Match an exact identity or the same token inside a decorated display name."""
+    try:
+        candidate = normalize_display_name(value)
+        token = normalize_display_name(identity)
+    except ValueError:
+        return False
+    start = 0
+    while True:
+        index = candidate.find(token, start)
+        if index < 0:
+            return False
+        end = index + len(token)
+        before_ok = index == 0 or not (
+            candidate[index - 1].isalnum() or candidate[index - 1] == "_"
+        )
+        after_ok = end == len(candidate) or not (
+            candidate[end].isalnum() or candidate[end] == "_"
+        )
+        if before_ok and after_ok:
+            return True
+        start = index + 1
+
+
 class _PortalGreetingParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()

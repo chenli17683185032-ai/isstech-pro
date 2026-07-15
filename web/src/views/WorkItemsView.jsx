@@ -8,6 +8,17 @@ import WorkItemDetailDrawer from "../components/WorkItemDetailDrawer";
 import { formatDateTime } from "../lib/format";
 
 const CLIPBOARD_TIMEOUT_MS = 3000;
+const RELATION_LABELS = {
+  applicant: "发起人",
+  submitter: "提交人",
+  project_manager: "项目经理",
+  procurement_manager: "采购经理",
+  approver: "审批人",
+};
+
+function relationLabels(item) {
+  return (item.relations || []).map((relation) => RELATION_LABELS[relation] || relation);
+}
 
 async function writeClipboardText(text) {
   if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
@@ -51,7 +62,15 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         || item.waiting_days < 7
       )) return false;
       if (!normalized) return true;
-      return [item.reference_no, item.project_no, item.title, item.current_approver, item.status]
+      return [
+        item.reference_no,
+        item.project_no,
+        item.title,
+        item.applicant,
+        item.current_approver,
+        item.status,
+        ...relationLabels(item),
+      ]
         .some((value) => String(value || "").toLowerCase().includes(normalized));
     });
   }, [data.workItems.items, query, mode]);
@@ -87,11 +106,12 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
     const text = items.map((item) => [
       item.reference_no || item.external_id,
       item.title || item.project_no,
+      `我的关系：${relationLabels(item).join("、") || "待确认"}`,
+      `状态：${item.status || "待确认"}`,
       item.category === "approved" ? "已过审" : (item.current_approver || "待确认"),
       item.category === "approved"
         ? "已完成"
         : (item.waiting_days == null ? "天数未知" : `${item.waiting_days}天`),
-      item.source_url,
     ].join("\t")).join("\n");
     try {
       await writeClipboardText(text);
@@ -112,7 +132,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
       <section className="content-section">
         <div className="work-item-scope">
           <ShieldCheck size={17} aria-hidden="true" />
-          <div><strong>范围：我发起的</strong><span>申请人按当前登录身份精确匹配</span></div>
+          <div><strong>范围：我参与的</strong><span>按发起、提交、项目管理、采购管理和审批关系匹配</span></div>
           <p>
             全量候选 <strong>{data.workItems.source_total_count ?? "--"}</strong>
             <span>·</span>
@@ -138,7 +158,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         {items.length ? (
           <div className="table-wrap">
             <table className="data-table followup-table">
-              <thead><tr><th>编号</th><th>项目</th><th>当前节点</th><th>责任人</th><th>停留</th><th>状态</th><th /></tr></thead>
+              <thead><tr><th>编号</th><th>项目</th><th>我的关系</th><th>当前节点</th><th>责任人</th><th>停留</th><th>状态</th><th /></tr></thead>
               <tbody>
                 {items.map((item) => (
                   <tr
@@ -157,9 +177,16 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
                   >
                     <td className="mono">{item.reference_no || item.external_id}</td>
                     <td><strong>{item.title || "未命名项目"}</strong><span>{item.project_no}</span></td>
+                    <td>
+                      <div className="relation-list">
+                        {relationLabels(item).length
+                          ? relationLabels(item).map((label) => <span className="relation-chip" key={label}>{label}</span>)
+                          : <span className="relation-chip relation-chip--muted">待确认</span>}
+                      </div>
+                    </td>
                     <td>{item.status || "--"}</td>
-                    <td><strong>{item.current_approver || "--"}</strong></td>
-                    <td className={(item.waiting_days || 0) >= 7 ? "waiting waiting--high" : "waiting"}>{item.waiting_days == null ? "--" : `${item.waiting_days} 天`}</td>
+                    <td><strong>{item.category === "approved" ? "流程已完成" : (item.current_approver || "待确认")}</strong></td>
+                    <td className={(item.waiting_days || 0) >= 7 ? "waiting waiting--high" : "waiting"}>{item.category === "approved" ? "已完成" : (item.waiting_days == null ? "--" : `${item.waiting_days} 天`)}</td>
                     <td><StatusTag value={item.category} label={item.category === "approved" ? "已过审" : item.status} /></td>
                     <td className="align-right">
                       <button

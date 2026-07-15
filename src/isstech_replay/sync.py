@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 import hashlib
 import json
@@ -11,9 +11,20 @@ from typing import Any
 from uuid import uuid4
 
 from .client import IsstechClient
-from .models.purchase import PurchaseListQuery, PurchaseListResult, PurchaseView
-from .models.work_items import SyncResult, WorkflowKind, WorkflowSnapshot
-from .parsers.portal import normalize_display_name
+from .models.purchase import (
+    PurchaseListQuery,
+    PurchaseListResult,
+    PurchaseRequisitionDetail,
+    PurchaseRequisitionSummary,
+    PurchaseView,
+)
+from .models.work_items import (
+    SyncResult,
+    WorkItemRelation,
+    WorkflowKind,
+    WorkflowSnapshot,
+)
+from .parsers.portal import display_name_matches
 from .storage import WorkflowStorage
 from .validation import require_path_segment
 from .work_items import (
@@ -27,6 +38,26 @@ _COOKIE_VALUE_RE = re.compile(
     r"(?i)(\.iPSA|emp_Password|password|authorization|cookie|ticket|token)"
     r"=([^;&\s]+)"
 )
+_DETAIL_SCAN_LIMIT = 500
+_DETAIL_READ_ATTEMPTS = 2
+_SUBMIT_ACTIONS = {"提交", "发起", "申请"}
+
+
+class DetailScanIncompleteError(RuntimeError):
+    """A complete account-relevance measurement could not be proven."""
+
+
+@dataclass(frozen=True, slots=True)
+class AccountPurchaseRecord:
+    summary: PurchaseRequisitionSummary
+    detail: PurchaseRequisitionDetail
+    relations: tuple[WorkItemRelation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AccountPurchaseMeasurement:
+    result: PurchaseListResult
+    records: tuple[AccountPurchaseRecord, ...]
 
 
 def utc_iso(value: datetime) -> str:
@@ -54,8 +85,11 @@ def _snapshot_payload(
     source_url: str,
     active: bool,
     actionable: bool,
+    relations: tuple[WorkItemRelation, ...],
+    detail: PurchaseRequisitionDetail,
 ) -> tuple[str, str]:
     payload = {
+        "payload_version": 2,
         "actionable": actionable,
         "active": active,
         "adapter": WorkflowKind.PURCHASE_REQUISITION.value,
@@ -69,6 +103,12 @@ def _snapshot_payload(
         "status": status,
         "submitted_at": submitted_at,
         "title": title,
+        "relations": [relation.value for relation in relations],
+        "detail": {
+            "fields": detail.fields,
+            "html_title": detail.html_title,
+            "approval_steps": [asdict(step) for step in detail.approval_steps],
+        },
     }
     payload_json = json.dumps(
         payload,
@@ -81,14 +121,15 @@ def _snapshot_payload(
 
 
 def purchase_snapshots(
-    result: PurchaseListResult,
+    measurement: AccountPurchaseMeasurement,
     *,
     base_url: str,
     observed_at: str,
     today: date,
 ) -> tuple[WorkflowSnapshot, ...]:
     snapshots: list[WorkflowSnapshot] = []
-    for record in result.items:
+    for measured in measurement.records:
+        record = measured.summary
         external_id = require_path_segment(record.id, "purchase requisition id")
         active = is_purchase_active(record.status)
         actionable = active and bool(record.next_approver)
@@ -110,6 +151,8 @@ def purchase_snapshots(
             source_url=source_url,
             active=active,
             actionable=actionable,
+            relations=measured.relations,
+            detail=measured.detail,
         )
         snapshots.append(
             WorkflowSnapshot(
@@ -128,6 +171,7 @@ def purchase_snapshots(
                 source_url=source_url,
                 active=active,
                 actionable=actionable,
+                relations=measured.relations,
                 payload_json=payload_json,
                 payload_hash=payload_hash,
             )
@@ -141,12 +185,11 @@ def filter_account_purchase_requisitions(
     display_name: str,
 ) -> PurchaseListResult:
     """Filter the global SearchIndex by the authenticated Portal identity."""
-    normalized_display_name = normalize_display_name(display_name)
     owned = tuple(
         record
         for record in search_result.items
         if record.creator_name
-        and normalize_display_name(record.creator_name) == normalized_display_name
+        and display_name_matches(record.creator_name, display_name)
     )
 
     return PurchaseListResult(
@@ -162,20 +205,109 @@ def filter_account_purchase_requisitions(
     )
 
 
-def read_account_purchase_requisitions(
+def _purchase_relations(
+    summary: PurchaseRequisitionSummary,
+    detail: PurchaseRequisitionDetail,
+    *,
+    display_name: str,
+) -> tuple[WorkItemRelation, ...]:
+    relations: set[WorkItemRelation] = set()
+    if display_name_matches(summary.creator_name, display_name):
+        relations.add(WorkItemRelation.APPLICANT)
+    if display_name_matches(
+        detail.fields.get("PR_ProjectManagerName", ""),
+        display_name,
+    ):
+        relations.add(WorkItemRelation.PROJECT_MANAGER)
+    if display_name_matches(
+        detail.fields.get("PR_ProcurementManagerName", ""),
+        display_name,
+    ):
+        relations.add(WorkItemRelation.PROCUREMENT_MANAGER)
+    for step in detail.approval_steps:
+        if not display_name_matches(step.approver_name, display_name):
+            continue
+        action = step.action.strip()
+        if action in _SUBMIT_ACTIONS:
+            relations.add(WorkItemRelation.SUBMITTER)
+        elif action:
+            relations.add(WorkItemRelation.APPROVER)
+    return tuple(relation for relation in WorkItemRelation if relation in relations)
+
+
+def _read_detail_with_retry(
+    client: IsstechClient,
+    external_id: str,
+    *,
+    position: int,
+    total: int,
+) -> PurchaseRequisitionDetail:
+    last_error: Exception | None = None
+    for _ in range(_DETAIL_READ_ATTEMPTS):
+        try:
+            return client.get_purchase_requisition(external_id)
+        except Exception as error:
+            last_error = error
+    raise DetailScanIncompleteError(
+        f"detail scan failed at item {position}/{total} after "
+        f"{_DETAIL_READ_ATTEMPTS} attempts"
+    ) from last_error
+
+
+def read_account_purchase_measurement(
     client: IsstechClient,
     *,
     max_pages: int,
-) -> PurchaseListResult:
+) -> AccountPurchaseMeasurement:
     display_name = client.get_portal_display_name()
     search_result = client.list_all_purchase_requisitions(
         PurchaseListQuery(view=PurchaseView.SEARCH),
         max_pages=max_pages,
     )
-    return filter_account_purchase_requisitions(
-        search_result,
-        display_name=display_name,
+    if len(search_result.items) > _DETAIL_SCAN_LIMIT:
+        raise DetailScanIncompleteError(
+            f"detail scan candidate count exceeds limit {_DETAIL_SCAN_LIMIT}"
+        )
+    records = []
+    total = len(search_result.items)
+    for position, summary in enumerate(search_result.items, start=1):
+        detail = _read_detail_with_retry(
+            client,
+            summary.id,
+            position=position,
+            total=total,
+        )
+        relations = _purchase_relations(
+            summary,
+            detail,
+            display_name=display_name,
+        )
+        if relations:
+            records.append(
+                AccountPurchaseRecord(
+                    summary=summary,
+                    detail=detail,
+                    relations=relations,
+                )
+            )
+    result = PurchaseListResult(
+        view=PurchaseView.SEARCH,
+        items=tuple(record.summary for record in records),
+        total_text=None,
+        total_count=search_result.total_count,
+        page=1,
+        page_size=search_result.page_size,
+        source_url=search_result.source_url,
     )
+    return AccountPurchaseMeasurement(result=result, records=tuple(records))
+
+
+def read_account_purchase_requisitions(
+    client: IsstechClient,
+    *,
+    max_pages: int,
+) -> PurchaseListResult:
+    return read_account_purchase_measurement(client, max_pages=max_pages).result
 
 
 def sync_purchase_requisitions(
@@ -210,12 +342,13 @@ def sync_purchase_requisitions(
         run_started = True
 
     try:
-        result = read_account_purchase_requisitions(client, max_pages=max_pages)
+        measurement = read_account_purchase_measurement(client, max_pages=max_pages)
+        result = measurement.result
         observed_datetime = observed_at or datetime.now(UTC)
         observed_text = utc_iso(observed_datetime)
         effective_today = today or date.today()
         snapshots = purchase_snapshots(
-            result,
+            measurement,
             base_url=client.settings.base_url,
             observed_at=observed_text,
             today=effective_today,
@@ -224,6 +357,9 @@ def sync_purchase_requisitions(
             result,
             base_url=client.settings.base_url,
             today=effective_today,
+            relations_by_id={
+                record.summary.id: record.relations for record in measurement.records
+            },
         )
         if len(snapshots) != len(result.items):
             raise RuntimeError("snapshot normalization lost records")

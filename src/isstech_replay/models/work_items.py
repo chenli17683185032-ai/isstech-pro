@@ -15,6 +15,14 @@ class WorkItemCategory(StrEnum):
     APPROVED = "approved"
 
 
+class WorkItemRelation(StrEnum):
+    APPLICANT = "applicant"
+    SUBMITTER = "submitter"
+    PROJECT_MANAGER = "project_manager"
+    PROCUREMENT_MANAGER = "procurement_manager"
+    APPROVER = "approver"
+
+
 class ChangeKind(StrEnum):
     NEW = "new"
     NODE_CHANGED = "node_changed"
@@ -37,6 +45,7 @@ class WorkItem:
     waiting_days: int | None = None
     source_url: str = ""
     category: WorkItemCategory = WorkItemCategory.FOLLOW_UP
+    relations: tuple[WorkItemRelation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +65,7 @@ class WorkflowSnapshot:
     source_url: str = ""
     active: bool = False
     actionable: bool = False
+    relations: tuple[WorkItemRelation, ...] = ()
     payload_json: str = ""
     payload_hash: str = ""
 

@@ -17,14 +17,29 @@ const viewTitles = {
   "work-items": "催办清单",
 };
 
+function restoreToken() {
+  const current = localStorage.getItem(TOKEN_KEY);
+  if (current) {
+    sessionStorage.removeItem(TOKEN_KEY);
+    return current;
+  }
+  const legacy = sessionStorage.getItem(TOKEN_KEY);
+  if (legacy) {
+    localStorage.setItem(TOKEN_KEY, legacy);
+    sessionStorage.removeItem(TOKEN_KEY);
+  }
+  return legacy;
+}
+
 export default function App() {
-  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState(restoreToken);
   const [session, setSession] = useState(null);
   const [checkingSession, setCheckingSession] = useState(Boolean(token));
   const [activeView, setActiveView] = useState("overview");
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
   const clearSession = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setSession(null);
@@ -58,7 +73,8 @@ export default function App() {
       method: "POST",
       body: { username, password },
     });
-    sessionStorage.setItem(TOKEN_KEY, record.token);
+    localStorage.setItem(TOKEN_KEY, record.token);
+    sessionStorage.removeItem(TOKEN_KEY);
     setToken(record.token);
     setSession(record);
   }

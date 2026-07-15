@@ -31,8 +31,15 @@ from .models.extraction import (
     FieldSpec,
     SourceKind,
 )
-from .models.work_items import ChangeEvent, ChangeKind, WorkflowKind, WorkflowSnapshot
 from .models.materials import Material, MaterialArtifact, MaterialStatus
+from .models.purchase import PurchaseApprovalStep
+from .models.work_items import (
+    ChangeEvent,
+    ChangeKind,
+    WorkItemRelation,
+    WorkflowKind,
+    WorkflowSnapshot,
+)
 
 
 SCHEMA_VERSION = 4
@@ -95,6 +102,84 @@ class DraftStateConflict(StorageError):
 class StorageApplyResult:
     history_rows_inserted: int
     events: tuple[ChangeEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CachedWorkflowDetail:
+    fields: dict[str, str]
+    html_title: str
+    approval_steps: tuple[PurchaseApprovalStep, ...]
+
+
+def _workflow_payload(payload_json: str) -> dict[str, object]:
+    try:
+        payload = json.loads(payload_json)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payload_relations(payload: dict[str, object]) -> tuple[WorkItemRelation, ...]:
+    if payload.get("payload_version") != 2:
+        return ()
+    raw_relations = payload.get("relations")
+    if not isinstance(raw_relations, list):
+        return ()
+    found: set[WorkItemRelation] = set()
+    for value in raw_relations:
+        if not isinstance(value, str):
+            continue
+        try:
+            found.add(WorkItemRelation(value))
+        except ValueError:
+            continue
+    return tuple(relation for relation in WorkItemRelation if relation in found)
+
+
+def cached_workflow_detail(
+    snapshot: WorkflowSnapshot,
+) -> CachedWorkflowDetail | None:
+    payload = _workflow_payload(snapshot.payload_json)
+    if payload.get("payload_version") != 2:
+        return None
+    detail = payload.get("detail")
+    if not isinstance(detail, dict):
+        return None
+    raw_fields = detail.get("fields")
+    html_title = detail.get("html_title")
+    raw_steps = detail.get("approval_steps")
+    if (
+        not isinstance(raw_fields, dict)
+        or not isinstance(html_title, str)
+        or not isinstance(raw_steps, list)
+        or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw_fields.items()
+        )
+    ):
+        return None
+
+    step_fields = (
+        "sequence",
+        "timestamp",
+        "approver_name",
+        "role",
+        "action",
+        "comment",
+    )
+    steps: list[PurchaseApprovalStep] = []
+    for raw_step in raw_steps:
+        if not isinstance(raw_step, dict):
+            return None
+        values = {field: raw_step.get(field, "") for field in step_fields}
+        if any(not isinstance(value, str) for value in values.values()):
+            return None
+        steps.append(PurchaseApprovalStep(**values))
+    return CachedWorkflowDetail(
+        fields=dict(raw_fields),
+        html_title=html_title,
+        approval_steps=tuple(steps),
+    )
 
 
 @contextmanager
@@ -303,6 +388,17 @@ class WorkflowStorage:
                         f"source_total_count={source_total_count} is smaller than "
                         f"snapshot_count={len(snapshots)}"
                     )
+                newer_current = connection.execute(
+                    "SELECT external_id, last_seen_at FROM workflow_current "
+                    "WHERE adapter = ? AND last_seen_at > ? LIMIT 1",
+                    (run["adapter"], observed_at),
+                ).fetchone()
+                if newer_current is not None:
+                    raise SnapshotOrderError(
+                        f"measurement {observed_at} predates current "
+                        f"{newer_current['last_seen_at']} for "
+                        f"{run['adapter']}/{newer_current['external_id']}"
+                    )
 
                 for snapshot in snapshots:
                     self._validate_snapshot(snapshot, observed_at=observed_at)
@@ -347,6 +443,20 @@ class WorkflowStorage:
                         self._insert_event(connection, run_id, current, snapshot, event)
                         events.append(event)
                     self._upsert_current(connection, run_id, snapshot)
+
+                current_ids = [external_id for _, external_id in seen]
+                if current_ids:
+                    placeholders = ",".join("?" for _ in current_ids)
+                    connection.execute(
+                        "DELETE FROM workflow_current WHERE adapter = ? "
+                        f"AND external_id NOT IN ({placeholders})",
+                        (run["adapter"], *current_ids),
+                    )
+                else:
+                    connection.execute(
+                        "DELETE FROM workflow_current WHERE adapter = ?",
+                        (run["adapter"],),
+                    )
 
                 cursor = connection.execute(
                     "UPDATE sync_runs SET status = 'succeeded', observed_at = ?, "
@@ -692,6 +802,8 @@ class WorkflowStorage:
 
     @staticmethod
     def _snapshot_from_current(row: sqlite3.Row) -> WorkflowSnapshot:
+        payload_json = row["payload_json"]
+        relations = _payload_relations(_workflow_payload(payload_json))
         return WorkflowSnapshot(
             adapter=WorkflowKind(row["adapter"]),
             external_id=row["external_id"],
@@ -708,7 +820,8 @@ class WorkflowStorage:
             source_url=row["source_url"],
             active=bool(row["active"]),
             actionable=bool(row["actionable"]),
-            payload_json=row["payload_json"],
+            relations=relations,
+            payload_json=payload_json,
             payload_hash=row["payload_hash"],
         )
 

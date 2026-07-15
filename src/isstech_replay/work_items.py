@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from .models.purchase import PurchaseListResult, PurchaseRequisitionSummary
-from .models.work_items import WorkItem, WorkItemCategory, WorkflowKind
+from .models.work_items import (
+    WorkItem,
+    WorkItemCategory,
+    WorkItemRelation,
+    WorkflowKind,
+)
 from .validation import require_path_segment
 
 
@@ -39,6 +44,7 @@ def _purchase_item(
     category: WorkItemCategory,
     base_url: str,
     today: date,
+    relations: tuple[WorkItemRelation, ...] = (),
 ) -> WorkItem:
     external_id = require_path_segment(record.id, "purchase requisition id")
     return WorkItem(
@@ -63,6 +69,7 @@ def _purchase_item(
             f"{base_url.rstrip('/')}/WebTP/PurchaseRequisition/Detail/{external_id}"
         ),
         category=category,
+        relations=relations,
     )
 
 
@@ -81,6 +88,7 @@ def purchase_follow_up_items(
     *,
     base_url: str,
     today: date | None = None,
+    relations_by_id: dict[str, tuple[WorkItemRelation, ...]] | None = None,
 ) -> tuple[WorkItem, ...]:
     """Return only records that are actively waiting on a named approver."""
     current_date = today or date.today()
@@ -98,6 +106,7 @@ def purchase_follow_up_items(
                 category=category,
                 base_url=base_url,
                 today=current_date,
+                relations=(relations_by_id or {}).get(record.id, ()),
             )
         )
     return tuple(
@@ -117,6 +126,7 @@ def purchase_center_items(
     *,
     base_url: str,
     today: date | None = None,
+    relations_by_id: dict[str, tuple[WorkItemRelation, ...]] | None = None,
 ) -> tuple[WorkItem, ...]:
     current_date = today or date.today()
     items = []
@@ -133,6 +143,7 @@ def purchase_center_items(
                 category=category,
                 base_url=base_url,
                 today=current_date,
+                relations=(relations_by_id or {}).get(record.id, ()),
             )
         )
     return tuple(

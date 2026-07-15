@@ -14,15 +14,24 @@ from isstech_replay.account_scope import account_database_path, account_runtime_
 from isstech_replay.client import PaginationIncompleteError
 from isstech_replay.config import Settings
 from isstech_replay.models.purchase import (
+    PurchaseApprovalStep,
     PurchaseListQuery,
     PurchaseListResult,
+    PurchaseRequisitionDetail,
     PurchaseRequisitionSummary,
     PurchaseView,
 )
-from isstech_replay.models.work_items import ChangeKind, WorkItem, WorkflowKind
+from isstech_replay.models.work_items import (
+    ChangeKind,
+    WorkItem,
+    WorkItemRelation,
+    WorkflowKind,
+)
 from isstech_replay.storage import WorkflowStorage
 from isstech_replay.sync import (
+    DetailScanIncompleteError,
     filter_account_purchase_requisitions,
+    read_account_purchase_measurement,
     sync_purchase_requisitions,
 )
 from tools import sync_work_items as cli
@@ -73,15 +82,25 @@ class FakeClient:
         self,
         result: PurchaseListResult | None = None,
         error: Exception | None = None,
+        *,
+        display_name: str = "USER_REQUESTER",
+        details: dict[
+            str,
+            PurchaseRequisitionDetail | list[PurchaseRequisitionDetail | Exception],
+        ]
+        | None = None,
     ) -> None:
         self.settings = Settings(base_url="http://ipsapro.isstech.com")
         self.result = result or _result()
         self.error = error
+        self.display_name = display_name
+        self.details = details or {}
         self.calls: list[tuple[PurchaseView, int]] = []
+        self.detail_calls: list[str] = []
         self.closed = False
 
     def get_portal_display_name(self) -> str:
-        return "USER_REQUESTER"
+        return self.display_name
 
     def list_all_purchase_requisitions(
         self,
@@ -94,6 +113,17 @@ class FakeClient:
         if self.error is not None:
             raise self.error
         return self.result
+
+    def get_purchase_requisition(self, external_id: str) -> PurchaseRequisitionDetail:
+        self.detail_calls.append(external_id)
+        configured = self.details.get(external_id)
+        if isinstance(configured, list):
+            if not configured:
+                raise AssertionError(f"no configured detail result left for {external_id}")
+            configured = configured.pop(0)
+        if isinstance(configured, Exception):
+            raise configured
+        return configured or PurchaseRequisitionDetail(id=external_id)
 
     def close(self) -> None:
         self.closed = True
@@ -189,6 +219,136 @@ def test_sync_preserves_global_candidate_count_after_account_filter(
     assert run is not None
     assert run["source_total_count"] == 78
     assert run["observed_count"] == 1
+
+
+def test_measurement_keeps_each_proven_participant_relation() -> None:
+    identity = "ACCOUNT_1"
+    summaries = (
+        PurchaseRequisitionSummary(id="applicant", creator_name=identity),
+        PurchaseRequisitionSummary(id="submitter", creator_name="OTHER"),
+        PurchaseRequisitionSummary(id="project-manager", creator_name="OTHER"),
+        PurchaseRequisitionSummary(id="procurement-manager", creator_name="OTHER"),
+        PurchaseRequisitionSummary(id="approver", creator_name="OTHER"),
+        PurchaseRequisitionSummary(id="unrelated", creator_name="OTHER"),
+    )
+    source = PurchaseListResult(
+        view=PurchaseView.SEARCH,
+        items=summaries,
+        total_count=len(summaries),
+    )
+    details = {
+        "submitter": PurchaseRequisitionDetail(
+            id="submitter",
+            approval_steps=(
+                PurchaseApprovalStep(approver_name=identity, action="提交"),
+            ),
+        ),
+        "project-manager": PurchaseRequisitionDetail(
+            id="project-manager",
+            fields={"PR_ProjectManagerName": f"Current User ({identity})"},
+        ),
+        "procurement-manager": PurchaseRequisitionDetail(
+            id="procurement-manager",
+            fields={"PR_ProcurementManagerName": identity},
+        ),
+        "approver": PurchaseRequisitionDetail(
+            id="approver",
+            approval_steps=(
+                PurchaseApprovalStep(approver_name=identity, action="同意"),
+            ),
+        ),
+    }
+
+    measurement = read_account_purchase_measurement(
+        FakeClient(source, display_name=identity, details=details),  # type: ignore[arg-type]
+        max_pages=20,
+    )
+
+    assert {
+        record.summary.id: record.relations for record in measurement.records
+    } == {
+        "applicant": (WorkItemRelation.APPLICANT,),
+        "submitter": (WorkItemRelation.SUBMITTER,),
+        "project-manager": (WorkItemRelation.PROJECT_MANAGER,),
+        "procurement-manager": (WorkItemRelation.PROCUREMENT_MANAGER,),
+        "approver": (WorkItemRelation.APPROVER,),
+    }
+    assert measurement.result.total_count == len(summaries)
+
+
+def test_detail_read_retries_once_then_keeps_complete_measurement() -> None:
+    source = PurchaseListResult(
+        view=PurchaseView.SEARCH,
+        items=(PurchaseRequisitionSummary(id="retry", creator_name="ACCOUNT_1"),),
+        total_count=1,
+    )
+    client = FakeClient(
+        source,
+        display_name="ACCOUNT_1",
+        details={
+            "retry": [
+                RuntimeError("temporary detail failure"),
+                PurchaseRequisitionDetail(id="retry", fields={"Field": "Value"}),
+            ]
+        },
+    )
+
+    measurement = read_account_purchase_measurement(  # type: ignore[arg-type]
+        client,
+        max_pages=20,
+    )
+
+    assert [record.summary.id for record in measurement.records] == ["retry"]
+    assert client.detail_calls == ["retry", "retry"]
+
+
+def test_detail_read_failure_aborts_run_and_preserves_previous_current(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    sync_purchase_requisitions(
+        FakeClient(),  # type: ignore[arg-type]
+        storage=storage,
+        observed_at=OBSERVED_1,
+        run_id="complete-run",
+    )
+    failing = FakeClient(
+        details={
+            "1": [RuntimeError("first"), RuntimeError("second")],
+        }
+    )
+
+    with pytest.raises(DetailScanIncompleteError, match="item 1/2"):
+        sync_purchase_requisitions(
+            failing,  # type: ignore[arg-type]
+            storage=storage,
+            observed_at=OBSERVED_2,
+            run_id="failed-detail-run",
+        )
+
+    assert failing.detail_calls == ["1", "1"]
+    assert {item.external_id for item in storage.current_snapshots()} == {"1", "2"}
+    assert storage.get_run("failed-detail-run")["status"] == "failed"  # type: ignore[index]
+
+
+def test_detail_scan_limit_fails_before_any_detail_request() -> None:
+    summaries = tuple(
+        PurchaseRequisitionSummary(id=str(index), creator_name="ACCOUNT_1")
+        for index in range(501)
+    )
+    client = FakeClient(
+        PurchaseListResult(
+            view=PurchaseView.SEARCH,
+            items=summaries,
+            total_count=len(summaries),
+        ),
+        display_name="ACCOUNT_1",
+    )
+
+    with pytest.raises(DetailScanIncompleteError, match="exceeds limit 500"):
+        read_account_purchase_measurement(client, max_pages=100)  # type: ignore[arg-type]
+
+    assert client.detail_calls == []
 
 
 def test_same_state_next_day_updates_age_without_change_event(tmp_path: Path) -> None:

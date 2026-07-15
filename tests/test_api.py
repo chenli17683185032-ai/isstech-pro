@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import sqlite3
 
@@ -290,6 +291,8 @@ def test_unified_work_items_returns_owned_follow_up_and_approved_records() -> No
     assert approved["current_approver"] == ""
     assert approved["waiting_days"] is None
     assert {item["external_id"] for item in body["items"]} == {"10001", "10002"}
+    assert follow_up["relations"] == ["applicant"]
+    assert approved["relations"] == ["applicant"]
 
 
 def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
@@ -338,13 +341,14 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert current.json()["total_count"] == 2
     assert current.json()["follow_up_count"] == 1
     assert current.json()["approved_count"] == 1
-    assert current.json()["ownership_scope"] == "applicant"
+    assert current.json()["ownership_scope"] == "participant"
     assert current.json()["source_total_count"] == 2
     assert current.json()["matched_count"] == 2
     assert {item["category"] for item in current.json()["items"]} == {
         "follow_up",
         "approved",
     }
+    assert all(item["relations"] == ["applicant"] for item in current.json()["items"])
     assert runs.status_code == 200
     assert len(runs.json()) == 2
     assert runs.json()[0]["status"] == "succeeded"
@@ -380,13 +384,30 @@ def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
 
         record.client.get_purchase_requisition = tracked_detail  # type: ignore[method-assign]
         owned = client.get("/v1/work-items/10001/detail", headers=headers)
-        missing = client.get("/v1/work-items/not-owned/detail", headers=headers)
-        blank = client.get("/v1/work-items/%20/detail", headers=headers)
+        assert detail_calls == []
 
+        legacy_payload = json.dumps(
+            {"payload_version": 1},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        legacy_hash = hashlib.sha256(legacy_payload.encode()).hexdigest()
         scoped_database = account_database_path(
             "alice",
             base_database_path=database,
         )
+        with sqlite3.connect(scoped_database) as connection:
+            connection.execute(
+                "UPDATE workflow_current SET payload_json = ?, payload_hash = ? "
+                "WHERE external_id = '10001'",
+                (legacy_payload, legacy_hash),
+            )
+            connection.commit()
+        legacy = client.get("/v1/work-items/10001/detail", headers=headers)
+        missing = client.get("/v1/work-items/not-owned/detail", headers=headers)
+        blank = client.get("/v1/work-items/%20/detail", headers=headers)
+
         with sqlite3.connect(scoped_database) as connection:
             connection.execute(
                 "UPDATE workflow_current SET status = '已保存', actionable = 0 "
@@ -400,6 +421,8 @@ def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
     assert owned.json()["item"]["category"] == "approved"
     assert owned.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
     assert len(owned.json()["approval_steps"]) == 2
+    assert legacy.status_code == 200
+    assert legacy.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
     assert missing.status_code == 404
     assert blank.status_code == 404
     assert hidden.status_code == 404
