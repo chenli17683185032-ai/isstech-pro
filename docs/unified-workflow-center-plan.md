@@ -11,7 +11,7 @@
 | 仓库 | `/Users/ethan/Documents/isstech` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
 | 当前分支 | `main` |
-| 当前总阶段 | `P6 已完成，准备阶段提交` |
+| 当前总阶段 | `P8 每日只读同步调度` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
 
@@ -53,9 +53,8 @@
 
 ### 0.2 当前未提交工作树
 
-P5 已提交为 `68f57b0 Add evidence-backed material field extraction`。当前未提交
-工作树只包含 P6 schema v4、状态服务、draft API、测试和文档；不得混入 P8
-调度或任何 P7 上游执行代码。
+P6 已提交为 `3c13ed8 Add audited human review draft state machine`。P7 仍为
+BLOCKED；当前只推进 P8 只读同步调度，不得增加任何上游写动作。
 
 ### 0.3 最近一次验证结果
 
@@ -823,7 +822,7 @@ no P6 route can reach GuardedTransport or adapter submit
 
 ## P8 每日调度
 
-状态：`TODO`
+状态：`IN_PROGRESS`
 
 ### 设施
 
@@ -832,12 +831,76 @@ no P6 route can reach GuardedTransport or adapter submit
 - 默认每天工作日 08:30，最终时间由用户确认。
 - 凭据优先系统钥匙串或受限环境注入，不写 plist 明文。
 
+### 修改文件
+
+```text
+ops/com.isstech.workflow-center.sync.plist
+tools/scheduled_sync.py
+tools/configure_sync_keychain.py
+tools/install_launch_agent.py
+tests/test_scheduled_sync.py
+README.md
+docs/architecture.md
+docs/final-verification.md
+```
+
+### 最小调度闭环
+
+```text
+launchd 工作日 08:30 唤醒
+→ tools/scheduled_sync.py
+→ macOS Keychain 限时读取 username/password
+→ 子进程调用现有 tools/sync_work_items.py --json --csv
+→ 现有完整翻页/SQLite 事务/summary/CSV 路径
+→ wrapper 只记录脱敏计数与退出状态
+→ 非零退出供 launchctl 和人工排障
+```
+
+1. 调度 wrapper 不复制同步逻辑，必须调用手工同步的同一 CLI 文件。
+2. plist 只包含绝对 Python/脚本/工作目录、日历和非敏感参数；不得包含
+   username、password、Cookie、ticket 或 AI key。
+3. 两个 iPSA 凭据值放 macOS Keychain，service 名固定，account 使用本机
+   登录用户名；配置工具使用交互输入，不接受密码命令行参数。
+4. Keychain 读取、同步子进程和 `launchctl` 操作全部有 timeout；超时后退出，
+   不能等待用户操作无限挂起。
+5. wrapper 捕获同步 CLI 的 JSON/stdout，不把完整 work item 写普通 launchd
+   日志；仅将 run_id、status、计数、时间和脱敏错误追加到 mode `0600`
+   `data/logs/scheduled-sync.log`。
+6. LaunchAgent stdout/stderr 指向 `/dev/null`，可观察性由受限日志、SQLite
+   sync run 和 `data/runs/<run-id>/summary.json` 提供。
+7. 安装工具用 `plistlib` 解析/改写模板，原子写入
+   `~/Library/LaunchAgents/com.isstech.workflow-center.sync.plist`，mode `0600`；
+   支持 `--dry-run`、自定义 hour/minute、bootstrap 和 uninstall。
+8. 默认周一至周五 08:30；在用户确认其他时间前不擅自改变该默认值。
+9. 当前无运行时凭据时只完成代码、mock/本地验证和安装 dry-run，不加载一个
+   每天必然失败的真实 agent。实际 bootstrap 是独立人工验收门禁。
+
+### 保存位置
+
+```text
+仓库模板: ops/com.isstech.workflow-center.sync.plist
+安装文件: ~/Library/LaunchAgents/com.isstech.workflow-center.sync.plist
+受限日志: data/logs/scheduled-sync.log
+同步状态: data/workflow-center.sqlite3
+运行摘要: data/runs/<run-id>/summary.json
+待办导出: data/exports/YYYY-MM-DD-work-items.csv
+```
+
+### 本阶段网站与工具
+
+- 不需要打开网站或 Computer Use；真实执行仍是现有纯 HTTP 只读客户端。
+- 使用 `plistlib`、`launchctl print/bootstrap/bootout`、macOS `security`、
+  `pytest` mock subprocess、`plutil -lint` 和一次安装 `--dry-run` 验证。
+- 凭据配置完成后的 live gate 只读取 SearchIndex，不访问 P7 写路径。
+
 ### 验收
 
 ```text
 manual CLI and scheduled CLI execute same code path
 app closed时 schedule still works
 failure has exit code, run record and可定位日志
+plist/log contain no credential values
+keychain/subprocess timeout cannot hang indefinitely
 ```
 
 ## P9 第二个流程适配器
@@ -931,9 +994,9 @@ failure has exit code, run record and可定位日志
 | 9 | `DONE` | P5 AI 抽取接口与来源证据 | 205 tests + 离线 extraction + wheel 检查通过 |
 | 10 | `DONE` | P5 阶段性提交 | `68f57b0 Add evidence-backed material field extraction` |
 | 11 | `DONE` | P6 人工审阅 | 216 tests + v4 migration + API/state/audit 门禁通过 |
-| 12 | `IN_PROGRESS` | P6 阶段性提交 | 提交只包含 P6 代码、migration、文档和测试 |
+| 12 | `DONE` | P6 阶段性提交 | `3c13ed8 Add audited human review draft state machine` |
 | 13 | `BLOCKED` | P7 真实一键提交 | 等待明确写授权 |
-| 14 | `TODO` | P8 每日调度 | 手动与调度同路径、失败可见 |
+| 14 | `IN_PROGRESS` | P8 每日调度 | 手动与调度同路径、失败可见 |
 
 ---
 
