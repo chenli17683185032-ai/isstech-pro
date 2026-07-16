@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -19,8 +18,8 @@ from isstech_replay.models.work_items import (
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
 from isstech_replay.storage import WorkflowStorage, cached_workflow_detail
-from isstech_replay.sync import read_account_purchase_measurement, safe_error_message
-from isstech_replay.work_items import purchase_center_items, purchase_item_category
+from isstech_replay.sync import safe_error_message, sync_procurement_workflows
+from isstech_replay.work_items import visible_item_category
 
 router = APIRouter(tags=["work-items"])
 
@@ -28,6 +27,7 @@ router = APIRouter(tags=["work-items"])
 class WorkItemOut(BaseModel):
     key: str
     workflow: str
+    workflow_label: str
     external_id: str
     reference_no: str = ""
     project_no: str = ""
@@ -47,6 +47,7 @@ class WorkItemListOut(BaseModel):
     total_count: int
     follow_up_count: int
     approved_count: int
+    other_count: int = 0
     synced_at: str
 
 
@@ -55,11 +56,14 @@ class CurrentWorkItemListOut(BaseModel):
     total_count: int
     follow_up_count: int
     approved_count: int
+    other_count: int = 0
     synced_at: str | None = None
     source: str = "sqlite_current"
-    ownership_scope: str = "participant"
+    ownership_scope: str = "account_visible"
     source_total_count: int | None = None
     matched_count: int = 0
+    workflow_counts: dict[str, int] = Field(default_factory=dict)
+    source_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class WorkItemApprovalStepOut(BaseModel):
@@ -85,6 +89,7 @@ def _snapshot_out(
     return WorkItemOut(
         key=f"{snapshot.adapter.value}:{snapshot.external_id}",
         workflow=snapshot.adapter.value,
+        workflow_label=snapshot.adapter.label,
         external_id=snapshot.external_id,
         reference_no=snapshot.reference_no,
         project_no=snapshot.project_no,
@@ -116,27 +121,32 @@ def list_current_work_items(
         storage = WorkflowStorage(account_database_path(session.username))
         snapshots = storage.current_snapshots()
         categorized = [
-            (snapshot, category)
-            for snapshot in snapshots
-            if (
-                category := purchase_item_category(
+            (
+                snapshot,
+                visible_item_category(
                     snapshot.status,
                     has_current_approver=snapshot.actionable,
-                )
+                ),
             )
-            is not None
+            for snapshot in snapshots
         ]
-        latest_run = storage.latest_successful_run()
-        synced_at = (
-            str(latest_run["observed_at"])
-            if latest_run is not None and latest_run.get("observed_at") is not None
-            else None
-        )
-        source_total_count = (
-            int(latest_run["source_total_count"])
-            if latest_run is not None and latest_run.get("source_total_count") is not None
-            else None
-        )
+        latest_runs = storage.latest_successful_runs_by_adapter()
+        source_counts = {
+            adapter.value: int(record["source_total_count"])
+            for adapter, record in latest_runs.items()
+            if record.get("source_total_count") is not None
+        }
+        observed_values = [
+            str(record["observed_at"])
+            for record in latest_runs.values()
+            if record.get("observed_at") is not None
+        ]
+        synced_at = min(observed_values) if observed_values else None
+        workflow_counts = {
+            workflow.value: sum(snapshot.adapter is workflow for snapshot in snapshots)
+            for workflow in WorkflowKind
+            if any(snapshot.adapter is workflow for snapshot in snapshots)
+        }
     except Exception as exc:
         raise local_storage_error(
             f"current work-item lookup failed: {type(exc).__name__}"
@@ -150,16 +160,19 @@ def list_current_work_items(
         approved_count=sum(
             category is WorkItemCategory.APPROVED for _, category in categorized
         ),
+        other_count=sum(category is WorkItemCategory.OTHER for _, category in categorized),
         synced_at=synced_at,
-        source_total_count=source_total_count,
-        matched_count=len(snapshots),
+        source_total_count=sum(source_counts.values()) if source_counts else None,
+        matched_count=sum(bool(snapshot.relations) for snapshot in snapshots),
+        workflow_counts=workflow_counts,
+        source_counts=source_counts,
     )
 
 
-@router.get("/work-items/{external_id}/detail", response_model=WorkItemDetailOut)
-def get_work_item_detail(
+def _work_item_detail(
+    workflow: WorkflowKind,
     external_id: str,
-    session: Annotated[SessionRecord, Depends(get_session)],
+    session: SessionRecord,
 ) -> WorkItemDetailOut:
     normalized_id = external_id.strip()
     if not normalized_id:
@@ -167,7 +180,7 @@ def get_work_item_detail(
     try:
         storage = WorkflowStorage(account_database_path(session.username))
         snapshot = storage.get_current_snapshot(
-            WorkflowKind.PURCHASE_REQUISITION,
+            workflow,
             normalized_id,
         )
     except Exception as exc:
@@ -176,7 +189,7 @@ def get_work_item_detail(
         ) from exc
 
     category = (
-        purchase_item_category(
+        visible_item_category(
             snapshot.status,
             has_current_approver=snapshot.actionable,
         )
@@ -187,7 +200,7 @@ def get_work_item_detail(
         raise not_found("Work item not found in the current account scope")
 
     detail = cached_workflow_detail(snapshot)
-    if detail is None:
+    if detail is None and workflow is WorkflowKind.PURCHASE_REQUISITION:
         try:
             detail = session.client.get_purchase_requisition(normalized_id)
         except PermissionError as exc:
@@ -199,6 +212,8 @@ def get_work_item_detail(
             raise upstream_error(
                 f"work-item detail failed: {safe_error_message(exc)}"
             ) from exc
+    if detail is None:
+        raise not_found("Cached work-item detail is unavailable")
 
     return WorkItemDetailOut(
         item=_snapshot_out(snapshot, category),
@@ -218,24 +233,51 @@ def get_work_item_detail(
     )
 
 
+@router.get(
+    "/work-items/{workflow}/{external_id}/detail",
+    response_model=WorkItemDetailOut,
+)
+def get_workflow_item_detail(
+    workflow: WorkflowKind,
+    external_id: str,
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> WorkItemDetailOut:
+    return _work_item_detail(workflow, external_id, session)
+
+
+@router.get("/work-items/{external_id}/detail", response_model=WorkItemDetailOut)
+def get_work_item_detail(
+    external_id: str,
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> WorkItemDetailOut:
+    """Backward-compatible PurchaseRequisition detail route."""
+    return _work_item_detail(WorkflowKind.PURCHASE_REQUISITION, external_id, session)
+
+
 @router.get("/work-items", response_model=WorkItemListOut)
 def list_work_items(
     session: Annotated[SessionRecord, Depends(get_session)],
     max_pages: int = Query(default=20, ge=1, le=100),
 ) -> WorkItemListOut:
     try:
-        measurement = read_account_purchase_measurement(
+        result = sync_procurement_workflows(
             session.client,
+            storage=None,
             max_pages=max_pages,
+            dry_run=True,
         )
-        items = purchase_center_items(
-            measurement.result,
-            base_url=session.client.settings.base_url,
-            relations_by_id={
-                record.summary.id: record.relations
-                for record in measurement.records
-            },
-        )
+        if result.status not in {"succeeded", "dry_run"}:
+            failure = next(
+                (stream for stream in result.streams if stream.status == "failed"),
+                None,
+            )
+            message = (
+                failure.error_message
+                if failure is not None and failure.error_message
+                else "one or more procurement streams were incomplete"
+            )
+            raise RuntimeError(message)
+        items = result.work_items
     except PermissionError as exc:
         raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
     except Exception as exc:
@@ -246,6 +288,7 @@ def list_work_items(
             WorkItemOut(
                 key=item.key,
                 workflow=item.workflow.value,
+                workflow_label=item.workflow.label,
                 external_id=item.external_id,
                 reference_no=item.reference_no,
                 project_no=item.project_no,
@@ -268,5 +311,6 @@ def list_work_items(
         approved_count=sum(
             item.category is WorkItemCategory.APPROVED for item in items
         ),
-        synced_at=datetime.now(UTC).isoformat(),
+        other_count=sum(item.category is WorkItemCategory.OTHER for item in items),
+        synced_at=result.observed_at,
     )

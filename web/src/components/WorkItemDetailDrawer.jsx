@@ -3,19 +3,20 @@ import { useEffect, useRef } from "react";
 import Button from "./Button";
 import StatusTag from "./StatusTag";
 
-const DETAIL_FIELDS = [
-  ["PR_RequisitionNo", "申请单编号"],
-  ["PR_PrjNo", "项目编号"],
-  ["PR_PrjName", "项目名称"],
-  ["PR_ProjectManagerName", "项目经理"],
-  ["PR_SalesContractNo", "销售合同"],
-  ["PR_SigningEntity", "签署主体"],
-  ["PR_RemainingHardwareCost", "第三方软硬件剩余成本"],
-  ["PR_RemainingServiceCost", "第三方服务剩余成本"],
-  ["PR_ProcurementMethod", "采购方式"],
-  ["PR_ProcurementManagerName", "采购经理"],
-  ["PR_Remark", "备注"],
-];
+const FIELD_LABELS = {
+  PR_RequisitionNo: "申请单编号",
+  PR_PrjNo: "项目编号",
+  PR_PrjName: "项目名称",
+  PR_ProjectManagerName: "项目经理",
+  PR_SalesContractNo: "销售合同",
+  PR_SigningEntity: "签署主体",
+  PR_RemainingHardwareCost: "第三方软硬件剩余成本",
+  PR_RemainingServiceCost: "第三方服务剩余成本",
+  PR_ProcurementMethod: "采购方式",
+  PR_ProcurementManagerName: "采购经理",
+  PR_Remark: "备注",
+};
+const FIELD_ORDER = Object.keys(FIELD_LABELS);
 const RELATION_LABELS = {
   applicant: "发起人",
   submitter: "提交人",
@@ -24,13 +25,28 @@ const RELATION_LABELS = {
   approver: "审批人",
 };
 
-function fieldValue(detail, item, key) {
-  const value = detail?.fields?.[key];
-  if (value) return value;
-  if (key === "PR_RequisitionNo") return item.reference_no;
-  if (key === "PR_PrjNo") return item.project_no;
-  if (key === "PR_PrjName") return item.title;
-  return "";
+function detailFields(detail, item) {
+  const source = detail?.fields || {};
+  const preferred = FIELD_ORDER.filter((key) => Object.hasOwn(source, key));
+  const keys = [...preferred, ...Object.keys(source).filter((key) => !FIELD_ORDER.includes(key))];
+  const labels = new Set();
+  const fields = [];
+  keys.forEach((key) => {
+    const label = FIELD_LABELS[key] || key;
+    if (labels.has(label)) return;
+    labels.add(label);
+    fields.push({ key, label, value: source[key] || "" });
+  });
+  [
+    ["summary-applicant", "填报人", item.applicant],
+    ["summary-date", "填报日期", item.submitted_at],
+    ["summary-status", "当前状态", item.status],
+  ].forEach(([key, label, value]) => {
+    if (labels.has(label) || (label === "填报人" && labels.has("申请人"))) return;
+    labels.add(label);
+    fields.push({ key, label, value: value || "" });
+  });
+  return fields;
 }
 
 export default function WorkItemDetailDrawer({
@@ -62,6 +78,7 @@ export default function WorkItemDetailDrawer({
   const relations = (summary.relations || []).map(
     (relation) => RELATION_LABELS[relation] || relation,
   );
+  const fields = detailFields(detail, summary);
 
   return (
     <div
@@ -78,14 +95,14 @@ export default function WorkItemDetailDrawer({
       >
         <header className="work-detail-header">
           <div>
-            <span>采购立项申请</span>
+            <span>{summary.workflow_label || "采购单据"}</span>
             <h2 id="work-detail-title">{summary.reference_no || summary.external_id}</h2>
-            <small>{summary.title || "未命名项目"}</small>
-            <div className="work-detail-relations" aria-label="我的关系">
-              <span>我的关系</span>
+            <small>{summary.title || "未命名单据"}</small>
+            <div className="work-detail-relations" aria-label="关系标注">
+              <span>关系</span>
               {relations.length
                 ? relations.map((relation) => <strong key={relation}>{relation}</strong>)
-                : <strong>待确认</strong>}
+                : <strong>未标注</strong>}
             </div>
           </div>
           <div className="work-detail-header__actions">
@@ -123,18 +140,15 @@ export default function WorkItemDetailDrawer({
               <section className="work-detail-section">
                 <div className="work-detail-section__heading">
                   <h3>单据详情</h3>
-                  <span>{DETAIL_FIELDS.length + 3} 项</span>
+                  <span>{fields.length} 项</span>
                 </div>
                 <dl className="work-detail-fields">
-                  {DETAIL_FIELDS.map(([key, label]) => (
-                    <div key={key} className={key === "PR_Remark" ? "work-detail-field--wide" : ""}>
-                      <dt>{label}</dt>
-                      <dd>{fieldValue(detail, summary, key) || "--"}</dd>
+                  {fields.map((field) => (
+                    <div key={field.key} className={field.label === "备注" ? "work-detail-field--wide" : ""}>
+                      <dt>{field.label}</dt>
+                      <dd>{field.value || "--"}</dd>
                     </div>
                   ))}
-                  <div><dt>申请人</dt><dd>{summary.applicant || "--"}</dd></div>
-                  <div><dt>申请时间</dt><dd>{summary.submitted_at || "--"}</dd></div>
-                  <div><dt>当前状态</dt><dd>{summary.status || "--"}</dd></div>
                 </dl>
               </section>
 

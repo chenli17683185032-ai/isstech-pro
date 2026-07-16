@@ -16,11 +16,11 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | Endpoint policy (deny-by-default, Delete-as-GET = write) | Yes |
 | Browser login protocol | Captured and reproducibly redacted; browser already carried `.iPSA` |
 | Pure HTTP login | Mock-verified; clean-process live smoke still needs runtime credentials |
-| Application/Search lists + Detail + bounded attachment download | Implemented; live schema/count parity checked without printing values |
+| Five procurement SearchIndex streams + PR Detail + bounded attachment download | Implemented; live schema/count parity checked without printing values |
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
-| FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; incomplete pagination fails closed |
-| SQLite snapshots + change events + manual sync CLI | Yes; local-only, transactional, replay-idempotent events |
+| FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
+| SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
 | Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
@@ -62,9 +62,9 @@ local material -> local_rules extraction -> evidence review
 -> validated -> ready -> read-only status sync -> follow-up list
 ```
 
-The browser stores only the short-lived local Bearer handle in
-`sessionStorage`; it never receives the upstream `.iPSA` value. Refresh restores
-materials, extraction runs, drafts, current actionable snapshots, and sync runs
+The browser stores only the short-lived local Bearer handle in same-origin
+`localStorage`; it never receives the upstream `.iPSA` value. Refresh restores
+materials, extraction runs, drafts, current account-visible snapshots, and sync runs
 from SQLite. Stale draft writes return `409 CONFLICT`, after which the UI reloads
 the newer version instead of overwriting it.
 
@@ -80,8 +80,8 @@ npm run build
 
 The material picker uploads only to the local `/v1/materials` endpoint. The UI
 contains no iPSA create, save, submit, approve, delete, or upload action. Manual
-and scheduled workflow synchronization use only the already policy-gated
-SearchIndex read path.
+and scheduled workflow synchronization use only the five explicitly policy-gated
+procurement `SearchIndex` read paths.
 
 ### Durable manual sync
 
@@ -96,7 +96,7 @@ export ISSTECH_PASSWORD='...'
 # Prove fetch + normalization without creating data files
 uv run python tools/sync_work_items.py --dry-run --json
 
-# Persist owned snapshots, print JSON, and export the current follow-up list
+# Persist account-visible snapshots, print JSON, and export the current list
 uv run python tools/sync_work_items.py --json --csv
 
 unset ISSTECH_PASSWORD ISSTECH_USERNAME
@@ -113,11 +113,13 @@ data/accounts/<sha256-account-scope>/exports/YYYY-MM-DD-work-items.csv
 `data/` is gitignored. SQLite, summary, and CSV files are created with mode
 `0600`. The account scope is a normalized SHA-256 key; the raw username is not
 used in paths. Legacy `data/workflow-center.sqlite3` data is retained for audit
-but is not shown as any logged-in account's current work-item state. Portal's
-authenticated greeting supplies the display identity; only exact applicant
-matches from the complete SearchIndex enter that account scope. A declared total
-mismatch, repeated/short page, missing/ambiguous Portal identity, schema mismatch,
-stale measurement, or local transaction error makes the command exit non-zero.
+but is not shown as any logged-in account's current work-item state. The sync reads
+the complete account-visible PurchaseRequisition, ProcurementContract,
+ProcurementOrder, CostConfirmation, and CheckAcceptance SearchIndex streams.
+Portal identity adds relation labels when it matches a trustworthy applicant field;
+it is not a record-discard gate. Each stream owns an independent checkpoint, so a
+declared-total mismatch, repeated/short page, schema drift, stale measurement, or
+local transaction error preserves that stream's previous complete current state.
 
 ### Weekday scheduled sync
 
@@ -245,11 +247,11 @@ curl -s http://127.0.0.1:8000/v1/sessions \
 curl -s 'http://127.0.0.1:8000/v1/purchase-requisitions?view=application' \
   -H "Authorization: Bearer $TOKEN"
 
-# owned follow-up + approved list (Portal identity + SearchIndex, read-only)
+# account-visible five-workflow list (read-only, no local persistence)
 curl -s 'http://127.0.0.1:8000/v1/work-items' \
   -H "Authorization: Bearer $TOKEN"
 
-# full read + transactional local snapshot (no upstream mutation)
+# full five-stream read + per-stream transactional local checkpoints
 curl -s -X POST 'http://127.0.0.1:8000/v1/sync/work-items?max_pages=20' \
   -H "Authorization: Bearer $TOKEN"
 

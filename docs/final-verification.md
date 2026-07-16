@@ -20,11 +20,9 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-Last complete P9 code gate on `2026-07-15`: **231 passed**, Ruff clean, OpenAPI
-matched runtime, the React production build completed with 1,592 modules, and
-`git diff --check` passed. The P8 scheduler timeout/redaction/rollback and plist
-contracts remain in the suite. Runtime Keychain provisioning and LaunchAgent
-bootstrap remain an account-holder gate.
+The current P9.5 gate is recorded in the implementation plan after the final run.
+It includes the full pytest suite, Ruff, OpenAPI, secret/evidence verification,
+React production build, wheel contents, plist lint, and `git diff --check`.
 
 ## Operator evidence check
 
@@ -97,8 +95,9 @@ uv run python tools/sync_work_items.py --dry-run --json
 # Creates one successful run and optional CSV
 uv run python tools/sync_work_items.py --json --csv
 
-sqlite3 data/workflow-center.sqlite3 \
-  'select status, observed_count, actionable_count, event_count from sync_runs order by started_at desc limit 1;'
+find data/accounts -name workflow-center.sqlite3 -type f
+sqlite3 data/accounts/<account-scope>/workflow-center.sqlite3 \
+  'select adapter,status,source_total_count,observed_count from sync_runs order by started_at desc limit 5;'
 stat -f '%Lp %N' \
   data/workflow-center.sqlite3 \
   data/runs/*/summary.json \
@@ -107,9 +106,10 @@ stat -f '%Lp %N' \
 unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
-Pass criteria: dry-run leaves no new DB/run file; real sync is `succeeded`;
-source count is complete; all files report mode `600`; a second unchanged sync
-adds history but zero change events.
+Pass criteria: dry-run leaves no new DB/run file; all five real stream runs are
+`succeeded`; every stream has `source_total_count == observed_count`; current is
+the sum of the five declared totals; all files report mode `600`; a second
+unchanged sync adds history but zero change events.
 
 ## Material ingestion smoke (offline)
 
@@ -187,16 +187,17 @@ Open `http://127.0.0.1:8000/`. The verified local-only browser path was:
 ```text
 mock login -> material in local store -> local_rules extraction -> draft
 -> three required evidence-backed confirmations -> validated -> ready
--> mock Portal identity + read-only SearchIndex sync
--> one follow-up item + one approved item in account-scoped SQLite
+-> mock Portal identity + five read-only SearchIndex streams
+-> all account-visible records in adapter-scoped SQLite checkpoints
 -> refresh recovery -> stale-version 409 refresh without overwrite
 ```
 
-Browser QA used `1440x900` and `390x844`. The desktop overview and mobile
-overview/material/draft/follow-up views had no page-level horizontal overflow,
-blank primary view, or console warning/error. Wide operational tables scroll
-inside their own container on mobile. Local ignored screenshots are kept under
-`outputs/p9-*.png`; they are QA artifacts, not wheel contents.
+P9.5 Browser QA used `1280x720` and `390x844` against the persisted 353-row
+baseline. Workflow filtering produced 57 acceptance records and 9 pending rows;
+the cached-detail drawer opened and closed without losing filters. There was no
+page-level horizontal overflow, blank primary view, overlap, or console warning/
+error. Wide tables scroll only inside their container on mobile. Business-free
+QA screenshots remain in `/tmp` and are not wheel contents.
 
 The built root, hashed JS, and hashed CSS must return 200 from FastAPI. Common
 icon buttons retain accessible names on mobile, the material button label remains
@@ -289,7 +290,6 @@ allowed for synthetic tests.
 
 | Capture | Path | Why |
 | --- | --- | --- |
-| Clean pure-HTTP login | Runtime-only credentials; no saved credential artifact | Proves ticket issuance in a new process without Chrome Cookie import |
 | Intercepted writes | Redacted request templates | Upgrade builder notes from `inferred` to `observed`; capture must pause and abort before send |
 | Second role | Read-only comparison evidence | Evaluate read-side IDOR without modifying target state |
 
@@ -316,22 +316,23 @@ bash tools/first-commit.sh
 | --- | --- | --- |
 | Evidence baseline docs | Yes | — |
 | Policy + transport | Yes, including adversarial URL tests | — |
-| Browser login protocol | Yes, redacted CDP is reproducible | Capture does not prove clean-session ticket issuance |
-| Pure HTTP login code | Yes (mocked) | Runtime credentialed live smoke |
-| Application/Search list and Detail | Yes, with live schema/count parity | Pure-HTTP live smoke |
+| Browser login protocol | Yes, redacted CDP is reproducible | Historical browser capture already carried `.iPSA` |
+| Pure HTTP login code | Yes, mocked and credentialed live reads | Credentials remain runtime-only |
+| Five SearchIndex streams and PR Detail | Yes, with live 353/353 schema/count parity | Non-PR upstream Detail remains disabled |
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
-| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | Credentialed session smoke |
-| SQLite snapshot/diff | Yes; transactional and version-gated | Credentialed live sync |
-| Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures | Credentialed live sync |
+| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | P7 write execution remains blocked |
+| SQLite snapshot/diff | Yes; five per-stream checkpoints and live 353 current | — |
+| Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures and live run | — |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
 | Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | P7 remains write-blocked |
-| Weekday scheduled sync | Facility yes; same CLI, Keychain, timeout, private log, rollback | Account-holder Keychain setup and live bootstrap |
+| Weekday scheduled sync | Facility and Keychain-backed wrapper live run verified | LaunchAgent bootstrap remains optional |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
-| Clean acceptance | Automated parts | Credentialed smoke |
+| Clean acceptance | Automated gates plus credentialed read-only smoke | Write-side P7 excluded |
 
 Do **not** describe the project as fully production-finished against live iPSA.
-The credentialed pure-HTTP smoke is still pending, and P7 upstream execution
-remains explicitly blocked by the current competition rules.
+P7 upstream execution remains explicitly blocked by the current competition
+rules, and the four added workflows intentionally expose cached list fields rather
+than unproven upstream Detail routes.

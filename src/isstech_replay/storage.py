@@ -120,7 +120,7 @@ def _workflow_payload(payload_json: str) -> dict[str, object]:
 
 
 def _payload_relations(payload: dict[str, object]) -> tuple[WorkItemRelation, ...]:
-    if payload.get("payload_version") != 2:
+    if payload.get("payload_version") not in {2, 3}:
         return ()
     raw_relations = payload.get("relations")
     if not isinstance(raw_relations, list):
@@ -140,7 +140,7 @@ def cached_workflow_detail(
     snapshot: WorkflowSnapshot,
 ) -> CachedWorkflowDetail | None:
     payload = _workflow_payload(snapshot.payload_json)
-    if payload.get("payload_version") != 2:
+    if payload.get("payload_version") not in {2, 3}:
         return None
     detail = payload.get("detail")
     if not isinstance(detail, dict):
@@ -729,6 +729,26 @@ class WorkflowStorage:
                 "ORDER BY started_at DESC, run_id DESC LIMIT 1"
             ).fetchone()
             return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def latest_successful_runs_by_adapter(self) -> dict[WorkflowKind, dict[str, object]]:
+        """Return the newest complete checkpoint for every known adapter."""
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM sync_runs WHERE status = 'succeeded' "
+                "ORDER BY started_at DESC, run_id DESC"
+            ).fetchall()
+            latest: dict[WorkflowKind, dict[str, object]] = {}
+            for row in rows:
+                try:
+                    adapter = WorkflowKind(row["adapter"])
+                except ValueError:
+                    continue
+                latest.setdefault(adapter, dict(row))
+            return latest
         finally:
             connection.close()
 

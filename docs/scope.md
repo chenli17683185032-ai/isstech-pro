@@ -5,6 +5,8 @@
 - `http://ipsapro.isstech.com/Portal`
 - `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` and its five views:
   `Index`, `ApprovalIndex`, `AdjustIndex`, `RevocationIndex`, `SearchIndex`
+- Read-only `SearchIndex` and observed pagination under `ProcurementContract`,
+  `ProcurementOrder`, `CostConfirmation`, and `CheckAcceptance`
 - Downstream purchase flows discovered from those views (e.g. `ProjectSelection`,
   `Edit/{id}`, detail, dictionary, attachment list/download)
 - Authentication redirects and callbacks on `https://passport.isstech.com`
@@ -16,9 +18,8 @@
 
 ## Out of scope
 
-- Other WebTP modules linked from the shell (ProcurementContract,
-  FrameworkAgreement, ProcurementOrder, CostConfirmation, CheckAcceptance)
-  unless required to understand shared auth or attachment infrastructure
+- Other WebTP modules or views not listed above, including FrameworkAgreement and
+  create/edit/approval/adjustment/export surfaces of the four added workflows
 - Using browser automation as a runtime dependency of the final API
 - Committing passwords, cookie values, `.iPSA`, employee names, project numbers,
   or attachment content
@@ -80,21 +81,20 @@ The repository currently has:
 
 - A FastAPI `/v1` facade with in-memory local session handles
 - Exact-origin, canonical-path `EndpointPolicy` and mandatory `GuardedTransport`
-- Mock-verified pure HTTP login implementation; live credential proof pending
+- Mock-verified pure HTTP login implementation and credentialed clean-process live reads
 - Evidence-backed application Index parsing, detail/attachment parsing, and
   size-bounded attachment downloads
-- Runtime-captured Search/Approval/Adjust/Revocation GET paths, observed Search
-  filter/pagination POSTs, and Search current-approver parsing
+- Runtime-captured PurchaseRequisition views plus replayed five-workflow SearchIndex
+  pagination with per-stream declared-total reconciliation
 - Offline write request previews that cannot reach the live transport
 - Immutable local material ingestion and format-specific PDF/Office/text parsing
 - Evidence-backed local/HTTP-JSON field extraction with confidence and review gates
 - Versioned human review drafts with immutable AI proposals and append-only local audit
 - A same-origin local Web workspace for materials, evidence review, ready state,
-  SQLite follow-up lists, and policy-gated read-only sync
+  SQLite account-visible lists, per-stream checkpoints, and policy-gated read-only sync
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
-It does **not** yet have a credentialed clean-process pure-HTTP smoke,
-intercepted-and-aborted write bodies, or second-role IDOR evidence. The browser
-credential POST and authenticated Portal response are captured, but that
-browser already carried `.iPSA`; do not describe fresh ticket issuance as
-live-proven.
+It does **not** yet have intercepted-and-aborted write bodies or second-role IDOR
+evidence. Credentialed clean-process reads are operationally replayed through the
+Keychain-backed CLI, but credential values and raw authenticated responses remain
+outside Git.

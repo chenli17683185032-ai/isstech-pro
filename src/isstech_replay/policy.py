@@ -171,6 +171,20 @@ def _default_rules() -> tuple[EndpointRule, ...]:
             side_effect=SideEffect.MUTATING,
             request_class=RequestClass.BUILD_ONLY,
         ),
+        EndpointRule(
+            rule_id="procurement.write",
+            action="procurement.write",
+            methods=frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/(?:ProcurementContract|ProcurementOrder|CostConfirmation|"
+                r"CheckAcceptance)/(?:Create|Edit|Save|Submit|Approve|Adjust|Delete|"
+                r"Revoke|Revocation|Import|New|RollBack)(?:/.*)?$"
+            ),
+            side_effect=SideEffect.MUTATING,
+            request_class=RequestClass.BUILD_ONLY,
+            description="Write and write-preparation paths for procurement workflows",
+        ),
         # --- purchase requisition reads ---
         EndpointRule(
             rule_id="pr.entry",
@@ -240,6 +254,20 @@ def _default_rules() -> tuple[EndpointRule, ...]:
             path_pattern=_compile(r"^/WebTP/PurchaseRequisition/(?:JS|js)/.+$"),
             side_effect=SideEffect.NONE,
             request_class=RequestClass.ALLOW_LIVE,
+        ),
+        EndpointRule(
+            rule_id="procurement.search_views",
+            action="procurement.search",
+            methods=frozenset({"GET", "HEAD", "POST"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/(?:ProcurementContract|ProcurementOrder|CostConfirmation|"
+                r"CheckAcceptance)/SearchIndex"
+                r"(?:/0/1/False/[1-9]\d*(?:/(?:10|15|20|30|50|100))?)?/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="Observed read-only SearchIndex and pagination for procurement flows",
         ),
         EndpointRule(
             rule_id="webtp.static",

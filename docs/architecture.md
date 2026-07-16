@@ -40,10 +40,10 @@ React workspace --> FastAPI /v1 --> session store --> IsstechClient
      v                                  v
 sync service  --------------------> SQLite state/audit
      |
-     +---------------------------> Portal identity + complete SearchIndex
+     +---------------------------> five complete SearchIndex streams
                                          |
                                          v
-                              exact applicant ownership filter
+                              account-visible records + relation labels
                                          |
                                          v
                                    EndpointPolicy
@@ -107,11 +107,13 @@ sync service  --------------------> SQLite state/audit
 7. Persisted work-item snapshots, sync runs, summaries, and default CSV exports
    are isolated by a normalized SHA-256 account scope. Legacy unscoped workflow
    data is retained but never attributed to a logged-in account.
-8. Portal `#AccountGreetings #Greeting p` supplies the authenticated display
-   identity. SearchIndex records enter the local account scope only when their
-   applicant matches that identity exactly after Unicode/whitespace normalization.
-   Missing or ambiguous Portal identity fails closed.
-9. The Web workspace has no upstream execution control. Local material upload,
+8. Five fixed procurement workflow specifications define exact controller slugs,
+   list schemas, page shapes, and field mappings. Every account-visible row enters
+   that account's local scope only after its stream proves `observed == declared`.
+9. Portal `#AccountGreetings #Greeting p` supplies an optional display identity.
+   Exact normalized applicant matches add relation labels; identity mismatch or a
+   missing applicant column never discards an otherwise visible row.
+10. The Web workspace has no upstream execution control. Local material upload,
    field review, ready transitions, and SQLite sync are the only mutations it can request.
 
 ## Evidence pipeline
@@ -128,27 +130,29 @@ Exact GET paths for application, approval, adjustment, revocation, search, and
 Detail are runtime-captured and live-enabled. Search filter and pagination POST
 shapes are captured; the other list forms are restricted to their exact served
 read-only paths. Write-preparation pages and all mutating actions remain blocked.
-Full-list reads fail closed when a declared total cannot be satisfied, a page
-repeats, totals drift, or the configured page ceiling is reached; partial lists
-are never returned as successful work-item output.
+Each of PurchaseRequisition, ProcurementContract, ProcurementOrder,
+CostConfirmation, and CheckAcceptance fails closed when its declared total cannot
+be satisfied, a page repeats, totals drift, schema changes, or the configured page
+ceiling is reached. A failed stream keeps its prior complete checkpoint while
+other streams can advance; authentication failure stops the batch immediately.
 Write previews stay explicitly inferred until request-stage interception plus
-abort supplies their real shape. Clean-process credential login is still a
-separate live-smoke gate because the browser capture already carried `.iPSA`.
+abort supplies their real shape. Clean-process credential reads are operationally
+replayed; the older browser capture remains insufficient by itself to prove fresh
+ticket issuance.
 
 ## Snapshot transaction
 
-1. Create and commit one `sync_runs` row with status `running` before the read.
-2. Read the Portal greeting identity, then fetch every SearchIndex page; Portal
-   drift or incomplete pagination raises and records the run as `failed` without
-   snapshot rows.
-3. Keep only exact applicant matches. Classify explicit active/named-approver
-   records as `follow_up` and explicit approval-complete records as `approved`;
-   saved, rejected, and unknown states are not guessed.
-4. Normalize every owned source record into a canonical payload and SHA-256 state hash.
-5. In one SQLite transaction, append history, derive events, update current state,
-   and mark the run `succeeded`.
-6. If any item fails, rollback the whole state transaction, then mark the run
-   `failed` in a separate transaction.
+1. Create one `sync_runs` row per workflow stream before its read.
+2. Fetch every page at a fixed page size and reconcile unique stable IDs against
+   that stream's declared total.
+3. Normalize every visible record into payload v3, preserving trustworthy cached
+   PR detail/relations and using list fields as the minimum detail for other flows.
+4. Classify approval-in-progress rows with a named approver as `follow_up`, approval
+   completion as `approved`, and retain saved/rejected/unknown rows as `other`.
+5. In one per-stream SQLite transaction, append history, derive events, replace
+   only that adapter's current state, and mark the run `succeeded`.
+6. If a stream fails, rollback its state transaction, record a redacted failure,
+   retain its previous current rows, and continue the batch unless auth expired.
 
 Absence from one measurement is not treated as completion. A `completed` event
 requires an observed transition from an active status to a terminal status.
@@ -227,7 +231,7 @@ so API routing takes precedence. Runtime deployment needs only the Python wheel;
 Node, browser automation, and third-party CDNs are absent from the serving path.
 
 After login, the UI loads five independent local measurements concurrently:
-materials, extraction runs, draft summaries, current actionable snapshots, and
+materials, extraction runs, draft summaries, current account-visible snapshots, and
 sync runs. SQLite schema initialization is serialized by a process thread lock
 and a mode `0600` per-database advisory lock with a 10-second ceiling. This
 prevents first-run requests or a simultaneous scheduler process from racing

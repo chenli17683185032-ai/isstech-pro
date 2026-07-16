@@ -95,9 +95,13 @@ export default function App() {
     try {
       const result = await apiRequest("/v1/sync/work-items", { token, method: "POST" });
       await workspace.refresh();
-      setToast({
+      const failedStreams = (result.streams || []).filter((stream) => stream.status === "failed");
+      setToast(result.status === "succeeded" ? {
         tone: "success",
-        message: `同步完成：${result.observed_count} 条流程，${result.actionable_count} 条待催办`,
+        message: `同步完成：${result.observed_count} 条单据，${result.actionable_count} 条待处理`,
+      } : {
+        tone: "error",
+        message: `部分同步完成：${result.observed_count} 条，${failedStreams.length} 个流程失败`,
       });
     } catch (error) {
       setToast({ tone: "error", message: error.message || "同步失败" });

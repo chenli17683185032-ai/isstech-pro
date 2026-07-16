@@ -10,6 +10,7 @@ from .models.work_items import (
     WorkItemCategory,
     WorkItemRelation,
     WorkflowKind,
+    WorkflowSnapshot,
 )
 from .validation import require_path_segment
 
@@ -36,6 +37,48 @@ def purchase_item_category(
     if is_purchase_approved(status):
         return WorkItemCategory.APPROVED
     return None
+
+
+def visible_item_category(
+    status: str,
+    *,
+    has_current_approver: bool,
+) -> WorkItemCategory:
+    return purchase_item_category(
+        status,
+        has_current_approver=has_current_approver,
+    ) or WorkItemCategory.OTHER
+
+
+def snapshot_center_item(snapshot: WorkflowSnapshot) -> WorkItem:
+    category = visible_item_category(
+        snapshot.status,
+        has_current_approver=snapshot.actionable,
+    )
+    return WorkItem(
+        key=f"{snapshot.adapter.value}:{snapshot.external_id}",
+        workflow=snapshot.adapter,
+        external_id=snapshot.external_id,
+        reference_no=snapshot.reference_no,
+        project_no=snapshot.project_no,
+        title=snapshot.title,
+        applicant=snapshot.applicant,
+        submitted_at=snapshot.submitted_at,
+        status=snapshot.status,
+        current_approver=(
+            snapshot.current_approver
+            if category is WorkItemCategory.FOLLOW_UP
+            else ""
+        ),
+        waiting_days=(
+            snapshot.waiting_days
+            if category is WorkItemCategory.FOLLOW_UP
+            else None
+        ),
+        source_url=snapshot.source_url,
+        category=category,
+        relations=snapshot.relations,
+    )
 
 
 def _purchase_item(

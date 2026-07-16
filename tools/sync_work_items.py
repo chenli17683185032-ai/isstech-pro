@@ -21,7 +21,7 @@ from isstech_replay.models.work_items import WorkItem, WorkflowKind
 from isstech_replay.storage import DEFAULT_DATABASE_NAME, WorkflowStorage
 from isstech_replay.sync import (
     safe_error_message,
-    sync_purchase_requisitions,
+    sync_procurement_workflows,
     sync_result_dict,
     utc_iso,
 )
@@ -98,7 +98,7 @@ def render_work_items_csv(items: tuple[WorkItem, ...]) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Read all PurchaseRequisition pages and update local snapshots."
+        description="Read all procurement workflow pages and update local snapshots."
     )
     parser.add_argument(
         "--data-dir",
@@ -199,7 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_started_at = datetime.now(UTC)
     try:
         client, _ = login_with_settings(username, password)
-        result = sync_purchase_requisitions(
+        result = sync_procurement_workflows(
             client,
             storage=storage,
             max_pages=args.max_pages,
@@ -248,6 +248,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"csv {csv_path}", file=sys.stderr)
         else:
             _print_human(result, summary_path, csv_path)
+        if result.status != "succeeded":
+            print(
+                f"SYNC_FAILED run_id={result.run_id} status={result.status}",
+                file=sys.stderr,
+            )
+            return 1
         return 0
     except Exception as error:
         if client is None and storage is not None:

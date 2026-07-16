@@ -23,8 +23,8 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
   const latestRun = data.syncRuns[0];
   const metrics = [
     { label: "待审草稿", value: reviewDrafts.length, icon: ClipboardCheck, tone: "warning" },
-    { label: "待催办", value: data.workItems.follow_up_count, icon: ListTodo, tone: "danger" },
-    { label: "已过审", value: data.workItems.approved_count, icon: CircleCheckBig, tone: "success" },
+    { label: "待处理", value: data.workItems.follow_up_count, icon: ListTodo, tone: "danger" },
+    { label: "可见单据", value: data.workItems.total_count, icon: CircleCheckBig, tone: "success" },
     { label: "材料", value: data.materials.length, icon: FileText, tone: "neutral" },
   ];
 
@@ -52,20 +52,20 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
       <div className="overview-grid">
         <section className="content-section overview-grid__wide">
           <div className="section-heading">
-            <div><h2>催办清单</h2><span>{data.workItems.synced_at ? `快照 ${formatDateTime(data.workItems.synced_at)}` : "尚无快照"}</span></div>
+            <div><h2>待处理单据</h2><span>{data.workItems.synced_at ? `快照 ${formatDateTime(data.workItems.synced_at)}` : "尚无快照"}</span></div>
             <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("work-items")}>查看全部</Button>
           </div>
           {followUpItems.length ? (
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>编号</th><th>项目</th><th>责任人</th><th>停留</th><th>状态</th></tr></thead>
+                <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>责任人</th><th>状态</th></tr></thead>
                 <tbody>
                   {followUpItems.slice(0, 6).map((item) => (
                     <tr key={item.key}>
+                      <td>{item.workflow_label}</td>
                       <td className="mono">{item.reference_no || item.external_id}</td>
-                      <td><strong>{item.title || "未命名项目"}</strong><span>{item.project_no}</span></td>
+                      <td><strong>{item.title || "未命名单据"}</strong><span>{item.project_no}</span></td>
                       <td>{item.current_approver || "--"}</td>
-                      <td>{item.waiting_days == null ? "--" : `${item.waiting_days} 天`}</td>
                       <td><StatusTag value="needs_review" label={item.status} /></td>
                     </tr>
                   ))}
@@ -75,7 +75,7 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
           ) : (
             <EmptyState
               icon={ListTodo}
-              title="暂无本地待催办项"
+              title="暂无待处理单据"
               action={<Button icon={RefreshCw} onClick={onSync} disabled={syncing}>{syncing ? "同步中" : "立即同步"}</Button>}
             />
           )}

@@ -30,15 +30,16 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
 
     assert js.status_code == 200
     assert "javascript" in js.headers["content-type"]
-    assert "待催办" in js.text
-    assert "已过审" in js.text
-    assert "范围：我参与的" in js.text
-    assert "我的关系" in js.text
+    assert "待处理" in js.text
+    assert "已完成" in js.text
+    assert "范围：账号可见全集" in js.text
+    assert "全部流程" in js.text
+    assert "未标注" in js.text
     assert "项目经理" in js.text
     assert "localStorage" in js.text
     assert "查看本地详情" in js.text
     assert "审批轨迹" in js.text
-    assert "data-selection-source" in js.text
+    assert "筛选流程类型" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")

@@ -21,6 +21,11 @@ from isstech_replay.models.purchase import (
     PurchaseRequisitionSummary,
     PurchaseView,
 )
+from isstech_replay.models.procurement import (
+    PROCUREMENT_STREAM_BY_WORKFLOW,
+    ProcurementDocumentSummary,
+    ProcurementListResult,
+)
 from isstech_replay.models.work_items import (
     ChangeKind,
     WorkItem,
@@ -124,6 +129,56 @@ class FakeClient:
         if isinstance(configured, Exception):
             raise configured
         return configured or PurchaseRequisitionDetail(id=external_id)
+
+    def list_all_procurement_documents(
+        self,
+        workflow: WorkflowKind,
+        *,
+        max_pages: int,
+        page_size: int,
+    ) -> ProcurementListResult:
+        del max_pages, page_size
+        if self.error is not None:
+            raise self.error
+        if workflow is not WorkflowKind.PURCHASE_REQUISITION:
+            return ProcurementListResult(
+                workflow=workflow,
+                items=(),
+                total_count=0,
+            )
+        spec = PROCUREMENT_STREAM_BY_WORKFLOW[workflow]
+        items = []
+        for record in self.result.items:
+            fields = (
+                ("申请单编号", record.requisition_no),
+                ("项目编号", record.project_no),
+                ("项目名称", record.project_name),
+                ("申请人", record.creator_name),
+                ("申请时间", record.create_date),
+                ("单据状态", record.status),
+                ("下一级审批人", record.next_approver),
+            )
+            assert tuple(name for name, _ in fields) == spec.headers[1:]
+            items.append(
+                ProcurementDocumentSummary(
+                    workflow=workflow,
+                    id=record.id,
+                    reference_no=record.requisition_no,
+                    project_no=record.project_no,
+                    title=record.project_name,
+                    applicant=record.creator_name,
+                    submitted_at=record.create_date,
+                    status=record.status,
+                    next_approver=record.next_approver,
+                    fields=fields,
+                )
+            )
+        return ProcurementListResult(
+            workflow=workflow,
+            items=tuple(items),
+            total_count=len(items),
+            source_url=self.result.source_url,
+        )
 
     def close(self) -> None:
         self.closed = True

@@ -8,11 +8,26 @@ from enum import StrEnum
 
 class WorkflowKind(StrEnum):
     PURCHASE_REQUISITION = "purchase_requisition"
+    PROCUREMENT_CONTRACT = "procurement_contract"
+    PROCUREMENT_ORDER = "procurement_order"
+    COST_CONFIRMATION = "cost_confirmation"
+    CHECK_ACCEPTANCE = "check_acceptance"
+
+    @property
+    def label(self) -> str:
+        return {
+            WorkflowKind.PURCHASE_REQUISITION: "采购立项",
+            WorkflowKind.PROCUREMENT_CONTRACT: "采购合同",
+            WorkflowKind.PROCUREMENT_ORDER: "采购订单",
+            WorkflowKind.COST_CONFIRMATION: "成本确认",
+            WorkflowKind.CHECK_ACCEPTANCE: "采购验收",
+        }[self]
 
 
 class WorkItemCategory(StrEnum):
     FOLLOW_UP = "follow_up"
     APPROVED = "approved"
+    OTHER = "other"
 
 
 class WorkItemRelation(StrEnum):
@@ -94,6 +109,40 @@ class SyncResult:
     actionable_count: int
     snapshot_count: int
     history_rows_inserted: int
+    events: tuple[ChangeEvent, ...] = ()
+    work_items: tuple[WorkItem, ...] = ()
+    database_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StreamSyncSummary:
+    workflow: WorkflowKind
+    run_id: str
+    status: str
+    source_total_count: int | None = None
+    observed_count: int = 0
+    actionable_count: int = 0
+    snapshot_count: int = 0
+    history_rows_inserted: int = 0
+    event_count: int = 0
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBatchResult:
+    run_id: str
+    status: str
+    dry_run: bool
+    started_at: str
+    observed_at: str
+    finished_at: str
+    source_total_count: int
+    observed_count: int
+    actionable_count: int
+    snapshot_count: int
+    history_rows_inserted: int
+    streams: tuple[StreamSyncSummary, ...]
     events: tuple[ChangeEvent, ...] = ()
     work_items: tuple[WorkItem, ...] = ()
     database_path: str | None = None

@@ -1399,11 +1399,262 @@ pytest、Ruff、OpenAPI、秘密/证据、diff、Vite build、wheel 通过
 - 最终门禁：267 tests、Ruff、OpenAPI、秘密扫描、证据校验、Vite build、
   60 文件 wheel、gitignore 与 `git diff --check` 全部通过。
 
+## P9.5 账号可见历史全集与多流程同步
+
+状态：`DONE`
+
+### 用户目标与性能指标
+
+用户明确反馈：历史上发起过多笔单据，但当前工作台没有拉出这些历史记录。
+本阶段不再把“身份关系识别成功”当作记录进入本地库的前置条件，而是先保证登录
+账号在上游各采购流程中可见的历史记录完整落地，再把“我的关系”作为可解释的
+派生标注和筛选条件。
+
+完成指标：
+
+1. 覆盖已由当前采购导航实际服务的五个查询流：采购立项、采购合同、采购订单、
+   成本确认、采购验收。
+2. 每个数据流独立完成全量翻页，`observed_count == declared_total`；总数缺失、漂移、
+   重复页、短页、稳定 ID 缺失或达到页数上限时，该流失败且保留其上一份完整快照。
+3. 当前运行基线的初始页声明总数为 `78 + 79 + 6 + 133 + 57 = 353`；该值只是
+   2026-07-16 的验收基线，不硬编码进代码。正式 live 验收必须以当次上游声明总数
+   动态对账。
+4. UI 默认展示“账号可见”全集，并提供流程类型、状态和全文搜索；本人关系仅在有
+   可靠证据时显示，不得再因为关系为空而丢弃记录。
+5. 首次历史回填与后续刷新走同一条有界、幂等链路；相同输入重复同步不制造重复
+   current 或重复 change event。
+6. 任何上游写路径继续保持零请求；凭据、Cookie、姓名、单号和业务正文不进入 Git、
+   测试日志或公开验收输出。
+
+### 运行证据与已确认根因
+
+- 当前实现只完整读取 `PurchaseRequisition/SearchIndex` 的 78 条候选，随后扫描 78 条
+  Detail 并只持久化 2 条身份关系命中的记录。
+- 当前账号在采购立项五个视图中的完整计数为：申请草稿 5、待审批 0、调整 72、
+  撤销 72、查询 78；采购立项分页本身完成了 78/78，不是只取首页。
+- Portal 当前身份为 2 字中文显示名，登录账号为 9 位 ASCII；采购立项 78 条中
+  申请人精确命中 1，登录账号命中 0。账号可见草稿池的 5 条还分属 4 个不同申请人，
+  因此它不是可用于反推本人别名的“我的草稿”集合。
+- 当前服务导航还实际链接到采购合同、采购订单、成本确认和采购验收。只读初始页
+  返回的声明总数分别为 79、6、133、57；当前同步链路完全没有读取这些数据流。
+- 根因因此是两个串联误差：采集对象只覆盖一个流程；随后又用不充分的身份模型把
+  账号可见集合裁剪为 2 条。继续放宽姓名子串匹配既不能恢复其他流程，也会引入
+  错误归属。
+
+### 工程控制结构
+
+```text
+目标: 账号可见历史全集
+  -> 控制器: 多流程同步编排器 + 每流有界分页器
+  -> 执行器: 精确 host/path/method 的只读 HTTP 请求
+  -> 对象: 五个采购 SearchIndex 数据流
+  -> 测量: 每流声明总数、页记录数、稳定 ID、重复集合、完成时间
+  -> 反馈: observed == declared 且本地事务成功
+  -> 状态: 每流 current/history/run checkpoint
+  -> 输出: 账号独立 SQLite -> 本地 API -> 可搜索 Web 列表
+```
+
+稳定性优先级：
+
+```text
+不覆盖上一份完整快照
+> 不静默丢页或丢流程
+> 每流可独立重试和解释
+> 首次回填速度
+> 详情丰富度和关系识别率
+```
+
+非线性和扰动控制：上游总数可能在翻页中变化；同一 ID 可能跨流程重号；页面可能
+使用 POST 做只读翻页；部分流程没有填报人或填报日期列；状态文案并不完全一致；
+单次请求可能超时。所有流程使用 `workflow + external_id` 复合身份、有限重试、页数
+上限和旧快照保留，不用猜测值填补缺列。
+
+### GitHub 经验参考与取舍
+
+| 项目 | 采用的最小经验 | 明确不采用 |
+| --- | --- | --- |
+| `airbytehq/airbyte` | 首次历史回填与后续增量/状态检查点分离；每个 stream 独立报告完整性 | connector 平台、容器编排和完整 CDK |
+| `singer-io/getting-started` | tap 只负责抽取，state 明确记录可重复进度，输出 schema 稳定 | Singer 消息协议和外部 target 进程 |
+| `n8n-io/n8n` | 节点/适配器明确标识来源，单节点失败可观察 | 通用工作流引擎和插件市场 |
+
+本阶段先做全量基线，不在缺少上游更新时间游标证据时伪造增量同步。数据量当前只有
+数百条，完整翻页是更小、更可证明的模型；待完整闭环稳定且能观察可靠游标后再优化。
+
+### 最小实施顺序
+
+#### 节点 1：协议和 schema 取证
+
+状态：`DONE`
+
+1. 对四个新增 `SearchIndex` 只读取初始页、表单 action、分页链接、列头和稳定 ID
+   来源；只保存脱敏的结构与计数证据。
+2. 对每流执行一次有界完整翻页，记录 `declared/observed/pages/duplicate_ids`，不落库。
+3. 证明分页方法、路径和表单字段后才加入默认 `EndpointPolicy`；所有 Delete、Edit、
+   Create、Save、Submit、Approve、Adjust、Revoke、Upload 规则必须排在读规则前。
+
+完成门禁：五流均可重复获得完整计数，且测试证明未知模块、路径穿越、写动作和错误
+HTTP 方法在传输前被阻断。
+
+实际结果（2026-07-16）：
+
+- 五流统一使用 50 条页长完成只读 dry-run：采购立项 `78/78`（2 页）、采购合同
+  `79/79`（2 页）、采购订单 `6/6`（1 页）、成本确认 `133/133`（3 页）、采购验收
+  `57/57`（2 页），合计 `353/353`，所有稳定 ID 在各自流内唯一。
+- 四个新增流程均使用 `SearchIndex/0/1/False/{page}/{size}` 的 AJAX `POST` 分页；
+  无筛选请求体可稳定复现全集。盲目序列化页面的展示型 select 控件会把采购合同
+  误筛成 0 条，因此正式实现只允许显式无筛选 payload，不回放任意表单值。
+- Portal 身份在采购验收的“填报人”列精确命中 9 条；采购合同和订单命中 0 条，
+  成本确认列表没有填报人列。这个结果直接证明旧的采购立项关系裁剪漏掉了至少
+  9 条可证明的本人历史单据。
+- 状态分布也已对账：合同 77 通过/1 审批中/1 拒绝，订单 6 通过，成本确认
+  123 通过/4 审批中/2 拒绝/4 已保存，验收 40 通过/9 审批中/4 拒绝/4 已保存。
+
+#### 节点 2：最小通用列表适配器
+
+状态：`DONE`
+
+1. 新增显式的流程规格表，只包含模块 slug、中文标签、SearchIndex 路径、允许的分页
+   形状和列名映射；不做动态 URL 拼接或任意模块访问。
+2. 列表解析改为按已观察列头映射，不用采购立项的固定列位置解释其他流程。
+3. 规范字段限制为：复合身份、流程类型、编号、标题、项目编号/名称、填报人、日期、
+   状态、下一级审批人、来源 URL 和原始已观察列表字段。
+4. 新增流程若没有填报人/日期则保存空值，不用 Portal 身份、当前时间或相邻列猜测。
+
+完成门禁：五种脱敏 fixture 的 schema、分页、重号和缺列测试通过；同一外部 ID 在不同
+流程中不会互相覆盖。
+
+实际结果（2026-07-16）：
+
+- 新增五个固定 `WorkflowKind` 和对应 `ProcurementStreamSpec`；列头、模块 slug、
+  标准字段映射和允许页长均为代码白名单，不接受调用方传入任意模块路径。
+- 通用解析器按完整列头 schema 解析并要求每行恰好一个 `ajax-data` 稳定 ID；schema
+  漂移、缺 ID、缺总数、短页、重复页、总数漂移和最大页截断均失败关闭。
+- 默认策略只新增四个精确 SearchIndex 及分页形状；四模块的写/写准备动作优先进入
+  `BUILD_ONLY`，未知模块和错误方法仍 `DENY`。
+- 85 项定向测试与 Ruff 通过；正式客户端使用 Keychain 会话再次 live 复现五流
+  `78/78 + 79/79 + 6/6 + 133/133 + 57/57 = 353/353`。
+
+#### 节点 3：完整同步与持久化反馈
+
+状态：`DONE`
+
+1. 每个流程建立独立 run/checkpoint；成功流原子替换自己的 current，失败流保留上次
+   成功 current，编排结果明确列出每流状态和计数。
+2. 首次同步拉取账号可见列表全集；后续同步仍全量对账并依赖 payload hash 保持幂等。
+3. 采购立项已有缓存详情和关系作为增强信息保留，但不再承担全集准入门禁；其他流程
+   第一版缓存列表字段作为可用详情，不批量扫描数百个 Detail。
+4. API、CLI、Keychain 调度共用同一编排器；调度日志只记录流程名、状态、计数、耗时
+   和脱敏错误。
+
+完成门禁：一流故障不会清空该流旧数据或其他流；五流成功后 current 总数等于各流
+当次声明总数之和；连续两次相同同步不新增 change event。
+
+实际结果（2026-07-16）：
+
+- 五个 workflow 使用独立 `sync_runs` 和现有单流事务替换自己的 current；批次层聚合
+  `succeeded/partial/failed/dry_run`，不把分流事务伪装成跨流原子事务。
+- 单流分页失败会记录脱敏错误、保留该流旧 current，并继续更新其他流；认证失效则
+  立即上抛，不降级成部分成功。回归覆盖跨流相同 external ID、失败流旧 checkpoint、
+  其他流继续推进和 dry-run 零文件。
+- payload v3 缓存列表字段并兼容读取 v1/v2。采购立项会合并旧缓存详情/关系，并只对
+  申请人精确命中的记录做非阻塞 Detail 增强；详情失败不再阻塞列表全集。
+- API、CLI 和 Keychain 调度均切到同一五流编排器；current API 返回账号可见全集、
+  各流程/source 计数和有关系证据的记录数。旧采购立项详情 URL 保持兼容。
+- 正式编排器 live dry-run 为 `353/353`、15 条待处理、10 条直接关系标注；85 项定向
+  pytest、全仓 Ruff、OpenAPI 和 diff 门禁通过。
+
+#### 节点 4：可用列表与详情降级
+
+状态：`DONE`
+
+1. 工作台范围改为“账号可见”，增加流程类型筛选和“全部/待处理/已完成”状态视图；
+   不再只显示可分类为采购立项待催办或已过审的记录。
+2. 搜索覆盖编号、项目、标题、填报人、责任人、状态和流程类型。
+3. 每行明确显示流程类型；有可靠关系时显示关系，无关系时显示“未标注”，不能显示成
+   “不是本人”。
+4. 采购立项继续显示完整缓存详情/审批轨迹；其他流程至少显示同步时缓存的列表字段，
+   详情增强在取得独立只读 Detail 证据后再做，不阻塞历史列表交付。
+
+完成门禁：353 基线数据在 UI 可检索、可按流程筛选；空字段不造成布局跳动；桌面和
+移动视口无重叠、横向页面溢出或 console warning/error。
+
+实际结果（2026-07-16）：
+
+- current API 和工作台默认显示账号可见全集；顶部真实显示 353 可见、15 待处理、
+  318 已完成、20 其他状态、11 条关系标注，并保留最旧分流 checkpoint 作为全集水位。
+- 增加流程下拉和“全部/待处理/已完成”分段；353 行全文检索使用 deferred query，
+  搜索覆盖流程、编号、标题、项目、填报人、责任人、状态和关系。
+- 行和详情均显示 API 返回的流程中文名；无关系证据显示“未标注”。采购立项详情保留
+  原字段/审批轨迹，其他流程详情按 payload v3 动态显示已缓存列表字段。
+- Browser 真实数据闭环：全部 353；采购验收筛选 57；待处理 9；关系标注 9；打开
+  详情为 17 个字段，关闭后仍保持“采购验收 + 待处理”。桌面 `1280x720` 和移动
+  `390x844` 均无页面横向溢出或控件重叠；移动表格只在自身容器内滚动，详情层严格
+  位于视口内。console 无 warning/error，页面已恢复为“全部流程 + 全部”。
+
+#### 节点 5：真实闭环、文档与交付
+
+状态：`DONE`
+
+1. 使用 Keychain 凭据运行一次 dry-run 完整回填，再运行一次真实本地同步；只输出
+   每流计数和状态。
+2. SQLite 对账每流 current、最近成功 run、payload 版本和账号目录权限；浏览器验证
+   搜索和流程筛选能找到历史数据。
+3. 运行全量 pytest、Ruff、OpenAPI、秘密/证据、Vite build、wheel、diff 和 gitignore
+   门禁；重启本地 API 后再次验证。
+4. 更新本节实际结果、剩余限制和恢复步骤；提交到本地 `main`。当前仓库没有 Git
+   remote，因此只有在发现或获得明确 GitHub 远端后才能推送，禁止猜测仓库地址。
+
+实际结果（2026-07-16）：
+
+- 真实回填前将旧账号目录完整备份到
+  `data/quarantine/20260716-p9.5-pre-multistream/`；备份与新数据均保持 Git ignored。
+- 第一次 Keychain 调度入口同步五流全部成功：采购立项 78、采购合同 79、采购订单 6、
+  成本确认 133、采购验收 57，总计 353；15 条待处理，351 个首次新增事件。
+- SQLite current 为 353 条 payload v3：318 已完成、15 待处理、20 其他状态；11 条有
+  关系标注，其中采购验收 9 条、采购立项 2 条。数据库和调度日志均为 mode `0600`。
+- 第二次同输入真实同步仍为 353/353，五流 `event_count` 全部为 0，证明 current 替换、
+  payload hash 和事件派生可重复且幂等。
+- Browser QA 完成桌面/移动、流程筛选、状态筛选、详情打开/关闭、筛选保持、页面溢出
+  和 console 检查；服务最终运行于 `http://127.0.0.1:8000/`，页面恢复“全部流程 + 全部”。
+- 最终门禁：284 tests、Ruff、OpenAPI、秘密扫描、证据哈希/权限、两份 plist、
+  `git diff --check` 和 gitignore 全部通过；Vite 构建 1,593 modules，JS `244.15 kB`、
+  CSS `29.97 kB`；wheel 为 62 个文件并包含两个新通用模块和新哈希静态资源。
+- 仓库仍没有 Git remote；本阶段提交到本地 `main`，无法执行 GitHub push/merge。
+
+### 预计修改面
+
+```text
+协议/策略:     src/isstech_replay/policy.py, src/isstech_replay/client.py
+通用模型/解析: src/isstech_replay/models/, src/isstech_replay/parsers/
+同步/存储:     src/isstech_replay/sync.py, src/isstech_replay/storage.py
+API/CLI:       src/isstech_replay/routes/sync.py,
+               src/isstech_replay/routes/work_items.py,
+               tools/sync_work_items.py, src/isstech_replay/scheduler.py
+Web:           web/src/views/WorkItemsView.jsx,
+               web/src/components/WorkItemDetailDrawer.jsx,
+               web/src/hooks/useWorkspaceData.js, web/src/styles.css
+构建产物:     src/isstech_replay/web_dist/
+测试/契约:     tests/, docs/openapi.json
+计划/证据:     docs/unified-workflow-center-plan.md,
+               docs/endpoint-matrix.md, docs/architecture.md, docs/scope.md
+```
+
+### 回滚与恢复
+
+- 所有业务读取继续只写账号独立的 `data/accounts/<scope>/`；旧数据库先保留，不做破坏性
+  迁移或删除。
+- 新同步必须在每流完整测量后才替换该流 current。中断、超时、解析漂移和单流失败均
+  允许重新执行，不要求用户手工解锁或清理 `running` 状态。
+- 前端/API 变更可由单个代码提交回滚；数据 payload 采用向后兼容读取，旧 v1/v2
+  采购立项快照仍可恢复。
+
 ## P10 第二个流程适配器
 
-状态：`TODO`
+状态：`SUPERSEDED`
 
-只有 P0-P8 的第一条闭环稳定后才能开始。选择标准是：材料与字段结构明确、状态查询可只读、用户使用频率高、授权边界清楚。
+P9.5 已按同一固定-schema框架一次交付采购合同、采购订单、成本确认和采购验收四个
+账号可见列表适配器，因此原“只选择第二个流程”的阶段不再执行。各流程上游 Detail
+增强仍必须单独取得只读证据，不能从 SearchIndex 路径猜测。
 
 ---
 
@@ -1416,6 +1667,10 @@ pytest、Ruff、OpenAPI、秘密/证据、diff、Vite build、wheel 通过
 | Portal | `http://ipsapro.isstech.com/Portal` |
 | 采购入口 | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` |
 | 采购查询 | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition/SearchIndex` |
+| 采购合同查询 | `http://ipsapro.isstech.com/WebTP/ProcurementContract/SearchIndex` |
+| 采购订单查询 | `http://ipsapro.isstech.com/WebTP/ProcurementOrder/SearchIndex` |
+| 成本确认查询 | `http://ipsapro.isstech.com/WebTP/CostConfirmation/SearchIndex` |
+| 采购验收查询 | `http://ipsapro.isstech.com/WebTP/CheckAcceptance/SearchIndex` |
 | 采购审批待办 | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition/ApprovalIndex` |
 | 采购调整列表 | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition/AdjustIndex` |
 | 采购撤销列表 | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition/RevocationIndex` |
@@ -1440,6 +1695,8 @@ pytest、Ruff、OpenAPI、秘密/证据、diff、Vite build、wheel 通过
 | `https://github.com/docling-project/docling` | 文档转换边界、格式管线和结构化输出 |
 | `https://github.com/temporalio/samples-python` | 状态持久化、有限重试、活动与编排分离 |
 | `https://github.com/n8n-io/n8n` | 适配器/节点形态、人工节点和执行可观测性 |
+| `https://github.com/airbytehq/airbyte` | 历史回填、每流状态检查点和完整性观测 |
+| `https://github.com/singer-io/getting-started` | 抽取/state 分离和稳定 schema |
 
 不直接复制这些大型项目的架构；只吸收已经解决本项目真实问题的最小模式。
 
@@ -1505,6 +1762,9 @@ pytest、Ruff、OpenAPI、秘密/证据、diff、Vite build、wheel 通过
 | 24 | `DONE` | P9.3 阶段性提交 | `eb0ec9d Select the first non-empty workflow view` |
 | 25 | `DONE` | P9.4 本人参与关系与离线详情 | 267 tests + 78 Detail 有界扫描 + payload v2 + localStorage + 真实 2 条 desktop/mobile QA |
 | 26 | `DONE` | P9.4 阶段性提交 | `11f32b8 Add participant-scoped cached workflow details` |
+| 27 | `DONE` | P9.5 五个采购流程协议/schema 取证 | 353/353 + 五流动态总数对账 + 分页/列 schema 已证明 |
+| 28 | `DONE` | P9.5 账号可见历史全集同步与 UI | 五流 checkpoint + 353 current + 全集可搜索 + 单流失败保留旧快照 |
+| 29 | `DONE` | P9.5 真实回填、全门禁与阶段提交 | 双次 353/353 + 第二次 0 events + 284 tests + browser QA |
 
 ---
 

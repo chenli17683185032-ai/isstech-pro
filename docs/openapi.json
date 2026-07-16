@@ -70,8 +70,13 @@
             "title": "Matched Count",
             "type": "integer"
           },
+          "other_count": {
+            "default": 0,
+            "title": "Other Count",
+            "type": "integer"
+          },
           "ownership_scope": {
-            "default": "participant",
+            "default": "account_visible",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -79,6 +84,13 @@
             "default": "sqlite_current",
             "title": "Source",
             "type": "string"
+          },
+          "source_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Source Counts",
+            "type": "object"
           },
           "source_total_count": {
             "anyOf": [
@@ -105,6 +117,13 @@
           "total_count": {
             "title": "Total Count",
             "type": "integer"
+          },
+          "workflow_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Workflow Counts",
+            "type": "object"
           }
         },
         "required": [
@@ -1465,6 +1484,13 @@
             "title": "Status",
             "type": "string"
           },
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/SyncStreamOut"
+            },
+            "title": "Streams",
+            "type": "array"
+          },
           "work_items": {
             "items": {
               "$ref": "#/components/schemas/WorkItemOut"
@@ -1574,6 +1600,92 @@
           "event_count"
         ],
         "title": "SyncRunSummaryOut",
+        "type": "object"
+      },
+      "SyncStreamOut": {
+        "properties": {
+          "actionable_count": {
+            "title": "Actionable Count",
+            "type": "integer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "event_count": {
+            "title": "Event Count",
+            "type": "integer"
+          },
+          "history_rows_inserted": {
+            "title": "History Rows Inserted",
+            "type": "integer"
+          },
+          "observed_count": {
+            "title": "Observed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "snapshot_count": {
+            "title": "Snapshot Count",
+            "type": "integer"
+          },
+          "source_total_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Total Count"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "workflow": {
+            "title": "Workflow",
+            "type": "string"
+          },
+          "workflow_label": {
+            "title": "Workflow Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "workflow_label",
+          "run_id",
+          "status",
+          "observed_count",
+          "actionable_count",
+          "snapshot_count",
+          "history_rows_inserted",
+          "event_count"
+        ],
+        "title": "SyncStreamOut",
         "type": "object"
       },
       "UploadBody": {
@@ -1717,7 +1829,8 @@
       "WorkItemCategory": {
         "enum": [
           "follow_up",
-          "approved"
+          "approved",
+          "other"
         ],
         "title": "WorkItemCategory",
         "type": "string"
@@ -1769,6 +1882,11 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "other_count": {
+            "default": 0,
+            "title": "Other Count",
+            "type": "integer"
           },
           "synced_at": {
             "title": "Synced At",
@@ -1864,11 +1982,16 @@
           "workflow": {
             "title": "Workflow",
             "type": "string"
+          },
+          "workflow_label": {
+            "title": "Workflow Label",
+            "type": "string"
           }
         },
         "required": [
           "key",
           "workflow",
+          "workflow_label",
           "external_id"
         ],
         "title": "WorkItemOut",
@@ -1897,6 +2020,17 @@
         },
         "title": "WorkflowBody",
         "type": "object"
+      },
+      "WorkflowKind": {
+        "enum": [
+          "purchase_requisition",
+          "procurement_contract",
+          "procurement_order",
+          "cost_confirmation",
+          "check_acceptance"
+        ],
+        "title": "WorkflowKind",
+        "type": "string"
       }
     }
   },
@@ -4064,6 +4198,7 @@
     },
     "/v1/work-items/{external_id}/detail": {
       "get": {
+        "description": "Backward-compatible PurchaseRequisition detail route.",
         "operationId": "get_work_item_detail_v1_work_items__external_id__detail_get",
         "parameters": [
           {
@@ -4115,6 +4250,72 @@
           }
         },
         "summary": "Get Work Item Detail",
+        "tags": [
+          "work-items"
+        ]
+      }
+    },
+    "/v1/work-items/{workflow}/{external_id}/detail": {
+      "get": {
+        "operationId": "get_workflow_item_detail_v1_work_items__workflow___external_id__detail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItemDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workflow Item Detail",
         "tags": [
           "work-items"
         ]

@@ -1,5 +1,5 @@
-import { Clipboard, Eye, ListTodo, RefreshCw, Search, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Clipboard, Eye, Layers3, ListTodo, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../api";
 import Button from "../components/Button";
 import EmptyState from "../components/EmptyState";
@@ -40,29 +40,28 @@ async function writeClipboardText(text) {
 
 export default function WorkItemsView({ token, data, notify, onSync, syncing }) {
   const [query, setQuery] = useState("");
-  const [modeOverride, setModeOverride] = useState(null);
+  const [mode, setMode] = useState("all");
+  const [workflow, setWorkflow] = useState("all");
   const [selectedItem, setSelectedItem] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRequestVersion, setDetailRequestVersion] = useState(0);
-  const mode = modeOverride ?? (
-    data.workItems.follow_up_count > 0
-      ? "follow_up"
-      : (data.workItems.approved_count > 0 ? "approved" : "follow_up")
-  );
+  const deferredQuery = useDeferredValue(query);
+  const workflowOptions = useMemo(() => {
+    const labels = new Map();
+    data.workItems.items.forEach((item) => labels.set(item.workflow, item.workflow_label));
+    return Array.from(labels, ([value, label]) => ({ value, label }));
+  }, [data.workItems.items]);
   const items = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+    const normalized = deferredQuery.trim().toLowerCase();
     return data.workItems.items.filter((item) => {
+      if (workflow !== "all" && item.workflow !== workflow) return false;
       if (mode === "approved" && item.category !== "approved") return false;
       if (mode === "follow_up" && item.category !== "follow_up") return false;
-      if (mode === "overdue" && (
-        item.category !== "follow_up"
-        || item.waiting_days == null
-        || item.waiting_days < 7
-      )) return false;
       if (!normalized) return true;
       return [
+        item.workflow_label,
         item.reference_no,
         item.project_no,
         item.title,
@@ -73,7 +72,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
       ]
         .some((value) => String(value || "").toLowerCase().includes(normalized));
     });
-  }, [data.workItems.items, query, mode]);
+  }, [data.workItems.items, deferredQuery, mode, workflow]);
 
   const closeDetail = useCallback(() => setSelectedItem(null), []);
 
@@ -83,7 +82,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
     setDetail(null);
     setDetailError(null);
     setDetailLoading(true);
-    apiRequest(`/v1/work-items/${encodeURIComponent(selectedItem.external_id)}/detail`, { token })
+    apiRequest(`/v1/work-items/${encodeURIComponent(selectedItem.workflow)}/${encodeURIComponent(selectedItem.external_id)}/detail`, { token })
       .then((result) => {
         if (active) setDetail(result);
       })
@@ -105,8 +104,9 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   async function copyList() {
     const text = items.map((item) => [
       item.reference_no || item.external_id,
+      item.workflow_label,
       item.title || item.project_no,
-      `我的关系：${relationLabels(item).join("、") || "待确认"}`,
+      `关系：${relationLabels(item).join("、") || "未标注"}`,
       `状态：${item.status || "待确认"}`,
       item.category === "approved" ? "已过审" : (item.current_approver || "待确认"),
       item.category === "approved"
@@ -115,7 +115,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
     ].join("\t")).join("\n");
     try {
       await writeClipboardText(text);
-      notify({ tone: "success", message: `已复制 ${items.length} 条流程记录` });
+      notify({ tone: "success", message: `已复制 ${items.length} 条单据` });
     } catch {
       notify({ tone: "error", message: "复制失败" });
     }
@@ -124,31 +124,39 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   return (
     <div className="view-stack">
       <section className="work-item-summary">
-        <div><span>当前待催办</span><strong>{data.workItems.follow_up_count}</strong></div>
-        <div><span>超过 7 天</span><strong>{data.workItems.items.filter((item) => item.category === "follow_up" && (item.waiting_days || 0) >= 7).length}</strong></div>
-        <div><span>已过审</span><strong>{data.workItems.approved_count}</strong></div>
+        <div><span>账号可见</span><strong>{data.workItems.total_count}</strong></div>
+        <div><span>待处理</span><strong>{data.workItems.follow_up_count}</strong></div>
+        <div><span>已完成</span><strong>{data.workItems.approved_count}</strong></div>
         <div><span>快照时间</span><strong>{formatDateTime(data.workItems.synced_at)}</strong></div>
       </section>
       <section className="content-section">
         <div className="work-item-scope">
           <ShieldCheck size={17} aria-hidden="true" />
-          <div><strong>范围：我参与的</strong><span>按发起、提交、项目管理、采购管理和审批关系匹配</span></div>
+          <div><strong>范围：账号可见全集</strong><span>采购立项、合同、订单、成本确认、验收</span></div>
           <p>
-            全量候选 <strong>{data.workItems.source_total_count ?? "--"}</strong>
+            上游对账 <strong>{data.workItems.source_total_count ?? "--"}</strong>
             <span>·</span>
-            本人匹配 <strong>{data.workItems.matched_count ?? data.workItems.total_count}</strong>
+            关系标注 <strong>{data.workItems.matched_count ?? 0}</strong>
+            <span>·</span>
+            其他状态 <strong>{data.workItems.other_count ?? 0}</strong>
           </p>
         </div>
         <div className="table-toolbar">
           <div className="search-control"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索编号、项目、责任人" aria-label="搜索流程记录" /></div>
+          <div className="workflow-filter">
+            <Layers3 size={16} aria-hidden="true" />
+            <select value={workflow} onChange={(event) => setWorkflow(event.target.value)} aria-label="筛选流程类型">
+              <option value="all">全部流程</option>
+              {workflowOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
           <div
             className="segmented"
-            aria-label="流程范围"
-            data-selection-source={modeOverride === null ? "automatic" : "manual"}
+            aria-label="单据状态"
           >
-            <button className={mode === "follow_up" ? "is-active" : ""} onClick={() => setModeOverride("follow_up")} type="button">待催办</button>
-            <button className={mode === "overdue" ? "is-active" : ""} onClick={() => setModeOverride("overdue")} type="button">超过 7 天</button>
-            <button className={mode === "approved" ? "is-active" : ""} onClick={() => setModeOverride("approved")} type="button">已过审</button>
+            <button className={mode === "all" ? "is-active" : ""} onClick={() => setMode("all")} type="button">全部</button>
+            <button className={mode === "follow_up" ? "is-active" : ""} onClick={() => setMode("follow_up")} type="button">待处理</button>
+            <button className={mode === "approved" ? "is-active" : ""} onClick={() => setMode("approved")} type="button">已完成</button>
           </div>
           <div className="table-toolbar__actions">
             <Button icon={Clipboard} onClick={copyList} disabled={!items.length}>复制清单</Button>
@@ -158,7 +166,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         {items.length ? (
           <div className="table-wrap">
             <table className="data-table followup-table">
-              <thead><tr><th>编号</th><th>项目</th><th>我的关系</th><th>当前节点</th><th>责任人</th><th>停留</th><th>状态</th><th /></tr></thead>
+              <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>关系</th><th>当前节点</th><th>责任人</th><th>状态</th><th /></tr></thead>
               <tbody>
                 {items.map((item) => (
                   <tr
@@ -175,19 +183,19 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
                       }
                     }}
                   >
+                    <td><strong>{item.workflow_label}</strong></td>
                     <td className="mono">{item.reference_no || item.external_id}</td>
-                    <td><strong>{item.title || "未命名项目"}</strong><span>{item.project_no}</span></td>
+                    <td><strong>{item.title || "未命名单据"}</strong><span>{item.project_no}</span></td>
                     <td>
                       <div className="relation-list">
                         {relationLabels(item).length
                           ? relationLabels(item).map((label) => <span className="relation-chip" key={label}>{label}</span>)
-                          : <span className="relation-chip relation-chip--muted">待确认</span>}
+                          : <span className="relation-chip relation-chip--muted">未标注</span>}
                       </div>
                     </td>
                     <td>{item.status || "--"}</td>
                     <td><strong>{item.category === "approved" ? "流程已完成" : (item.current_approver || "待确认")}</strong></td>
-                    <td className={(item.waiting_days || 0) >= 7 ? "waiting waiting--high" : "waiting"}>{item.category === "approved" ? "已完成" : (item.waiting_days == null ? "--" : `${item.waiting_days} 天`)}</td>
-                    <td><StatusTag value={item.category} label={item.category === "approved" ? "已过审" : item.status} /></td>
+                    <td><StatusTag value={item.category} label={item.status || "状态未知"} /></td>
                     <td className="align-right">
                       <button
                         className="icon-link"
@@ -207,7 +215,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
               </tbody>
             </table>
           </div>
-        ) : <EmptyState icon={ListTodo} title={query ? "没有匹配的流程记录" : (mode === "approved" ? "暂无已过审单据" : "暂无本地待催办项")} />}
+        ) : <EmptyState icon={ListTodo} title={query ? "没有匹配的单据" : "当前筛选无单据"} />}
       </section>
       {selectedItem ? (
         <WorkItemDetailDrawer

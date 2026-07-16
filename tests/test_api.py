@@ -15,6 +15,7 @@ from isstech_replay.api import create_app
 from isstech_replay.auth import login
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.config import Settings
+from isstech_replay.models.procurement import PROCUREMENT_STREAM_BY_WORKFLOW
 from isstech_replay.models.work_items import WorkflowKind
 from isstech_replay.session_store import SessionStore
 from isstech_replay.storage import WorkflowStorage
@@ -75,6 +76,43 @@ def _portal_html() -> str:
     )
 
 
+def _procurement_search_html(workflow: WorkflowKind) -> str:
+    spec = PROCUREMENT_STREAM_BY_WORKFLOW[workflow]
+    status = {
+        WorkflowKind.PROCUREMENT_CONTRACT: "审批通过",
+        WorkflowKind.PROCUREMENT_ORDER: "审批通过",
+        WorkflowKind.COST_CONFIRMATION: "审批拒绝",
+        WorkflowKind.CHECK_ACCEPTANCE: "审批中",
+    }[workflow]
+    fields = {
+        header: f"REDACTED-{index}"
+        for index, header in enumerate(spec.headers[1:], start=1)
+    }
+    fields[spec.reference_field] = f"REF-{workflow.value}"
+    fields[spec.title_field] = f"REDACTED {workflow.label}"
+    fields[spec.project_no_field] = "PROJECT-REDACTED"
+    fields[spec.status_field] = status
+    fields[spec.next_approver_field] = "USER_APPROVER" if status == "审批中" else ""
+    if spec.applicant_field:
+        fields[spec.applicant_field] = (
+            "USER_B" if workflow is WorkflowKind.CHECK_ACCEPTANCE else "OTHER_USER"
+        )
+    if spec.submitted_at_field:
+        fields[spec.submitted_at_field] = "2026-07-01"
+    headers = "".join(f"<th>{header}</th>" for header in spec.headers)
+    cells = [
+        f'<td><a class="View" ajax-data="{workflow.value}-1">查看</a></td>'
+    ]
+    cells.extend(f"<td>{fields[header]}</td>" for header in spec.headers[1:])
+    return (
+        '<table class="data-grid"><thead><tr>'
+        + headers
+        + "</tr></thead><tbody><tr>"
+        + "".join(cells)
+        + "</tr></tbody></table><span>总共1条记录</span>"
+    )
+
+
 def _upstream_handler(request: httpx.Request) -> httpx.Response:
     host = request.url.host or ""
     path = request.url.path or "/"
@@ -115,6 +153,19 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
             headers={"content-type": "application/pdf"},
             request=request,
         )
+    for workflow in (
+        WorkflowKind.PROCUREMENT_CONTRACT,
+        WorkflowKind.PROCUREMENT_ORDER,
+        WorkflowKind.COST_CONFIRMATION,
+        WorkflowKind.CHECK_ACCEPTANCE,
+    ):
+        spec = PROCUREMENT_STREAM_BY_WORKFLOW[workflow]
+        if host == "ipsapro.isstech.com" and path.startswith(spec.search_path):
+            return httpx.Response(
+                200,
+                text=_procurement_search_html(workflow),
+                request=request,
+            )
     if host == "ipsapro.isstech.com" and "/WebTP/PurchaseRequisition/" in path:
         if "/Detail/" in path:
             return httpx.Response(200, text=_edit_html(), request=request)
@@ -265,19 +316,28 @@ def test_list_and_detail_and_attachments() -> None:
         assert meta["content_length"] == len(b"FILEBYTES")
 
 
-def test_unified_work_items_returns_owned_follow_up_and_approved_records() -> None:
+def test_unified_work_items_returns_all_account_visible_workflows() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
     with client:
         r = client.get("/v1/work-items", headers=headers)
     assert r.status_code == 200
     body = r.json()
-    assert body["total_count"] == 2
-    assert body["follow_up_count"] == 1
-    assert body["approved_count"] == 1
-    by_category = {item["category"]: item for item in body["items"]}
-    follow_up = by_category["follow_up"]
-    approved = by_category["approved"]
+    assert body["total_count"] == 6
+    assert body["follow_up_count"] == 2
+    assert body["approved_count"] == 3
+    assert body["other_count"] == 1
+    by_workflow = {item["workflow"]: item for item in body["items"]}
+    follow_up = next(
+        item
+        for item in body["items"]
+        if item["workflow"] == "purchase_requisition" and item["category"] == "follow_up"
+    )
+    approved = next(
+        item
+        for item in body["items"]
+        if item["workflow"] == "purchase_requisition" and item["category"] == "approved"
+    )
     assert follow_up["workflow"] == "purchase_requisition"
     assert follow_up["external_id"] == "10002"
     assert follow_up["current_approver"] == "USER_APPROVER"
@@ -290,9 +350,11 @@ def test_unified_work_items_returns_owned_follow_up_and_approved_records() -> No
     assert approved["status"] == "审批通过"
     assert approved["current_approver"] == ""
     assert approved["waiting_days"] is None
-    assert {item["external_id"] for item in body["items"]} == {"10001", "10002"}
+    assert set(by_workflow) == {workflow.value for workflow in WorkflowKind}
     assert follow_up["relations"] == ["applicant"]
     assert approved["relations"] == ["applicant"]
+    assert by_workflow["check_acceptance"]["relations"] == ["applicant"]
+    assert by_workflow["check_acceptance"]["workflow_label"] == "采购验收"
 
 
 def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
@@ -304,7 +366,7 @@ def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
         del args, kwargs
         raise PaginationIncompleteError("pagination incomplete")
 
-    record.client.list_all_purchase_requisitions = fail_sync  # type: ignore[method-assign]
+    record.client.list_all_procurement_documents = fail_sync  # type: ignore[method-assign]
     with client:
         response = client.get(
             "/v1/work-items",
@@ -331,33 +393,40 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
 
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
-    assert first.json()["observed_count"] == 2
-    assert first.json()["actionable_count"] == 1
-    assert first.json()["event_count"] == 2
+    assert first.json()["observed_count"] == 6
+    assert first.json()["actionable_count"] == 2
+    assert first.json()["event_count"] == 6
+    assert len(first.json()["streams"]) == 5
     assert second.status_code == 200
     assert second.json()["event_count"] == 0
     assert current.status_code == 200
     assert current.json()["source"] == "sqlite_current"
-    assert current.json()["total_count"] == 2
-    assert current.json()["follow_up_count"] == 1
-    assert current.json()["approved_count"] == 1
-    assert current.json()["ownership_scope"] == "participant"
-    assert current.json()["source_total_count"] == 2
-    assert current.json()["matched_count"] == 2
+    assert current.json()["total_count"] == 6
+    assert current.json()["follow_up_count"] == 2
+    assert current.json()["approved_count"] == 3
+    assert current.json()["other_count"] == 1
+    assert current.json()["ownership_scope"] == "account_visible"
+    assert current.json()["source_total_count"] == 6
+    assert current.json()["matched_count"] == 3
+    assert current.json()["workflow_counts"] == {
+        workflow.value: (2 if workflow is WorkflowKind.PURCHASE_REQUISITION else 1)
+        for workflow in WorkflowKind
+    }
     assert {item["category"] for item in current.json()["items"]} == {
         "follow_up",
         "approved",
+        "other",
     }
-    assert all(item["relations"] == ["applicant"] for item in current.json()["items"])
+    assert sum(bool(item["relations"]) for item in current.json()["items"]) == 3
     assert runs.status_code == 200
-    assert len(runs.json()) == 2
+    assert len(runs.json()) == 10
     assert runs.json()[0]["status"] == "succeeded"
     storage = WorkflowStorage(
         account_database_path("alice", base_database_path=database)
     )
-    assert storage.table_count("sync_runs") == 2
-    assert storage.table_count("workflow_current") == 2
-    assert storage.table_count("workflow_events") == 2
+    assert storage.table_count("sync_runs") == 10
+    assert storage.table_count("workflow_current") == 6
+    assert storage.table_count("workflow_events") == 6
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
@@ -425,9 +494,9 @@ def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
     assert legacy.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
     assert missing.status_code == 404
     assert blank.status_code == 404
-    assert hidden.status_code == 404
+    assert hidden.status_code == 200
+    assert hidden.json()["item"]["category"] == "other"
     assert missing.json()["detail"]["code"] == "NOT_FOUND"
-    assert hidden.json()["detail"]["code"] == "NOT_FOUND"
     assert detail_calls == ["10001"]
 
 
@@ -532,10 +601,10 @@ def test_persisted_work_items_and_runs_are_isolated_by_login_account(
     assert bob_before.json()["synced_at"] is None
     assert bob_runs_before.json() == []
     assert bob_sync.status_code == 200
-    assert alice_after.json()["total_count"] == 2
-    assert alice_after.json()["follow_up_count"] == 1
-    assert alice_after.json()["approved_count"] == 1
-    assert len(alice_runs_after.json()) == 1
+    assert alice_after.json()["total_count"] == 6
+    assert alice_after.json()["follow_up_count"] == 2
+    assert alice_after.json()["approved_count"] == 3
+    assert len(alice_runs_after.json()) == 5
     assert account_database_path(
         "alice", base_database_path=database
     ).is_file()

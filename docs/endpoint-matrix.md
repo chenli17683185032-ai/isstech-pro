@@ -23,7 +23,7 @@ requisition identifier, or attachment body.
 | Submit credentials in Chrome | POST | `https://passport.isstech.com/?DomainUrl=...&ReturnUrl=...` | Browser session transition | observed | `captures/raw/20260715-login-attempt-01.cdp.json`, redacted protocol JSON |
 | Reach authenticated Portal | GET | `http://ipsapro.isstech.com/portal` | None | observed, HTTP 200 | same CDP capture |
 | Reuse an observed browser ticket with `httpx` | GET | `/WebTP/PurchaseRequisition` | None | replayed with imported ticket | `captures/redacted/auth-cookie-probe.json` |
-| Obtain a ticket using credentials in a clean HTTP process | POST + redirects | Passport to business host | Creates HTTP client session | pending | Run `tools/live_smoke.py` with runtime-only environment variables |
+| Obtain a ticket using credentials in a clean HTTP process | POST + redirects | Passport to business host | Creates HTTP client session | replayed | 2026-07-16 Keychain-backed dry-run and persisted sync; counts only |
 
 The captured browser credential POST contained these form fields only:
 
@@ -77,6 +77,23 @@ first_page_items = 10
 columns include status and next approver
 ```
 
+## Account-visible procurement SearchIndex streams
+
+| Workflow | Method and exact path shape | State | 2026-07-16 complete count |
+| --- | --- | --- | --- |
+| Purchase requisition | POST `/WebTP/PurchaseRequisition/SearchIndex/0/1/False/{page}/{size}` | replayed | 78/78 |
+| Procurement contract | POST `/WebTP/ProcurementContract/SearchIndex/0/1/False/{page}/{size}` | replayed | 79/79 |
+| Procurement order | POST `/WebTP/ProcurementOrder/SearchIndex/0/1/False/{page}/{size}` | replayed | 6/6 |
+| Cost confirmation | POST `/WebTP/CostConfirmation/SearchIndex/0/1/False/{page}/{size}` | replayed | 133/133 |
+| Check acceptance | POST `/WebTP/CheckAcceptance/SearchIndex/0/1/False/{page}/{size}` | replayed | 57/57 |
+
+All five streams accepted page size 50 and declared stable totals through their
+last page. The four added workflows use an explicit empty filter body; replaying
+display-oriented form values can accidentally apply filters and is not part of
+the runtime adapter. List schemas are fixed by observed column headers, and each
+row must expose exactly one `ajax-data` stable ID. The four added flows cache
+their list fields locally; their upstream Detail routes are not live-enabled.
+
 ## Detail and approval trail
 
 | Action | Method | Endpoint | Side effect | State | Evidence |
@@ -107,6 +124,7 @@ comment. Values remain in raw evidence only.
 | Submit/approve | paths containing `Submit` or `Approve` | blocked-write / preview only |
 | Adjust/revoke | mutating action paths containing `Adjust` or `Revocation` | blocked-write / preview only |
 | Attachment upload/delete | `/WebTP/Attachment/Upload/...`, `/Delete/...` | blocked-write |
+| Added procurement workflow writes | `Create/Edit/Save/Submit/Approve/Adjust/Delete/Revoke/RollBack` | blocked-write before SearchIndex read rules |
 
 Request bodies for these actions have not been transmitted or captured. Any
 future shape discovery must use request-stage pause plus abort and remain in
@@ -121,5 +139,5 @@ future shape discovery must use request-stage pause plus abort and remain in
    userinfo default to deny.
 4. Live enablement is limited to the exact read paths above. Do not infer a
    broader controller-prefix allowlist.
-5. The remaining auth gap is clean-process pure-HTTP login, not browser login
-   capture. The remaining protocol gap is intercepted-and-aborted write shape.
+5. The remaining protocol gap is intercepted-and-aborted write shape; runtime
+   credentials and authenticated response bodies remain intentionally uncommitted.

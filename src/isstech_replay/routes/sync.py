@@ -13,7 +13,7 @@ from isstech_replay.routes.deps import get_session
 from isstech_replay.routes.work_items import WorkItemOut
 from isstech_replay.session_store import SessionRecord
 from isstech_replay.storage import WorkflowStorage
-from isstech_replay.sync import safe_error_message, sync_purchase_requisitions
+from isstech_replay.sync import safe_error_message, sync_procurement_workflows
 
 
 router = APIRouter(tags=["sync"])
@@ -27,6 +27,21 @@ class SyncEventOut(BaseModel):
     old_value: str | None = None
     new_value: str | None = None
     details: dict[str, str | None] = Field(default_factory=dict)
+
+
+class SyncStreamOut(BaseModel):
+    workflow: str
+    workflow_label: str
+    run_id: str
+    status: str
+    source_total_count: int | None = None
+    observed_count: int
+    actionable_count: int
+    snapshot_count: int
+    history_rows_inserted: int
+    event_count: int
+    error_type: str | None = None
+    error_message: str | None = None
 
 
 class SyncRunOut(BaseModel):
@@ -45,6 +60,7 @@ class SyncRunOut(BaseModel):
     database_path: str | None = None
     events: list[SyncEventOut] = Field(default_factory=list)
     work_items: list[WorkItemOut] = Field(default_factory=list)
+    streams: list[SyncStreamOut] = Field(default_factory=list)
 
 
 class SyncRunSummaryOut(BaseModel):
@@ -120,7 +136,7 @@ def sync_work_items(
         else WorkflowStorage(account_database_path(session.username))
     )
     try:
-        result = sync_purchase_requisitions(
+        result = sync_procurement_workflows(
             session.client,
             storage=storage,
             max_pages=max_pages,
@@ -161,6 +177,7 @@ def sync_work_items(
             WorkItemOut(
                 key=item.key,
                 workflow=item.workflow.value,
+                workflow_label=item.workflow.label,
                 external_id=item.external_id,
                 reference_no=item.reference_no,
                 project_no=item.project_no,
@@ -175,5 +192,22 @@ def sync_work_items(
                 relations=list(item.relations),
             )
             for item in result.work_items
+        ],
+        streams=[
+            SyncStreamOut(
+                workflow=stream.workflow.value,
+                workflow_label=stream.workflow.label,
+                run_id=stream.run_id,
+                status=stream.status,
+                source_total_count=stream.source_total_count,
+                observed_count=stream.observed_count,
+                actionable_count=stream.actionable_count,
+                snapshot_count=stream.snapshot_count,
+                history_rows_inserted=stream.history_rows_inserted,
+                event_count=stream.event_count,
+                error_type=stream.error_type,
+                error_message=stream.error_message,
+            )
+            for stream in result.streams
         ],
     )

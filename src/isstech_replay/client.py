@@ -16,6 +16,10 @@ import httpx
 
 from .config import Settings
 from .models.attachment import AttachmentContent, AttachmentMeta
+from .models.procurement import (
+    PROCUREMENT_STREAM_BY_WORKFLOW,
+    ProcurementListResult,
+)
 from .models.purchase import (
     PurchaseListQuery,
     PurchaseListResult,
@@ -25,10 +29,12 @@ from .models.purchase import (
 from .parsers.attachment import parse_attachment_list
 from .parsers.login import is_login_page
 from .parsers.portal import parse_portal_display_name
+from .parsers.procurement import parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
 from .policy import EndpointPolicy, PolicyViolation, UnsafeRequestError
 from .transport import GuardedTransport
 from .validation import require_path_segment
+from .models.work_items import WorkflowKind
 
 # Re-export for existing imports
 __all__ = [
@@ -253,6 +259,130 @@ class IsstechClient:
 
     def list_view(self, view: PurchaseView, **kwargs: Any) -> PurchaseListResult:
         return self.list_purchase_requisitions(PurchaseListQuery(view=view, **kwargs))
+
+    def list_procurement_documents(
+        self,
+        workflow: WorkflowKind,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> ProcurementListResult:
+        """Read one observed SearchIndex page with no business filters."""
+        try:
+            spec = PROCUREMENT_STREAM_BY_WORKFLOW[workflow]
+        except KeyError as exc:
+            raise ValueError(f"unsupported procurement workflow: {workflow}") from exc
+        path = spec.page_path(page, page_size)
+        data: dict[str, str] = {}
+        if workflow is WorkflowKind.PURCHASE_REQUISITION:
+            data = PurchaseListQuery(
+                view=PurchaseView.SEARCH,
+                page=page,
+                page_size=page_size,
+            ).filter_form(navigation=True)
+        response = self.post(
+            self._url(path),
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_procurement_list(
+            response.text,
+            spec=spec,
+            source_url=str(response.url),
+            page=page,
+            page_size=page_size,
+        )
+
+    def list_all_procurement_documents(
+        self,
+        workflow: WorkflowKind,
+        *,
+        max_pages: int = 100,
+        page_size: int = 50,
+    ) -> ProcurementListResult:
+        """Read one complete procurement stream or fail without returning a partial list."""
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        if workflow not in PROCUREMENT_STREAM_BY_WORKFLOW:
+            raise ValueError(f"unsupported procurement workflow: {workflow}")
+
+        items = []
+        seen: set[str] = set()
+        first_result: ProcurementListResult | None = None
+        expected_total: int | None = None
+        for page in range(1, max_pages + 1):
+            result = self.list_procurement_documents(
+                workflow,
+                page=page,
+                page_size=page_size,
+            )
+            if first_result is None:
+                first_result = result
+            if result.total_count is None:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} page {page} did not declare a total"
+                )
+            if expected_total is None:
+                expected_total = result.total_count
+            elif result.total_count != expected_total:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} total changed during pagination: "
+                    f"{expected_total} -> {result.total_count}"
+                )
+
+            added = 0
+            for item in result.items:
+                if not item.id:
+                    raise PaginationIncompleteError(
+                        f"{workflow.value} page {page} contains a record without an identity"
+                    )
+                if item.id in seen:
+                    continue
+                seen.add(item.id)
+                items.append(item)
+                added += 1
+
+            if len(items) > expected_total:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} collected {len(items)} records but reported "
+                    f"{expected_total}"
+                )
+            if len(items) == expected_total:
+                break
+            if not result.items:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} page {page} was empty at "
+                    f"{len(items)}/{expected_total}"
+                )
+            if added == 0:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} page {page} repeated without progress"
+                )
+            if len(result.items) < page_size:
+                raise PaginationIncompleteError(
+                    f"{workflow.value} page {page} was short at "
+                    f"{len(items)}/{expected_total}"
+                )
+        else:
+            raise PaginationIncompleteError(
+                f"{workflow.value} reached max_pages={max_pages} at "
+                f"{len(items)}/{expected_total}"
+            )
+
+        assert first_result is not None
+        return ProcurementListResult(
+            workflow=workflow,
+            items=tuple(items),
+            total_count=expected_total,
+            page=1,
+            page_size=page_size,
+            source_url=first_result.source_url,
+        )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:
         """Load the captured read-only Detail page."""
