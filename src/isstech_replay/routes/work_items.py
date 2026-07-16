@@ -20,7 +20,11 @@ from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
 from isstech_replay.storage import WorkflowStorage, cached_workflow_detail
 from isstech_replay.sync import safe_error_message, sync_procurement_workflows
-from isstech_replay.work_items import personal_work_item_scope, visible_item_category
+from isstech_replay.work_items import (
+    personal_scope_reasons,
+    personal_work_item_scope,
+    visible_item_category,
+)
 
 router = APIRouter(tags=["work-items"])
 
@@ -51,6 +55,12 @@ class WorkItemListOut(BaseModel):
     approved_count: int
     other_count: int = 0
     synced_at: str
+    source: str = "upstream_dry_run"
+    ownership_scope: str = "personal_submissions_projects_and_management"
+    source_total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
 
 
 class CurrentWorkItemListOut(BaseModel):
@@ -61,11 +71,12 @@ class CurrentWorkItemListOut(BaseModel):
     other_count: int = 0
     synced_at: str | None = None
     source: str = "sqlite_current"
-    ownership_scope: str = "personal_projects_and_submissions"
+    ownership_scope: str = "personal_submissions_projects_and_management"
     source_total_count: int | None = None
     matched_count: int = 0
     my_project_count: int = 0
     submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
     workflow_counts: dict[str, int] = Field(default_factory=dict)
     source_counts: dict[str, int] = Field(default_factory=dict)
 
@@ -186,6 +197,10 @@ def list_current_work_items(
         ),
         submitted_by_me_count=sum(
             WorkItemScopeReason.SUBMITTED_BY_ME in record.scope_reasons
+            for record in scoped
+        ),
+        managed_by_me_count=sum(
+            WorkItemScopeReason.MANAGED_BY_ME in record.scope_reasons
             for record in scoped
         ),
         workflow_counts=workflow_counts,
@@ -315,7 +330,23 @@ def list_work_items(
                 else "one or more procurement streams were incomplete"
             )
             raise RuntimeError(message)
-        items = result.work_items
+        my_project_numbers = {
+            item.project_no.strip()
+            for item in result.work_items
+            if item.project_no.strip()
+            and WorkItemRelation.PROJECT_MANAGER in item.relations
+        }
+        items = tuple(
+            (item, reasons)
+            for item in result.work_items
+            if (
+                reasons := personal_scope_reasons(
+                    project_no=item.project_no,
+                    relations=item.relations,
+                    my_project_numbers=my_project_numbers,
+                )
+            )
+        )
     except PermissionError as exc:
         raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
     except Exception as exc:
@@ -339,16 +370,29 @@ def list_work_items(
                 source_url=item.source_url,
                 category=item.category,
                 relations=list(item.relations),
+                scope_reasons=list(scope_reasons),
             )
-            for item in items
+            for item, scope_reasons in items
         ],
         total_count=len(items),
         follow_up_count=sum(
-            item.category is WorkItemCategory.FOLLOW_UP for item in items
+            item.category is WorkItemCategory.FOLLOW_UP for item, _ in items
         ),
         approved_count=sum(
-            item.category is WorkItemCategory.APPROVED for item in items
+            item.category is WorkItemCategory.APPROVED for item, _ in items
         ),
-        other_count=sum(item.category is WorkItemCategory.OTHER for item in items),
+        other_count=sum(
+            item.category is WorkItemCategory.OTHER for item, _ in items
+        ),
         synced_at=result.observed_at,
+        source_total_count=len(result.work_items),
+        my_project_count=sum(
+            WorkItemScopeReason.MY_PROJECT in reasons for _, reasons in items
+        ),
+        submitted_by_me_count=sum(
+            WorkItemScopeReason.SUBMITTED_BY_ME in reasons for _, reasons in items
+        ),
+        managed_by_me_count=sum(
+            WorkItemScopeReason.MANAGED_BY_ME in reasons for _, reasons in items
+        ),
     )

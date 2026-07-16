@@ -9,7 +9,7 @@ from pathlib import Path
 from isstech_replay.models.bizcase import BizCaseListResult, BizCaseRecord
 from isstech_replay.models.payment import PaymentListResult, PaymentRecord
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
-from isstech_replay.readonly_sync import sync_readonly_modules
+from isstech_replay.readonly_sync import readonly_snapshots, sync_readonly_modules
 from isstech_replay.storage import SCHEMA_VERSION, WorkflowStorage
 
 
@@ -39,7 +39,11 @@ def _payment_result(*, status: str = "已保存") -> PaymentListResult:
     )
 
 
-def _bizcase_result(*, count: int = 2) -> BizCaseListResult:
+def _bizcase_result(
+    *,
+    count: int = 2,
+    project_numbers: tuple[str, ...] = (),
+) -> BizCaseListResult:
     records = tuple(
         BizCaseRecord(
             id=f"BC-REDACTED-{index:03d}-V001",
@@ -47,6 +51,11 @@ def _bizcase_result(*, count: int = 2) -> BizCaseListResult:
             version_no=f"BC-REDACTED-{index:03d}-V001",
             bizcase_no=f"BC-REDACTED-{index:03d}",
             client_name=f"CLIENT-{index}",
+            project_no=(
+                project_numbers[index - 1]
+                if index <= len(project_numbers)
+                else ""
+            ),
             project_name=f"PROJECT REDACTED {index}",
             current_approver="APPROVED",
             fields=(("BizCase编号", f"BC-REDACTED-{index:03d}"),),
@@ -69,13 +78,29 @@ class FakeReadonlyClient:
         bizcase_count: int = 2,
         fail_payment: bool = False,
         fail_bizcase: bool = False,
+        fail_identity: bool = False,
     ) -> None:
         self.payment_status = payment_status
         self.bizcase_count = bizcase_count
         self.fail_payment = fail_payment
         self.fail_bizcase = fail_bizcase
+        self.fail_identity = fail_identity
 
-    def list_payment_records(self) -> PaymentListResult:
+    def get_portal_display_name(self) -> str:
+        if self.fail_identity:
+            raise RuntimeError("identity unavailable")
+        return "USER-A"
+
+    def list_personal_payment_records(
+        self,
+        *,
+        display_name: str,
+        project_numbers: tuple[str, ...],
+        max_pages: int,
+    ) -> PaymentListResult:
+        assert display_name == "USER-A"
+        assert project_numbers == ()
+        assert max_pages == 20
         if self.fail_payment:
             raise RuntimeError("payment unavailable")
         return _payment_result(status=self.payment_status)
@@ -120,6 +145,39 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
         storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)[0].payload_json
     )
     assert payment_payload["payment_no"] == "PAYMENT-REDACTED-1"
+    assert payment_payload["scope_reasons"] == ["submitted_by_me"]
+
+
+def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
+    snapshots = readonly_snapshots(
+        ReadonlyModuleKind.BIZCASE,
+        _bizcase_result(
+            project_numbers=(" PROJECT-1 ", "PROJECT-OTHER"),
+        ),
+        observed_at="2026-07-16T01:00:00+00:00",
+        project_numbers=("PROJECT-1",),
+    )
+
+    payloads = [json.loads(snapshot.payload_json) for snapshot in snapshots]
+    assert payloads[0]["scope_reasons"] == ["my_project"]
+    assert payloads[1]["scope_reasons"] == []
+
+
+def test_identity_failure_does_not_block_bizcase_checkpoint(tmp_path: Path) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+
+    result = sync_readonly_modules(
+        FakeReadonlyClient(fail_identity=True),  # type: ignore[arg-type]
+        storage=storage,
+        observed_at=T1,
+        started_at=T1,
+        run_id="identity-failure",
+    )
+
+    assert result.status == "partial"
+    assert [stream.status for stream in result.streams] == ["failed", "succeeded"]
+    assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 0
+    assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
 
 
 def test_readonly_stream_failure_preserves_its_last_successful_snapshot(

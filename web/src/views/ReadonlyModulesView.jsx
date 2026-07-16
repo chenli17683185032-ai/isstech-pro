@@ -114,7 +114,7 @@ export default function ReadonlyModulesView({
 
   const emptyTitle = deferredQuery
     ? `没有匹配的${definition.label}记录`
-    : `暂无已缓存的${definition.label}记录`;
+    : `暂无个人相关的${definition.label}记录`;
 
   return (
     <div className="view-stack">
@@ -140,10 +140,15 @@ export default function ReadonlyModulesView({
         <div className="work-item-scope readonly-scope">
           <ShieldCheck size={17} aria-hidden="true" />
           <div>
-            <strong>账号可见范围</strong>
-            <span>仅呈现当前账号在上游查询页可见的记录，不表示付款或编辑权限</span>
+            <strong>个人相关范围</strong>
+            <span>仅显示我申请、我的项目或我管理的单据；无法证明归属时不显示</span>
           </div>
-          <p><span>源记录</span><strong>{current.source_total_count}</strong><span>缓存</span><strong>{current.total_count}</strong></p>
+          <p>
+            <span>源候选</span><strong>{current.source_total_count}</strong>
+            <span>我申请</span><strong>{current.submitted_by_me_count}</strong>
+            <span>我的项目</span><strong>{current.my_project_count}</strong>
+            <span>我管理</span><strong>{current.managed_by_me_count}</strong>
+          </p>
         </div>
 
         <div className="table-toolbar readonly-toolbar">

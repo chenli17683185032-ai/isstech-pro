@@ -20,6 +20,7 @@ const FIELD_ORDER = Object.keys(FIELD_LABELS);
 const SCOPE_LABELS = {
   my_project: "我的项目",
   submitted_by_me: "我提交的",
+  managed_by_me: "我管理的",
 };
 
 function detailFields(detail, item) {

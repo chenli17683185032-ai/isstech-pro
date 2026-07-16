@@ -7,6 +7,7 @@ import re
 
 from isstech_replay.models.payment import (
     PAYMENT_HEADERS,
+    PAYMENT_QUERY_HEADERS,
     PaymentListResult,
     PaymentRecord,
 )
@@ -34,6 +35,7 @@ class _PaymentGridParser(HTMLParser):
         self._cell: dict[str, object] | None = None
         self._parts: list[str] = []
         self._header_parts: list[str] | None = None
+        self._header_child_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -46,12 +48,15 @@ class _PaymentGridParser(HTMLParser):
             return
         if not self.in_grid:
             return
+        if self._header_parts is not None and tag != "th":
+            self._header_child_depth += 1
         if tag == "table":
             self.grid_depth += 1
         elif tag == "tr":
             self._row = []
         elif tag == "th":
             self._header_parts = []
+            self._header_child_depth = 0
         elif tag == "td" and self._row is not None:
             self._cell = {"text": "", "ajax_ids": []}
             self._parts = []
@@ -64,6 +69,8 @@ class _PaymentGridParser(HTMLParser):
         tag = tag.lower()
         if not self.in_grid:
             return
+        if self._header_parts is not None and tag != "th" and self._header_child_depth:
+            self._header_child_depth -= 1
         if tag == "th" and self._header_parts is not None:
             self.headers.append(_clean("".join(self._header_parts)))
             self._header_parts = None
@@ -82,36 +89,52 @@ class _PaymentGridParser(HTMLParser):
                 self.in_grid = False
 
     def handle_data(self, data: str) -> None:
-        if self._header_parts is not None:
+        if self._header_parts is not None and self._header_child_depth == 0:
             self._header_parts.append(data)
         elif self._cell is not None:
             self._parts.append(data)
 
 
-def parse_payment_list(html: str, *, source_url: str = "") -> PaymentListResult:
+def _parse_payment_list(
+    html: str,
+    *,
+    expected_headers: tuple[str, ...],
+    source_url: str,
+) -> PaymentListResult:
     parser = _PaymentGridParser()
     parser.feed(html)
     if not parser.found_grid:
         raise ValueError("payment list grid not found")
-    if tuple(parser.headers) != PAYMENT_HEADERS:
+    rows = parser.rows
+    if (
+        expected_headers == PAYMENT_QUERY_HEADERS
+        and tuple(parser.headers) == ("", *expected_headers)
+    ):
+        rows = [row[1:] for row in rows]
+    elif tuple(parser.headers) != expected_headers:
         raise ValueError("payment list schema changed")
 
     items: list[PaymentRecord] = []
-    field_names = PAYMENT_HEADERS[1:]
-    for row in parser.rows:
-        if len(row) != len(PAYMENT_HEADERS):
+    seen_ids: set[str] = set()
+    field_names = expected_headers[1:]
+    for row in rows:
+        if len(row) != len(expected_headers):
             raise ValueError("payment row does not match list schema")
         raw_ids = row[0]["ajax_ids"]
         assert isinstance(raw_ids, list)
         identities = {str(value) for value in raw_ids if value}
         if len(identities) != 1:
             raise ValueError("payment row has no unique stable identity")
+        identity = identities.pop()
+        if identity in seen_ids:
+            raise ValueError("payment page contains a duplicate stable identity")
+        seen_ids.add(identity)
         values = [str(cell["text"]) for cell in row[1:]]
         fields = tuple(zip(field_names, values, strict=True))
         field_map = dict(fields)
         items.append(
             PaymentRecord(
-                id=identities.pop(),
+                id=identity,
                 payment_no=field_map["付款单编号"],
                 payment_type=field_map["付款类别"],
                 applicant=field_map["申请人"],
@@ -143,3 +166,18 @@ def parse_payment_list(html: str, *, source_url: str = "") -> PaymentListResult:
         source_url=source_url,
     )
 
+
+def parse_payment_list(html: str, *, source_url: str = "") -> PaymentListResult:
+    return _parse_payment_list(
+        html,
+        expected_headers=PAYMENT_HEADERS,
+        source_url=source_url,
+    )
+
+
+def parse_payment_query_list(html: str, *, source_url: str = "") -> PaymentListResult:
+    return _parse_payment_list(
+        html,
+        expected_headers=PAYMENT_QUERY_HEADERS,
+        source_url=source_url,
+    )

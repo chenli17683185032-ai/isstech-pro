@@ -8,9 +8,13 @@ import httpx
 import pytest
 
 from isstech_replay.client import IsstechClient
+from isstech_replay.models.payment import payment_empty_query_form, payment_query_form
 from isstech_replay.policy import (
     BIZCASE_QUERY_URL,
+    BIZCASE_VIEW_PARAMS,
     EndpointPolicy,
+    PAYMENT_LIST_PATHS,
+    PAYMENT_QUERY_PATH,
     PolicyViolation,
     RequestClass,
     SideEffect,
@@ -296,19 +300,120 @@ def _bizcase_pagination_form() -> dict[str, str]:
     }
 
 
-def test_payment_policy_allows_only_initial_get() -> None:
+def _payment_query_form() -> dict[str, str]:
+    return payment_empty_query_form()
+
+
+def test_payment_policy_allows_only_served_list_gets() -> None:
     transport, seen = _tracking_transport()
     with IsstechClient(transport=transport) as client:
-        client.get(f"{BUSINESS}/WebPMS/Payment/index")
+        for path in PAYMENT_LIST_PATHS.values():
+            client.get(f"{BUSINESS}{path}")
         for method, path in (
             ("POST", "/WebPMS/?Length=7"),
+            ("POST", "/WebPMS/Payment/QueryList"),
+            ("GET", "/WebPMS/Payment/QueryList?status=all"),
             ("GET", "/WebPMS/Payment/Edit/1"),
             ("POST", "/WebPMS/Payment/DelMain"),
             ("GET", "/WebPMS/selector/selecttype"),
         ):
             with pytest.raises(PolicyViolation):
                 client.request(method, f"{BUSINESS}{path}")
-    assert seen == [f"GET {BUSINESS}/WebPMS/Payment/index"]
+    assert seen == [f"GET {BUSINESS}{path}" for path in PAYMENT_LIST_PATHS.values()]
+
+
+def test_payment_policy_body_validates_empty_query() -> None:
+    url = f"{BUSINESS}{PAYMENT_QUERY_PATH}"
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        client.post(url, data=_payment_query_form())
+
+    assert seen == [f"POST {url}"]
+
+
+def test_payment_policy_body_validates_proven_pager() -> None:
+    url = f"{BUSINESS}{PAYMENT_QUERY_PATH}/0/1/False/14"
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        client.post(url, data=payment_empty_query_form(pager=True))
+
+    assert seen == [f"POST {url}"]
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        payment_query_form(applicant="USER-A"),
+        payment_query_form(project_no="PROJECT-1"),
+        payment_query_form(applicant="USER-A", pager=True),
+        payment_query_form(project_no="PROJECT-1", pager=True),
+    ],
+)
+def test_payment_policy_allows_bounded_personal_filters(form: dict[str, str]) -> None:
+    is_pager = "PI_PaymentCompany" not in form
+    path = (
+        f"{PAYMENT_QUERY_PATH}/0/1/False/2"
+        if is_pager
+        else PAYMENT_QUERY_PATH
+    )
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        client.post(f"{BUSINESS}{path}", data=form)
+    assert seen == [f"POST {BUSINESS}{path}"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"ajax": "0"},
+        {"PM_EmpName": "USER-A"},
+        {"unexpected": ""},
+    ],
+)
+def test_payment_policy_blocks_query_drift(change: dict[str, str]) -> None:
+    url = f"{BUSINESS}{PAYMENT_QUERY_PATH}"
+    form = _payment_query_form()
+    form.update(change)
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.post(url, data=form)
+        with pytest.raises(PolicyViolation):
+            client.post(url, json=form)
+        with pytest.raises(PolicyViolation):
+            client.get(url)
+
+    assert seen == []
+
+
+def test_payment_policy_blocks_duplicate_query_fields() -> None:
+    url = f"{BUSINESS}{PAYMENT_QUERY_PATH}"
+    form = list(_payment_query_form().items()) + [("ajax", "1")]
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.post(
+                url,
+                content=urlencode(form),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+    assert seen == []
+
+
+def test_payment_policy_blocks_unbounded_or_wrong_pager_body() -> None:
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.post(
+                f"{BUSINESS}{PAYMENT_QUERY_PATH}/0/1/False/101",
+                data=payment_empty_query_form(pager=True),
+            )
+        with pytest.raises(PolicyViolation):
+            client.post(
+                f"{BUSINESS}{PAYMENT_QUERY_PATH}/0/1/False/2",
+                data=payment_empty_query_form(),
+            )
+    assert seen == []
 
 
 def test_bizcase_policy_requires_exact_query_and_body_validated_pager() -> None:
@@ -320,6 +425,26 @@ def test_bizcase_policy_requires_exact_query_and_body_validated_pager() -> None:
 
     assert seen == [f"GET {url}", f"POST {url}"]
     assert EndpointPolicy().decide("POST", url).request_class is RequestClass.BUILD_ONLY
+
+
+def test_bizcase_policy_allows_only_served_list_view_gets() -> None:
+    transport, seen = _tracking_transport()
+    urls = [
+        (
+            f"{BUSINESS}{BIZCASE_QUERY_URL}"
+            f"&url={control}&urltype=mcontrol&helpmenucode={help_menu_code}"
+        )
+        for control, help_menu_code in BIZCASE_VIEW_PARAMS.values()
+    ]
+    with IsstechClient(transport=transport) as client:
+        for url in urls:
+            client.get(url)
+        with pytest.raises(PolicyViolation):
+            client.get(urls[0] + "&unexpected=1")
+        with pytest.raises(PolicyViolation):
+            client.post(urls[0], data=_bizcase_pagination_form())
+
+    assert seen == [f"GET {url}" for url in urls]
 
 
 @pytest.mark.parametrize(

@@ -81,6 +81,10 @@ def test_personal_scope_unions_project_records_and_submissions_once() -> None:
         "submission-only",
         "overlap",
     ]
+    assert scoped[0].scope_reasons == (
+        WorkItemScopeReason.MY_PROJECT,
+        WorkItemScopeReason.MANAGED_BY_ME,
+    )
     assert scoped[1].scope_reasons == (WorkItemScopeReason.MY_PROJECT,)
     assert scoped[2].scope_reasons == (WorkItemScopeReason.SUBMITTED_BY_ME,)
     assert scoped[3].scope_reasons == (
@@ -89,7 +93,7 @@ def test_personal_scope_unions_project_records_and_submissions_once() -> None:
     )
 
 
-def test_personal_scope_excludes_approval_and_procurement_roles_alone() -> None:
+def test_personal_scope_includes_management_but_not_approval_alone() -> None:
     scoped = personal_work_item_scope(
         (
             _scope_snapshot(
@@ -104,7 +108,10 @@ def test_personal_scope_excludes_approval_and_procurement_roles_alone() -> None:
         )
     )
 
-    assert scoped == ()
+    assert [record.snapshot.external_id for record in scoped] == [
+        "procurement-manager"
+    ]
+    assert scoped[0].scope_reasons == (WorkItemScopeReason.MANAGED_BY_ME,)
 
 
 def test_personal_scope_never_joins_empty_project_numbers() -> None:
@@ -119,7 +126,8 @@ def test_personal_scope_never_joins_empty_project_numbers() -> None:
         )
     )
 
-    assert scoped == ()
+    assert [record.snapshot.external_id for record in scoped] == ["empty-manager"]
+    assert scoped[0].scope_reasons == (WorkItemScopeReason.MANAGED_BY_ME,)
 
 
 def test_purchase_follow_up_items_only_include_active_named_node() -> None:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from isstech_replay.account_scope import account_database_path
 from isstech_replay.errors import local_storage_error, upstream_error
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
+from isstech_replay.models.work_items import WorkItemScopeReason
 from isstech_replay.readonly_sync import sync_readonly_modules
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
@@ -33,6 +34,7 @@ class PaymentRecordOut(BaseModel):
     amount: str = ""
     currency: str = ""
     status: str = ""
+    scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
     fields: dict[str, str] = Field(default_factory=dict)
     source_url: str = ""
 
@@ -49,6 +51,7 @@ class BizCaseRecordOut(BaseModel):
     project_name: str = ""
     revenue_recognition_type: str = ""
     current_approver: str = ""
+    scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
     fields: dict[str, str] = Field(default_factory=dict)
     source_url: str = ""
 
@@ -57,10 +60,13 @@ class PaymentListOut(BaseModel):
     module: str = ReadonlyModuleKind.PAYMENT.value
     module_label: str = ReadonlyModuleKind.PAYMENT.label
     source: str = "sqlite_current"
-    ownership_scope: str = "account_visible"
+    ownership_scope: str = "personal_submissions_projects_and_management"
     synced_at: str | None = None
     source_total_count: int = 0
     total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
     items: list[PaymentRecordOut] = Field(default_factory=list)
 
 
@@ -68,10 +74,13 @@ class BizCaseListOut(BaseModel):
     module: str = ReadonlyModuleKind.BIZCASE.value
     module_label: str = ReadonlyModuleKind.BIZCASE.label
     source: str = "sqlite_current"
-    ownership_scope: str = "account_visible"
+    ownership_scope: str = "personal_submissions_projects_and_management"
     synced_at: str | None = None
     source_total_count: int = 0
     total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
     items: list[BizCaseRecordOut] = Field(default_factory=list)
 
 
@@ -138,19 +147,53 @@ def _current_payloads(
     return payloads, storage.latest_readonly_successful_run(module)
 
 
+def _payload_scope_reasons(
+    payload: dict[str, object],
+) -> tuple[WorkItemScopeReason, ...]:
+    raw_reasons = payload.get("scope_reasons")
+    if raw_reasons is None:
+        return ()
+    if not isinstance(raw_reasons, list) or any(
+        not isinstance(value, str) for value in raw_reasons
+    ):
+        raise ValueError("invalid cached personal scope reasons")
+    try:
+        found = {WorkItemScopeReason(value) for value in raw_reasons}
+    except ValueError as exc:
+        raise ValueError("unknown cached personal scope reason") from exc
+    return tuple(reason for reason in WorkItemScopeReason if reason in found)
+
+
+def _personal_payloads(
+    payloads: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], dict[WorkItemScopeReason, int]]:
+    personal = []
+    counts = {reason: 0 for reason in WorkItemScopeReason}
+    for payload in payloads:
+        reasons = _payload_scope_reasons(payload)
+        if not reasons:
+            continue
+        personal.append(payload)
+        for reason in reasons:
+            counts[reason] += 1
+    return personal, counts
+
+
 @router.post("/readonly-modules/sync", response_model=ReadonlySyncOut)
 def sync_modules(
     session: Annotated[SessionRecord, Depends(get_session)],
     max_pages: int = Query(default=20, ge=1, le=100),
     dry_run: bool = Query(default=False),
 ) -> ReadonlySyncOut:
-    storage = None if dry_run else _storage(session)
+    scope_storage = _storage(session)
+    storage = None if dry_run else scope_storage
     try:
         result = sync_readonly_modules(
             session.client,
             storage=storage,
             max_pages=max_pages,
             dry_run=dry_run,
+            scope_storage=scope_storage,
         )
     except PermissionError as exc:
         raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc
@@ -193,7 +236,8 @@ def list_payment_records(
     session: Annotated[SessionRecord, Depends(get_session)],
 ) -> PaymentListOut:
     try:
-        payloads, latest = _current_payloads(_storage(session), ReadonlyModuleKind.PAYMENT)
+        cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.PAYMENT)
+        payloads, counts = _personal_payloads(cached)
         items = [PaymentRecordOut.model_validate(payload) for payload in payloads]
     except Exception as exc:
         raise local_storage_error(f"payment cache read failed: {type(exc).__name__}") from exc
@@ -201,6 +245,9 @@ def list_payment_records(
         synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
         source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
         total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
         items=items,
     )
 
@@ -210,7 +257,8 @@ def list_bizcases(
     session: Annotated[SessionRecord, Depends(get_session)],
 ) -> BizCaseListOut:
     try:
-        payloads, latest = _current_payloads(_storage(session), ReadonlyModuleKind.BIZCASE)
+        cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.BIZCASE)
+        payloads, counts = _personal_payloads(cached)
         items = sorted(
             (BizCaseRecordOut.model_validate(payload) for payload in payloads),
             key=lambda item: item.ordinal,
@@ -221,6 +269,9 @@ def list_bizcases(
         synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
         source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
         total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
         items=items,
     )
 

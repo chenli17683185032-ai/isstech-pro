@@ -18,6 +18,7 @@ const RELATION_LABELS = {
 const SCOPE_LABELS = {
   my_project: "我的项目",
   submitted_by_me: "我提交的",
+  managed_by_me: "我管理的",
 };
 const WORKFLOW_OPTIONS = [
   { value: "purchase_requisition", label: "采购立项" },
@@ -147,12 +148,13 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         <div><span>个人相关</span><strong>{data.workItems.total_count}</strong></div>
         <div><span>我的项目</span><strong>{data.workItems.my_project_count ?? 0}</strong></div>
         <div><span>我提交</span><strong>{data.workItems.submitted_by_me_count ?? 0}</strong></div>
+        <div><span>我管理</span><strong>{data.workItems.managed_by_me_count ?? 0}</strong></div>
         <div><span>快照时间</span><strong>{formatDateTime(data.workItems.synced_at)}</strong></div>
       </section>
       <section className="content-section">
         <div className="work-item-scope">
           <ShieldCheck size={17} aria-hidden="true" />
-          <div><strong>范围：我的项目与我提交的</strong><span>采购立项、合同、订单、成本确认、验收</span></div>
+          <div><strong>范围：我申请、我的项目与我管理的</strong><span>采购立项、合同、订单、成本确认、验收</span></div>
           <p>
             源数据 <strong>{data.workItems.source_total_count ?? "--"}</strong>
             <span>·</span>
@@ -181,6 +183,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
             <button className={scopeMode === "all" ? "is-active" : ""} onClick={() => setScopeMode("all")} type="button">全部相关</button>
             <button className={scopeMode === "my_project" ? "is-active" : ""} onClick={() => setScopeMode("my_project")} type="button">我的项目</button>
             <button className={scopeMode === "submitted_by_me" ? "is-active" : ""} onClick={() => setScopeMode("submitted_by_me")} type="button">我提交的</button>
+            <button className={scopeMode === "managed_by_me" ? "is-active" : ""} onClick={() => setScopeMode("managed_by_me")} type="button">我管理的</button>
           </div>
           <div
             className="segmented segmented--status"

@@ -74,6 +74,15 @@ def _payment_html() -> str:
     return (FIXTURES_PAYMENT / "list.html").read_text(encoding="utf-8")
 
 
+def _payment_query_html() -> str:
+    return (
+        (FIXTURES_PAYMENT / "query_page1.html")
+        .read_text(encoding="utf-8")
+        .replace("总共3条记录，共2页，当前第1页", "总共2条记录，共1页，当前第1页")
+        .replace("USER-A", "USER_B")
+    )
+
+
 def _bizcase_html(page: int) -> str:
     return (FIXTURES_BIZCASE / f"page{page}.html").read_text(encoding="utf-8")
 
@@ -156,6 +165,8 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=_portal_html(), request=request)
     if host == "ipsapro.isstech.com" and path == "/WebPMS/Payment/index":
         return httpx.Response(200, text=_payment_html(), request=request)
+    if host == "ipsapro.isstech.com" and path == "/WebPMS/payment/QueryListBySearch":
+        return httpx.Response(200, text=_payment_query_html(), request=request)
     if host == "ipsapro.isstech.com" and path == "/WebPMP/Main.aspx":
         page = 1
         if request.method == "POST":
@@ -338,17 +349,22 @@ def test_list_and_detail_and_attachments() -> None:
         assert meta["content_length"] == len(b"FILEBYTES")
 
 
-def test_unified_work_items_returns_all_account_visible_workflows() -> None:
+def test_unified_work_items_returns_only_proven_personal_workflows() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
     with client:
         r = client.get("/v1/work-items", headers=headers)
     assert r.status_code == 200
     body = r.json()
-    assert body["total_count"] == 6
+    assert body["source_total_count"] == 6
+    assert body["total_count"] == 3
     assert body["follow_up_count"] == 2
-    assert body["approved_count"] == 3
-    assert body["other_count"] == 1
+    assert body["approved_count"] == 1
+    assert body["other_count"] == 0
+    assert body["ownership_scope"] == "personal_submissions_projects_and_management"
+    assert body["submitted_by_me_count"] == 3
+    assert body["my_project_count"] == 0
+    assert body["managed_by_me_count"] == 0
     by_workflow = {item["workflow"]: item for item in body["items"]}
     follow_up = next(
         item
@@ -372,11 +388,15 @@ def test_unified_work_items_returns_all_account_visible_workflows() -> None:
     assert approved["status"] == "审批通过"
     assert approved["current_approver"] == ""
     assert approved["waiting_days"] is None
-    assert set(by_workflow) == {workflow.value for workflow in WorkflowKind}
+    assert set(by_workflow) == {
+        WorkflowKind.PURCHASE_REQUISITION.value,
+        WorkflowKind.CHECK_ACCEPTANCE.value,
+    }
     assert follow_up["relations"] == ["applicant"]
     assert approved["relations"] == ["applicant"]
     assert by_workflow["check_acceptance"]["relations"] == ["applicant"]
     assert by_workflow["check_acceptance"]["workflow_label"] == "采购验收"
+    assert all(item["scope_reasons"] == ["submitted_by_me"] for item in body["items"])
 
 
 def test_work_items_reports_incomplete_pagination_as_upstream_error() -> None:
@@ -427,11 +447,15 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert current.json()["follow_up_count"] == 2
     assert current.json()["approved_count"] == 1
     assert current.json()["other_count"] == 0
-    assert current.json()["ownership_scope"] == "personal_projects_and_submissions"
+    assert (
+        current.json()["ownership_scope"]
+        == "personal_submissions_projects_and_management"
+    )
     assert current.json()["source_total_count"] == 6
     assert current.json()["matched_count"] == 3
     assert current.json()["my_project_count"] == 0
     assert current.json()["submitted_by_me_count"] == 3
+    assert current.json()["managed_by_me_count"] == 0
     assert current.json()["workflow_counts"] == {
         WorkflowKind.PURCHASE_REQUISITION.value: 2,
         WorkflowKind.PROCUREMENT_CONTRACT.value: 0,
@@ -469,6 +493,25 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
         before = client.get("/v1/work-items/current", headers=headers)
         first = client.post("/v1/readonly-modules/sync", headers=headers)
         second = client.post("/v1/readonly-modules/sync", headers=headers)
+
+        def unexpected_upstream_call(*args, **kwargs):
+            raise AssertionError("cached list API must not call upstream")
+
+        monkeypatch.setattr(
+            IsstechClient,
+            "get_portal_display_name",
+            unexpected_upstream_call,
+        )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_personal_payment_records",
+            unexpected_upstream_call,
+        )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_all_bizcases",
+            unexpected_upstream_call,
+        )
         payment = client.get("/v1/readonly-modules/payment", headers=headers)
         bizcases = client.get("/v1/readonly-modules/bizcases", headers=headers)
         runs = client.get("/v1/readonly-modules/runs", headers=headers)
@@ -478,8 +521,8 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert before.status_code == 200
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
-    assert first.json()["observed_count"] == 5
-    assert first.json()["changed_count"] == 5
+    assert first.json()["observed_count"] == 4
+    assert first.json()["changed_count"] == 4
     assert [stream["module"] for stream in first.json()["streams"]] == [
         "payment",
         "bizcase",
@@ -487,12 +530,23 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert second.status_code == 200
     assert second.json()["changed_count"] == 0
     assert payment.status_code == 200
-    assert payment.json()["ownership_scope"] == "account_visible"
-    assert payment.json()["total_count"] == 2
+    assert (
+        payment.json()["ownership_scope"]
+        == "personal_submissions_projects_and_management"
+    )
+    assert payment.json()["total_count"] == 1
+    assert payment.json()["submitted_by_me_count"] == 1
+    assert payment.json()["my_project_count"] == 0
+    assert payment.json()["managed_by_me_count"] == 0
     assert payment.json()["items"][0]["payment_no"] == "PAYMENT-REDACTED-1"
+    assert payment.json()["items"][0]["scope_reasons"] == ["submitted_by_me"]
     assert bizcases.status_code == 200
-    assert bizcases.json()["total_count"] == 3
-    assert [item["ordinal"] for item in bizcases.json()["items"]] == [1, 2, 3]
+    assert bizcases.json()["source_total_count"] == 3
+    assert bizcases.json()["total_count"] == 0
+    assert bizcases.json()["items"] == []
+    assert bizcases.json()["submitted_by_me_count"] == 0
+    assert bizcases.json()["my_project_count"] == 0
+    assert bizcases.json()["managed_by_me_count"] == 0
     assert runs.status_code == 200
     assert len(runs.json()) == 4
     assert after.status_code == 200
@@ -502,7 +556,7 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
         account_database_path("alice", base_database_path=database)
     )
     assert storage.table_count("readonly_module_runs") == 4
-    assert storage.table_count("readonly_module_current") == 5
+    assert storage.table_count("readonly_module_current") == 4
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(

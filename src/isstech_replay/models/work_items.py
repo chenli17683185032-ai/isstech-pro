@@ -41,6 +41,7 @@ class WorkItemRelation(StrEnum):
 class WorkItemScopeReason(StrEnum):
     MY_PROJECT = "my_project"
     SUBMITTED_BY_ME = "submitted_by_me"
+    MANAGED_BY_ME = "managed_by_me"
 
 
 class ChangeKind(StrEnum):

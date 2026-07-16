@@ -32,10 +32,11 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "javascript" in js.headers["content-type"]
     assert "待处理" in js.text
     assert "已完成" in js.text
-    assert "范围：我的项目与我提交的" in js.text
+    assert "范围：我申请、我的项目与我管理的" in js.text
     assert "全部相关" in js.text
     assert "我的项目" in js.text
     assert "我提交的" in js.text
+    assert "我管理的" in js.text
     assert "全部流程" in js.text
     assert "审批人" in js.text
     assert "localStorage" in js.text
@@ -46,7 +47,8 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "业务查询" in js.text
     assert "付款申请" in js.text
     assert "BizCase查询" in js.text
-    assert "账号可见范围" in js.text
+    assert "个人相关范围" in js.text
+    assert "账号可见范围" not in js.text
     assert "/v1/readonly-modules/payment" in js.text
     assert "/v1/readonly-modules/bizcases" in js.text
     assert "/v1/readonly-modules/sync" in js.text

@@ -14,8 +14,21 @@ from enum import StrEnum
 from urllib.parse import parse_qsl, unquote, urlparse
 import re
 
+from .models.payment import (
+    PAYMENT_QUERY_FORM_FIELDS,
+    PAYMENT_QUERY_PAGER_FORM_FIELDS,
+)
+
 
 PAYMENT_INDEX_PATH = "/WebPMS/Payment/index"
+PAYMENT_LIST_PATHS = {
+    "application": PAYMENT_INDEX_PATH,
+    "approval": "/WebPMS/Payment/ApprovalList",
+    "replenish_invoice": "/WebPMS/Payment/ReplenishInvoiceList",
+    "replenish_invoice_approval": "/WebPMS/Payment/ReplenishInvoiceApprovalList",
+    "query": "/WebPMS/Payment/QueryList",
+}
+PAYMENT_QUERY_PATH = "/WebPMS/payment/QueryListBySearch"
 BIZCASE_QUERY_PATH = "/WebPMP/Main.aspx"
 BIZCASE_QUERY_THURL = (
     "28^mcontrol^iss.psa.webui.bizcasemanage.bizcasequery.list^"
@@ -26,6 +39,24 @@ BIZCASE_QUERY_URL = (
     "thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5e"
     "PMP%2fBuiltItemM%2fBizcase_title.gif%5e0"
 )
+BIZCASE_VIEW_PARAMS = {
+    "application": (
+        "iss.psa.webui.bizcasemanage.bizcaseapply.list",
+        "280101",
+    ),
+    "adjustment": (
+        "iss.psa.webui.bizcasemanage.bizcaseadjust.list",
+        "280102",
+    ),
+    "approval": (
+        "iss.psa.webui.bizcasemanage.bizcaseexamine.list",
+        "280103",
+    ),
+    "query": (
+        "iss.psa.webui.bizcasemanage.bizcasequery.list",
+        "280104",
+    ),
+}
 _BIZCASE_POSTBACK_FIELDS = frozenset(
     {
         "__EVENTTARGET",
@@ -54,6 +85,10 @@ _BIZCASE_REQUIRED_POSTBACK_FIELDS = frozenset(
     }
 )
 _BIZCASE_MAX_BODY_BYTES = 1024 * 1024
+_PAYMENT_QUERY_MAX_BODY_BYTES = 16 * 1024
+_PAYMENT_QUERY_PAGER_PATH_RE = re.compile(
+    r"^/WebPMS/payment/QueryListBySearch/0/1/False/([1-9]\d*)$"
+)
 
 
 class SideEffect(StrEnum):
@@ -130,6 +165,32 @@ def _exact_bizcase_query(url: str) -> bool:
     return pairs == [("thUrl", BIZCASE_QUERY_THURL)]
 
 
+def _bizcase_get_view(url: str) -> str | None:
+    parsed = urlparse(url)
+    if parsed.path != BIZCASE_QUERY_PATH:
+        return None
+    try:
+        pairs = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=5,
+        )
+    except ValueError:
+        return None
+    if pairs == [("thUrl", BIZCASE_QUERY_THURL)]:
+        return "query"
+    for view, (control, help_menu_code) in BIZCASE_VIEW_PARAMS.items():
+        if pairs == [
+            ("thUrl", BIZCASE_QUERY_THURL),
+            ("url", control),
+            ("urltype", "mcontrol"),
+            ("helpmenucode", help_menu_code),
+        ]:
+            return view
+    return None
+
+
 def _blocked_bizcase_postback(reason: str) -> PolicyDecision:
     return _decision(
         RequestClass.BUILD_ONLY,
@@ -137,6 +198,81 @@ def _blocked_bizcase_postback(reason: str) -> PolicyDecision:
         "bizcase.postback",
         "bizcase.postback.blocked",
         reason,
+    )
+
+
+def _blocked_payment_query(reason: str) -> PolicyDecision:
+    return _decision(
+        RequestClass.BUILD_ONLY,
+        SideEffect.NONE,
+        "payment.query",
+        "payment.query_post.blocked",
+        reason,
+    )
+
+
+def _classify_payment_query(
+    *,
+    url: str,
+    headers: Mapping[str, str] | None,
+    body: bytes | None,
+) -> PolicyDecision:
+    if body is None:
+        return _blocked_payment_query("Payment query requires an in-memory form body")
+    if not body or len(body) > _PAYMENT_QUERY_MAX_BODY_BYTES:
+        return _blocked_payment_query("Payment query form body is empty or too large")
+    content_type = (headers or {}).get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return _blocked_payment_query("Payment query must be form URL encoded")
+    try:
+        pairs = parse_qsl(
+            body.decode("ascii"),
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=len(PAYMENT_QUERY_FORM_FIELDS) + 2,
+        )
+    except (UnicodeDecodeError, ValueError):
+        return _blocked_payment_query("Payment query form body is malformed")
+    names = [name for name, _ in pairs]
+    if any(count != 1 for count in Counter(names).values()):
+        return _blocked_payment_query("Payment query form contains duplicate fields")
+    path = urlparse(url).path
+    pager_match = _PAYMENT_QUERY_PAGER_PATH_RE.fullmatch(path)
+    if pager_match and int(pager_match.group(1)) > 100:
+        return _blocked_payment_query("Payment query page exceeds the safety limit")
+    expected_names = {
+        "ajax",
+        *(
+            PAYMENT_QUERY_PAGER_FORM_FIELDS
+            if pager_match
+            else PAYMENT_QUERY_FORM_FIELDS
+        ),
+    }
+    if set(names) != expected_names:
+        return _blocked_payment_query("Payment query form field set does not match evidence")
+    fields = dict(pairs)
+    if fields["ajax"] != "1":
+        return _blocked_payment_query("Payment query ajax marker is invalid")
+    nonempty = {name: value.strip() for name, value in fields.items() if name != "ajax" and value.strip()}
+    allowed_pairs = (
+        frozenset({"PM_EmpNo", "PM_EmpName"}),
+        frozenset({"PM_ProjectNo", "PM_ProjectName"}),
+    )
+    if nonempty and frozenset(nonempty) not in allowed_pairs:
+        return _blocked_payment_query("Payment query contains an unapproved filter shape")
+    if nonempty:
+        values = set(nonempty.values())
+        if len(values) != 1:
+            return _blocked_payment_query("Payment personal filter fields must match")
+        value = values.pop()
+        if len(value) > 128 or any(character in value for character in "\r\n\x00"):
+            return _blocked_payment_query("Payment personal filter value is invalid")
+    return _decision(
+        RequestClass.ALLOW_LIVE,
+        SideEffect.NONE,
+        "payment.query",
+        "payment.query_post",
+        "Body-validated Payment source or personal-scope query",
     )
 
 
@@ -228,14 +364,22 @@ def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
     parsed = urlparse(url)
     path = parsed.path or "/"
 
-    if path == PAYMENT_INDEX_PATH and not parsed.query:
+    payment_view = next(
+        (
+            view
+            for view, candidate_path in PAYMENT_LIST_PATHS.items()
+            if path == candidate_path
+        ),
+        None,
+    )
+    if payment_view is not None and not parsed.query:
         if method == "GET":
             return _decision(
                 RequestClass.ALLOW_LIVE,
                 SideEffect.NONE,
-                "payment.list",
-                "payment.index_get",
-                "Observed GET-only Payment application list",
+                f"payment.{payment_view}.list",
+                f"payment.{payment_view}_get",
+                "Served GET-only Payment list view",
             )
         return _decision(
             RequestClass.BUILD_ONLY,
@@ -277,21 +421,36 @@ def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
             "payment.broken_filter",
             "The served Payment filter action deterministically returns HTTP 500",
         )
+    if (
+        path == PAYMENT_QUERY_PATH
+        or _PAYMENT_QUERY_PAGER_PATH_RE.fullmatch(path) is not None
+    ) and not parsed.query:
+        if method == "POST":
+            return _blocked_payment_query(
+                "Payment POST is blocked unless its body proves an empty query"
+            )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "payment.query",
+            "payment.query_method",
+            "Payment query supports only the served POST request",
+        )
 
     if path == BIZCASE_QUERY_PATH:
-        if _exact_bizcase_query(url):
-            if method == "GET":
-                return _decision(
-                    RequestClass.ALLOW_LIVE,
-                    SideEffect.NONE,
-                    "bizcase.list",
-                    "bizcase.query_get",
-                    "Observed exact BizCase query entry",
-                )
-            if method == "POST":
-                return _blocked_bizcase_postback(
-                    "BizCase POST is blocked unless its form body proves pagination"
-                )
+        view = _bizcase_get_view(url)
+        if method == "GET" and view is not None:
+            return _decision(
+                RequestClass.ALLOW_LIVE,
+                SideEffect.NONE,
+                f"bizcase.{view}.list",
+                f"bizcase.{view}_get",
+                "Served exact BizCase list view",
+            )
+        if method == "POST" and _exact_bizcase_query(url):
+            return _blocked_bizcase_postback(
+                "BizCase POST is blocked unless its form body proves pagination"
+            )
         return _decision(
             RequestClass.DENY,
             SideEffect.UNKNOWN,
@@ -677,6 +836,8 @@ class EndpointPolicy:
         body: bytes | None = None,
     ) -> PolicyDecision:
         decision = self.decide(method, url)
+        if method.upper() == "POST" and decision.rule_id == "payment.query_post.blocked":
+            return _classify_payment_query(url=url, headers=headers, body=body)
         if (
             method.upper() == "POST"
             and decision.rule_id == "bizcase.postback.blocked"

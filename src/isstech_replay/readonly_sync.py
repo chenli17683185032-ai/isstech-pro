@@ -17,11 +17,33 @@ from .models.readonly_modules import (
     ReadonlySyncBatchResult,
     ReadonlySyncResult,
 )
+from .models.work_items import (
+    WorkItemRelation,
+    WorkItemScopeReason,
+)
+from .parsers.portal import display_name_matches
 from .storage import WorkflowStorage
 from .sync import safe_error_message, utc_iso
+from .work_items import personal_scope_reasons, personal_work_item_scope
 
 
 READONLY_MODULES = (ReadonlyModuleKind.PAYMENT, ReadonlyModuleKind.BIZCASE)
+
+
+def _personal_project_numbers(storage: WorkflowStorage | None) -> tuple[str, ...]:
+    if storage is None:
+        return ()
+    scoped = personal_work_item_scope(storage.current_snapshots())
+    return tuple(
+        sorted(
+            {
+                record.snapshot.project_no.strip()
+                for record in scoped
+                if WorkItemScopeReason.MY_PROJECT in record.scope_reasons
+                and record.snapshot.project_no.strip()
+            }
+        )
+    )
 
 
 def _canonical_payload(payload: dict[str, object]) -> tuple[str, str]:
@@ -34,9 +56,14 @@ def _canonical_payload(payload: dict[str, object]) -> tuple[str, str]:
     return payload_json, hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
 
-def _payment_payload(record: PaymentRecord, *, source_url: str) -> dict[str, object]:
+def _payment_payload(
+    record: PaymentRecord,
+    *,
+    source_url: str,
+    scope_reasons: tuple[WorkItemScopeReason, ...],
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "module": ReadonlyModuleKind.PAYMENT.value,
         "id": record.id,
         "payment_no": record.payment_no,
@@ -50,14 +77,20 @@ def _payment_payload(record: PaymentRecord, *, source_url: str) -> dict[str, obj
         "amount": record.amount,
         "currency": record.currency,
         "status": record.status,
+        "scope_reasons": [reason.value for reason in scope_reasons],
         "fields": record.field_dict(),
         "source_url": source_url,
     }
 
 
-def _bizcase_payload(record: BizCaseRecord, *, source_url: str) -> dict[str, object]:
+def _bizcase_payload(
+    record: BizCaseRecord,
+    *,
+    source_url: str,
+    scope_reasons: tuple[WorkItemScopeReason, ...],
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "module": ReadonlyModuleKind.BIZCASE.value,
         "id": record.id,
         "ordinal": record.ordinal,
@@ -70,6 +103,7 @@ def _bizcase_payload(record: BizCaseRecord, *, source_url: str) -> dict[str, obj
         "project_name": record.project_name,
         "revenue_recognition_type": record.revenue_recognition_type,
         "current_approver": record.current_approver,
+        "scope_reasons": [reason.value for reason in scope_reasons],
         "fields": record.field_dict(),
         "source_url": source_url,
     }
@@ -80,21 +114,57 @@ def readonly_snapshots(
     result: PaymentListResult | BizCaseListResult,
     *,
     observed_at: str,
+    display_name: str = "",
+    project_numbers: tuple[str, ...] = (),
 ) -> tuple[ReadonlySnapshot, ...]:
+    payloads: list[tuple[str, dict[str, object]]] = []
     if module is ReadonlyModuleKind.PAYMENT:
         if not isinstance(result, PaymentListResult):
             raise TypeError("Payment sync requires PaymentListResult")
-        payloads = (
-            (record.id, _payment_payload(record, source_url=result.source_url))
-            for record in result.items
-        )
+        if not display_name.strip():
+            raise ValueError("Payment personal scope requires a display name")
+        for record in result.items:
+            relations = (
+                (WorkItemRelation.APPLICANT,)
+                if display_name_matches(record.applicant, display_name)
+                else ()
+            )
+            scope_reasons = personal_scope_reasons(
+                project_no=record.project_no,
+                relations=relations,
+                my_project_numbers=project_numbers,
+            )
+            if not scope_reasons:
+                raise RuntimeError("Payment result contains an unscoped record")
+            payloads.append(
+                (
+                    record.id,
+                    _payment_payload(
+                        record,
+                        source_url=result.source_url,
+                        scope_reasons=scope_reasons,
+                    ),
+                )
+            )
     else:
         if not isinstance(result, BizCaseListResult):
             raise TypeError("BizCase sync requires BizCaseListResult")
-        payloads = (
-            (record.id, _bizcase_payload(record, source_url=result.source_url))
-            for record in result.items
-        )
+        for record in result.items:
+            scope_reasons = personal_scope_reasons(
+                project_no=record.project_no,
+                relations=(),
+                my_project_numbers=project_numbers,
+            )
+            payloads.append(
+                (
+                    record.id,
+                    _bizcase_payload(
+                        record,
+                        source_url=result.source_url,
+                        scope_reasons=scope_reasons,
+                    ),
+                )
+            )
 
     snapshots = []
     for external_id, payload in payloads:
@@ -121,6 +191,8 @@ def sync_readonly_module(
     observed_at: datetime | None = None,
     started_at: datetime | None = None,
     run_id: str | None = None,
+    display_name: str | None = None,
+    project_numbers: tuple[str, ...] = (),
 ) -> ReadonlySyncResult:
     if module not in READONLY_MODULES:
         raise ValueError(f"unsupported readonly module: {module}")
@@ -144,11 +216,22 @@ def sync_readonly_module(
     try:
         result: PaymentListResult | BizCaseListResult
         if module is ReadonlyModuleKind.PAYMENT:
-            result = client.list_payment_records()
+            identity = (display_name or client.get_portal_display_name()).strip()
+            result = client.list_personal_payment_records(
+                display_name=identity,
+                project_numbers=project_numbers,
+                max_pages=max_pages,
+            )
         else:
             result = client.list_all_bizcases(max_pages=max_pages)
         observed_text = utc_iso(observed_at or datetime.now(UTC))
-        snapshots = readonly_snapshots(module, result, observed_at=observed_text)
+        snapshots = readonly_snapshots(
+            module,
+            result,
+            observed_at=observed_text,
+            display_name=identity if module is ReadonlyModuleKind.PAYMENT else "",
+            project_numbers=project_numbers,
+        )
         if result.total_count != len(snapshots):
             raise RuntimeError(f"{module.value} normalization lost records")
         finished_text = utc_iso(datetime.now(UTC))
@@ -232,6 +315,7 @@ def sync_readonly_modules(
     observed_at: datetime | None = None,
     started_at: datetime | None = None,
     run_id: str | None = None,
+    scope_storage: WorkflowStorage | None = None,
 ) -> ReadonlySyncBatchResult:
     if not modules or len(set(modules)) != len(modules):
         raise ValueError("readonly modules must be non-empty and unique")
@@ -245,6 +329,7 @@ def sync_readonly_modules(
     measurement_time = observed_at or datetime.now(UTC)
     summaries: list[ReadonlyStreamSummary] = []
     results: list[ReadonlySyncResult] = []
+    project_numbers = _personal_project_numbers(scope_storage or storage)
     for module in modules:
         stream_run_id = f"{batch_id}-{module.value}"
         try:
@@ -257,9 +342,8 @@ def sync_readonly_modules(
                 observed_at=measurement_time,
                 started_at=batch_started,
                 run_id=stream_run_id,
+                project_numbers=project_numbers,
             )
-        except PermissionError:
-            raise
         except Exception as error:
             summaries.append(
                 ReadonlyStreamSummary(

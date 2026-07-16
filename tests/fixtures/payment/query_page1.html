@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN"><body>
+  <table class="table table-bordered table-striped table-hover">
+    <thead><tr>
+      <th></th><th>操作</th><th>付款单编号</th><th>付款类别</th><th>付款事由</th>
+      <th>申请人</th><th>项目编号</th><th>项目名称</th><th>核算成本中心名称</th>
+      <th>收款公司</th><th>付款公司</th><th>金额</th><th>币种</th><th>状态</th>
+      <th>下级审批人</th><th>资金支付状态<div class="dropdown-menu">EXPLANATION</div></th>
+      <th>支付日期</th><th>合同付款日期</th><th>后补发票状态</th>
+      <th>是否无合同付款</th><th>无合同付款原因</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><input type="checkbox" data-id="PAY-1" /></td>
+        <td><a class="view" ajax-data="PAY-1">查看</a></td>
+        <td>PAYMENT-REDACTED-1</td><td>TYPE-A</td><td>REASON-A</td><td>USER-A</td>
+        <td>PROJECT-1</td><td>PROJECT REDACTED 1</td><td>COST-CENTER-A</td>
+        <td>PAYEE-A</td><td>PAYER-A</td><td>100.00</td><td>CNY</td><td>审批中</td>
+        <td>APPROVER-A</td><td>待付款</td><td></td><td>2026-08-01</td><td>否</td><td>否</td><td></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" data-id="PAY-2" /></td>
+        <td><a class="view" ajax-data="PAY-2">查看</a></td>
+        <td>PAYMENT-REDACTED-2</td><td>TYPE-B</td><td>REASON-B</td><td>USER-B</td>
+        <td>PROJECT-2</td><td>PROJECT REDACTED 2</td><td>COST-CENTER-B</td>
+        <td>PAYEE-B</td><td>PAYER-B</td><td>200.00</td><td>CNY</td><td>已完成</td>
+        <td></td><td>支付成功</td><td>2026-07-01</td><td>2026-07-01</td><td>否</td><td>否</td><td></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pager"><span class="pagermessage">总共3条记录，共2页，当前第1页</span>
+    <a href="/WebPMS/payment/QueryListBySearch/0/1/False/2">下一页</a>
+  </div>
+</body></html>

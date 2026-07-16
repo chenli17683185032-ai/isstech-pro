@@ -43,6 +43,11 @@
             "title": "Items",
             "type": "array"
           },
+          "managed_by_me_count": {
+            "default": 0,
+            "title": "Managed By Me Count",
+            "type": "integer"
+          },
           "module": {
             "default": "bizcase",
             "title": "Module",
@@ -53,8 +58,13 @@
             "title": "Module Label",
             "type": "string"
           },
+          "my_project_count": {
+            "default": 0,
+            "title": "My Project Count",
+            "type": "integer"
+          },
           "ownership_scope": {
-            "default": "account_visible",
+            "default": "personal_submissions_projects_and_management",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -66,6 +76,11 @@
           "source_total_count": {
             "default": 0,
             "title": "Source Total Count",
+            "type": "integer"
+          },
+          "submitted_by_me_count": {
+            "default": 0,
+            "title": "Submitted By Me Count",
             "type": "integer"
           },
           "synced_at": {
@@ -145,6 +160,13 @@
             "title": "Revenue Recognition Type",
             "type": "string"
           },
+          "scope_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemScopeReason"
+            },
+            "title": "Scope Reasons",
+            "type": "array"
+          },
           "source_url": {
             "default": "",
             "title": "Source Url",
@@ -194,6 +216,11 @@
             "title": "Items",
             "type": "array"
           },
+          "managed_by_me_count": {
+            "default": 0,
+            "title": "Managed By Me Count",
+            "type": "integer"
+          },
           "matched_count": {
             "default": 0,
             "title": "Matched Count",
@@ -210,7 +237,7 @@
             "type": "integer"
           },
           "ownership_scope": {
-            "default": "personal_projects_and_submissions",
+            "default": "personal_submissions_projects_and_management",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -1219,6 +1246,11 @@
             "title": "Items",
             "type": "array"
           },
+          "managed_by_me_count": {
+            "default": 0,
+            "title": "Managed By Me Count",
+            "type": "integer"
+          },
           "module": {
             "default": "payment",
             "title": "Module",
@@ -1229,8 +1261,13 @@
             "title": "Module Label",
             "type": "string"
           },
+          "my_project_count": {
+            "default": 0,
+            "title": "My Project Count",
+            "type": "integer"
+          },
           "ownership_scope": {
-            "default": "account_visible",
+            "default": "personal_submissions_projects_and_management",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -1242,6 +1279,11 @@
           "source_total_count": {
             "default": 0,
             "title": "Source Total Count",
+            "type": "integer"
+          },
+          "submitted_by_me_count": {
+            "default": 0,
+            "title": "Submitted By Me Count",
             "type": "integer"
           },
           "synced_at": {
@@ -1325,6 +1367,13 @@
             "default": "",
             "title": "Project No",
             "type": "string"
+          },
+          "scope_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemScopeReason"
+            },
+            "title": "Scope Reasons",
+            "type": "array"
           },
           "source_url": {
             "default": "",
@@ -2405,9 +2454,39 @@
             "title": "Items",
             "type": "array"
           },
+          "managed_by_me_count": {
+            "default": 0,
+            "title": "Managed By Me Count",
+            "type": "integer"
+          },
+          "my_project_count": {
+            "default": 0,
+            "title": "My Project Count",
+            "type": "integer"
+          },
           "other_count": {
             "default": 0,
             "title": "Other Count",
+            "type": "integer"
+          },
+          "ownership_scope": {
+            "default": "personal_submissions_projects_and_management",
+            "title": "Ownership Scope",
+            "type": "string"
+          },
+          "source": {
+            "default": "upstream_dry_run",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_total_count": {
+            "default": 0,
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "submitted_by_me_count": {
+            "default": 0,
+            "title": "Submitted By Me Count",
             "type": "integer"
           },
           "synced_at": {
@@ -2540,7 +2619,8 @@
       "WorkItemScopeReason": {
         "enum": [
           "my_project",
-          "submitted_by_me"
+          "submitted_by_me",
+          "managed_by_me"
         ],
         "title": "WorkItemScopeReason",
         "type": "string"

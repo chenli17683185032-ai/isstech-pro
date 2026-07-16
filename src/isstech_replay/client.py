@@ -17,7 +17,11 @@ import httpx
 from .config import Settings
 from .models.attachment import AttachmentContent, AttachmentMeta
 from .models.bizcase import BizCaseListResult, BizCasePage, BizCaseRecord
-from .models.payment import PaymentListResult
+from .models.payment import (
+    PaymentListResult,
+    PaymentRecord,
+    payment_query_form,
+)
 from .models.procurement import (
     PROCUREMENT_STREAM_BY_WORKFLOW,
     ProcurementListResult,
@@ -31,13 +35,13 @@ from .models.purchase import (
 from .parsers.attachment import parse_attachment_list
 from .parsers.bizcase import parse_bizcase_page
 from .parsers.login import is_login_page
-from .parsers.payment import parse_payment_list
-from .parsers.portal import parse_portal_display_name
+from .parsers.payment import parse_payment_query_list
+from .parsers.portal import display_name_matches, parse_portal_display_name
 from .parsers.procurement import parse_procurement_detail, parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
 from .policy import (
     BIZCASE_QUERY_URL,
-    PAYMENT_INDEX_PATH,
+    PAYMENT_QUERY_PATH,
     EndpointPolicy,
     PolicyViolation,
     UnsafeRequestError,
@@ -62,6 +66,9 @@ class EvidenceGapError(RuntimeError):
 
 class PaginationIncompleteError(RuntimeError):
     """Raised instead of returning a list that cannot be proven complete."""
+
+
+_PAYMENT_QUERY_TIMEOUT_SECONDS = 90.0
 
 
 class IsstechClient:
@@ -394,24 +401,157 @@ class IsstechClient:
             source_url=first_result.source_url,
         )
 
-    def list_payment_records(self) -> PaymentListResult:
-        """Read the complete GET-only Payment application list or fail closed."""
-        response = self.get(
-            self._url(PAYMENT_INDEX_PATH),
+    def _read_payment_query_page(
+        self,
+        page: int,
+        *,
+        applicant: str = "",
+        project_no: str = "",
+    ) -> PaymentListResult:
+        path = (
+            PAYMENT_QUERY_PATH
+            if page == 1
+            else f"{PAYMENT_QUERY_PATH}/0/1/False/{page}"
+        )
+        response = self.post(
+            self._url(path),
+            data=payment_query_form(
+                applicant=applicant,
+                project_no=project_no,
+                pager=page > 1,
+            ),
             headers={"Accept-Language": "zh-CN"},
+            timeout=max(self.settings.timeout_seconds, _PAYMENT_QUERY_TIMEOUT_SECONDS),
         )
         response.raise_for_status()
         self._ensure_not_login(response)
-        result = parse_payment_list(response.text, source_url=str(response.url))
-        if result.current_page != 1 or result.page_count != 1:
+        return parse_payment_query_list(response.text, source_url=str(response.url))
+
+    def _list_payment_query(
+        self,
+        *,
+        max_pages: int,
+        applicant: str = "",
+        project_no: str = "",
+    ) -> PaymentListResult:
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        current = self._read_payment_query_page(
+            1,
+            applicant=applicant,
+            project_no=project_no,
+        )
+        if current.current_page != 1:
+            raise PaginationIncompleteError("Payment initial query response is not page 1")
+        if current.page_count > max_pages:
             raise PaginationIncompleteError(
-                "Payment declared multiple pages but no successful read-only pager is available"
+                f"Payment page count {current.page_count} exceeds max_pages={max_pages}"
             )
-        if result.total_count != len(result.items):
+        expected_total = current.total_count
+        expected_pages = current.page_count
+        expected_page_size = len(current.items)
+        if expected_total and expected_page_size == 0:
+            raise PaginationIncompleteError("Payment first page is empty before later records")
+
+        items: list[PaymentRecord] = []
+        seen: set[str] = set()
+        for page_number in range(1, expected_pages + 1):
+            if page_number > 1:
+                current = self._read_payment_query_page(
+                    page_number,
+                    applicant=applicant,
+                    project_no=project_no,
+                )
+            if current.current_page != page_number:
+                raise PaginationIncompleteError(
+                    f"Payment requested page {page_number} but received {current.current_page}"
+                )
+            if current.page_count != expected_pages or current.total_count != expected_total:
+                raise PaginationIncompleteError("Payment totals changed during pagination")
+            if page_number < expected_pages and len(current.items) != expected_page_size:
+                raise PaginationIncompleteError(
+                    f"Payment page {page_number} was short before the last page"
+                )
+            if page_number == expected_pages and len(current.items) > expected_page_size:
+                raise PaginationIncompleteError("Payment last page exceeded the first page size")
+            for item in current.items:
+                if item.id in seen:
+                    raise PaginationIncompleteError(
+                        f"Payment repeated stable identity on page {page_number}"
+                    )
+                seen.add(item.id)
+                items.append(item)
+
+        if len(items) != expected_total:
             raise PaginationIncompleteError(
-                f"Payment returned {len(result.items)}/{result.total_count} declared records"
+                f"Payment collected {len(items)}/{expected_total} declared records"
             )
-        return result
+        return PaymentListResult(
+            items=tuple(items),
+            total_count=expected_total,
+            page_count=expected_pages,
+            current_page=1,
+            source_url=self._url(PAYMENT_QUERY_PATH),
+        )
+
+    def list_payment_records(self, *, max_pages: int = 100) -> PaymentListResult:
+        """Low-frequency source audit across every Payment query page."""
+        return self._list_payment_query(max_pages=max_pages)
+
+    def list_personal_payment_records(
+        self,
+        *,
+        display_name: str,
+        project_numbers: tuple[str, ...],
+        max_pages: int = 20,
+    ) -> PaymentListResult:
+        """Union complete applicant and exact personal-project query streams."""
+        identity = display_name.strip()
+        if not identity:
+            raise ValueError("Payment personal scope requires a display name")
+        projects = tuple(sorted({value.strip() for value in project_numbers if value.strip()}))
+        streams = [
+            (
+                "applicant",
+                identity,
+                self._list_payment_query(max_pages=max_pages, applicant=identity),
+            )
+        ]
+        streams.extend(
+            (
+                "project",
+                project_no,
+                self._list_payment_query(max_pages=max_pages, project_no=project_no),
+            )
+            for project_no in projects
+        )
+
+        records: dict[str, PaymentRecord] = {}
+        page_count = 0
+        for scope, value, result in streams:
+            page_count += result.page_count
+            for record in result.items:
+                matches = (
+                    display_name_matches(record.applicant, value)
+                    if scope == "applicant"
+                    else record.project_no.strip() == value
+                )
+                if not matches:
+                    continue
+                previous = records.get(record.id)
+                if previous is not None and previous != record:
+                    raise PaginationIncompleteError(
+                        "Payment personal query returned conflicting duplicate records"
+                    )
+                records[record.id] = record
+        items = tuple(records.values())
+        return PaymentListResult(
+            items=items,
+            total_count=len(items),
+            page_count=page_count,
+            current_page=1,
+            source_url=self._url(PAYMENT_QUERY_PATH),
+        )
 
     def _read_bizcase_page(
         self,

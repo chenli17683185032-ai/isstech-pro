@@ -24,6 +24,10 @@ _SUBMISSION_RELATIONS = {
     WorkItemRelation.APPLICANT,
     WorkItemRelation.SUBMITTER,
 }
+_MANAGEMENT_RELATIONS = {
+    WorkItemRelation.PROJECT_MANAGER,
+    WorkItemRelation.PROCUREMENT_MANAGER,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,10 +36,32 @@ class PersonalWorkflowSnapshot:
     scope_reasons: tuple[WorkItemScopeReason, ...]
 
 
+def personal_scope_reasons(
+    *,
+    project_no: str,
+    relations: Iterable[WorkItemRelation],
+    my_project_numbers: Iterable[str],
+) -> tuple[WorkItemScopeReason, ...]:
+    """Return only explicitly proven personal relationships for one record."""
+    normalized_project = project_no.strip()
+    normalized_projects = {
+        value.strip() for value in my_project_numbers if value.strip()
+    }
+    relation_set = set(relations)
+    reasons: list[WorkItemScopeReason] = []
+    if normalized_project and normalized_project in normalized_projects:
+        reasons.append(WorkItemScopeReason.MY_PROJECT)
+    if _SUBMISSION_RELATIONS.intersection(relation_set):
+        reasons.append(WorkItemScopeReason.SUBMITTED_BY_ME)
+    if _MANAGEMENT_RELATIONS.intersection(relation_set):
+        reasons.append(WorkItemScopeReason.MANAGED_BY_ME)
+    return tuple(reasons)
+
+
 def personal_work_item_scope(
     snapshots: Iterable[WorkflowSnapshot],
 ) -> tuple[PersonalWorkflowSnapshot, ...]:
-    """Derive personal submissions and project records from complete source rows."""
+    """Derive personal submissions, project records, and managed records."""
     source = tuple(snapshots)
     my_project_numbers = {
         snapshot.project_no.strip()
@@ -45,17 +71,16 @@ def personal_work_item_scope(
     }
     scoped: list[PersonalWorkflowSnapshot] = []
     for snapshot in source:
-        reasons: list[WorkItemScopeReason] = []
-        project_no = snapshot.project_no.strip()
-        if project_no and project_no in my_project_numbers:
-            reasons.append(WorkItemScopeReason.MY_PROJECT)
-        if _SUBMISSION_RELATIONS.intersection(snapshot.relations):
-            reasons.append(WorkItemScopeReason.SUBMITTED_BY_ME)
+        reasons = personal_scope_reasons(
+            project_no=snapshot.project_no,
+            relations=snapshot.relations,
+            my_project_numbers=my_project_numbers,
+        )
         if reasons:
             scoped.append(
                 PersonalWorkflowSnapshot(
                     snapshot=snapshot,
-                    scope_reasons=tuple(reasons),
+                    scope_reasons=reasons,
                 )
             )
     return tuple(scoped)
