@@ -19,6 +19,13 @@ const SCOPE_LABELS = {
   my_project: "我的项目",
   submitted_by_me: "我提交的",
 };
+const WORKFLOW_OPTIONS = [
+  { value: "purchase_requisition", label: "采购立项" },
+  { value: "procurement_contract", label: "采购合同" },
+  { value: "procurement_order", label: "采购订单" },
+  { value: "cost_confirmation", label: "成本确认" },
+  { value: "check_acceptance", label: "采购验收" },
+];
 
 function relationLabels(item) {
   return (item.relations || []).map((relation) => RELATION_LABELS[relation] || relation);
@@ -57,11 +64,13 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRequestVersion, setDetailRequestVersion] = useState(0);
   const deferredQuery = useDeferredValue(query);
-  const workflowOptions = useMemo(() => {
-    const labels = new Map();
-    data.workItems.items.forEach((item) => labels.set(item.workflow, item.workflow_label));
-    return Array.from(labels, ([value, label]) => ({ value, label }));
-  }, [data.workItems.items]);
+  const workflowOptions = useMemo(
+    () => WORKFLOW_OPTIONS.map((option) => ({
+      ...option,
+      count: data.workItems.workflow_counts?.[option.value] ?? 0,
+    })),
+    [data.workItems.workflow_counts],
+  );
   const items = useMemo(() => {
     const normalized = deferredQuery.trim().toLowerCase();
     return data.workItems.items.filter((item) => {
@@ -158,7 +167,11 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
             <Layers3 size={16} aria-hidden="true" />
             <select value={workflow} onChange={(event) => setWorkflow(event.target.value)} aria-label="筛选流程类型">
               <option value="all">全部流程</option>
-              {workflowOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              {workflowOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}（{option.count}）
+                </option>
+              ))}
             </select>
           </div>
           <div

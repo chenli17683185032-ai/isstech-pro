@@ -160,7 +160,6 @@ def list_current_work_items(
                 record.snapshot.adapter is workflow for record in scoped
             )
             for workflow in WorkflowKind
-            if any(record.snapshot.adapter is workflow for record in scoped)
         }
     except Exception as exc:
         raise local_storage_error(

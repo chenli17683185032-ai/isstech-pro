@@ -412,6 +412,9 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert current.json()["submitted_by_me_count"] == 3
     assert current.json()["workflow_counts"] == {
         WorkflowKind.PURCHASE_REQUISITION.value: 2,
+        WorkflowKind.PROCUREMENT_CONTRACT.value: 0,
+        WorkflowKind.PROCUREMENT_ORDER.value: 0,
+        WorkflowKind.COST_CONFIRMATION.value: 0,
         WorkflowKind.CHECK_ACCEPTANCE.value: 1,
     }
     assert {item["category"] for item in current.json()["items"]} == {
