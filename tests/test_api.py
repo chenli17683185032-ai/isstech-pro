@@ -16,7 +16,8 @@ from isstech_replay.auth import login
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.config import Settings
 from isstech_replay.models.procurement import PROCUREMENT_STREAM_BY_WORKFLOW
-from isstech_replay.models.work_items import WorkflowKind
+from isstech_replay.models.readonly_modules import ReadonlyModuleKind
+from isstech_replay.models.work_items import WorkItemScopeReason, WorkflowKind
 from isstech_replay.session_store import SessionStore
 from isstech_replay.storage import WorkflowStorage
 
@@ -24,6 +25,7 @@ FIXTURES_AUTH = Path(__file__).parent / "fixtures" / "auth"
 FIXTURES_PR = Path(__file__).parent / "fixtures" / "purchase"
 FIXTURES_PAYMENT = Path(__file__).parent / "fixtures" / "payment"
 FIXTURES_BIZCASE = Path(__file__).parent / "fixtures" / "bizcase"
+FIXTURES_TRAVEL = Path(__file__).parent / "fixtures" / "travel_application"
 BUSINESS = "http://ipsapro.isstech.com"
 PASSPORT = "https://passport.isstech.com"
 
@@ -89,6 +91,31 @@ def _bizcase_html(page: int) -> str:
 
 def _bizcase_application_html() -> str:
     return (FIXTURES_BIZCASE / "application.html").read_text(encoding="utf-8")
+
+
+def _travel_application_html(page: int) -> str:
+    if page == 6:
+        return (FIXTURES_TRAVEL / "last_page.html").read_text(
+            encoding="utf-8"
+        ).replace("USER-A", "USER_B")
+    html = (FIXTURES_TRAVEL / "page1.html").read_text(encoding="utf-8")
+    if page == 1:
+        return html.replace("USER-A", "USER_B")
+    html = html.replace("OPAQUE_PAGE_1", f"OPAQUE_PAGE_{page}")
+    html = html.replace("VALIDATION_PAGE_1", f"VALIDATION_PAGE_{page}")
+    html = html.replace("&amp;page=1", f"&amp;page={page}")
+    html = html.replace(
+        'name="ctl00$ContentPlaceHolder1$gp_input" value="1"',
+        f'name="ctl00$ContentPlaceHolder1$gp_input" value="{page}"',
+    )
+    for index in range(1, 11):
+        global_index = (page - 1) * 10 + index
+        html = html.replace(
+            f"ELA-REDACTED-{index:03d}",
+            f"ELA-REDACTED-{global_index:03d}",
+        )
+        html = html.replace(f"id={1000 + index}&amp;", f"id={1000 + global_index}&amp;")
+    return html.replace("USER-A", "USER_B")
 
 
 def _portal_html() -> str:
@@ -183,6 +210,20 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
             body = httpx.QueryParams(request.content.decode())
             page = int(body.get("__EVENTARGUMENT", "0"))
         return httpx.Response(200, text=_bizcase_html(page), request=request)
+    if (
+        host == "ipsapro.isstech.com"
+        and path == "/WebPSAOA/Fee/FeeApply/EvectionLoan/List.aspx"
+    ):
+        page = 1
+        if request.method == "POST":
+            page = int(
+                httpx.QueryParams(request.content.decode())["__EVENTARGUMENT"]
+            )
+        return httpx.Response(
+            200,
+            text=_travel_application_html(page),
+            request=request,
+        )
     if host == "ipsapro.isstech.com" and path.startswith(
         "/WebTP/PurchaseRequisition/Download/"
     ):
@@ -503,6 +544,15 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
         before = client.get("/v1/work-items/current", headers=headers)
         first = client.post("/v1/readonly-modules/sync", headers=headers)
         second = client.post("/v1/readonly-modules/sync", headers=headers)
+        scope_storage = WorkflowStorage(
+            account_database_path("alice", base_database_path=database)
+        )
+        scope_storage.upsert_readonly_scope_assertion(
+            module=ReadonlyModuleKind.BIZCASE,
+            external_id="BC-REDACTED-001-V001",
+            scope_reason=WorkItemScopeReason.SUBMITTED_BY_ME,
+            confirmed_at="2026-07-17T00:00:00+00:00",
+        )
 
         def unexpected_upstream_call(*args, **kwargs):
             raise AssertionError("cached list API must not call upstream")
@@ -519,11 +569,20 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
         )
         monkeypatch.setattr(
             IsstechClient,
-            "list_personal_bizcases",
+            "list_bizcases_with_application_visibility",
+            unexpected_upstream_call,
+        )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_personal_travel_applications",
             unexpected_upstream_call,
         )
         payment = client.get("/v1/readonly-modules/payment", headers=headers)
         bizcases = client.get("/v1/readonly-modules/bizcases", headers=headers)
+        travel = client.get(
+            "/v1/readonly-modules/travel-applications",
+            headers=headers,
+        )
         runs = client.get("/v1/readonly-modules/runs", headers=headers)
         after = client.get("/v1/work-items/current", headers=headers)
 
@@ -531,11 +590,12 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert before.status_code == 200
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
-    assert first.json()["observed_count"] == 4
-    assert first.json()["changed_count"] == 4
+    assert first.json()["observed_count"] == 58
+    assert first.json()["changed_count"] == 58
     assert [stream["module"] for stream in first.json()["streams"]] == [
         "payment",
         "bizcase",
+        "travel_application",
     ]
     assert second.status_code == 200
     assert second.json()["changed_count"] == 0
@@ -552,26 +612,32 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert payment.json()["items"][0]["scope_reasons"] == ["submitted_by_me"]
     assert bizcases.status_code == 200
     assert bizcases.json()["source_total_count"] == 3
-    assert bizcases.json()["total_count"] == 2
-    assert len(bizcases.json()["items"]) == 2
-    assert bizcases.json()["submitted_by_me_count"] == 0
+    assert bizcases.json()["total_count"] == 1
+    assert len(bizcases.json()["items"]) == 1
+    assert bizcases.json()["submitted_by_me_count"] == 1
     assert bizcases.json()["my_project_count"] == 0
     assert bizcases.json()["managed_by_me_count"] == 0
-    assert bizcases.json()["submitted_or_managed_count"] == 2
-    assert all(
-        item["submitted_or_managed"] is True
-        for item in bizcases.json()["items"]
-    )
+    assert bizcases.json()["items"][0]["id"] == "BC-REDACTED-001-V001"
+    assert bizcases.json()["items"][0]["scope_reasons"] == ["submitted_by_me"]
+    assert travel.status_code == 200
+    assert travel.json()["source_total_count"] == 54
+    assert travel.json()["total_count"] == 54
+    assert travel.json()["submitted_by_me_count"] == 54
+    assert travel.json()["my_project_count"] == 0
+    assert travel.json()["managed_by_me_count"] == 0
+    assert "ELA-REDACTED-001" in {
+        item["application_no"] for item in travel.json()["items"]
+    }
     assert runs.status_code == 200
-    assert len(runs.json()) == 4
+    assert len(runs.json()) == 6
     assert after.status_code == 200
     assert after.json()["total_count"] == before.json()["total_count"] == 3
 
     storage = WorkflowStorage(
         account_database_path("alice", base_database_path=database)
     )
-    assert storage.table_count("readonly_module_runs") == 4
-    assert storage.table_count("readonly_module_current") == 4
+    assert storage.table_count("readonly_module_runs") == 6
+    assert storage.table_count("readonly_module_current") == 58
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(

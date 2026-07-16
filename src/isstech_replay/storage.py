@@ -38,12 +38,13 @@ from .models.work_items import (
     ChangeEvent,
     ChangeKind,
     WorkItemRelation,
+    WorkItemScopeReason,
     WorkflowKind,
     WorkflowSnapshot,
 )
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -60,6 +61,7 @@ _READONLY_MODULE_TABLES = {
     "readonly_module_runs",
     "readonly_module_snapshots",
     "readonly_module_current",
+    "readonly_scope_assertions",
 }
 _REQUIRED_TABLES = (
     _WORKFLOW_TABLES
@@ -73,13 +75,15 @@ _REQUIRED_TABLES_BY_VERSION = {
     2: _WORKFLOW_TABLES | _MATERIAL_TABLES,
     3: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES,
     4: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES,
-    5: _REQUIRED_TABLES,
+    5: _REQUIRED_TABLES - {"readonly_scope_assertions"},
+    6: _REQUIRED_TABLES,
 }
 _MIGRATIONS = {
     1: "migration_002_materials.sql",
     2: "migration_003_extraction.sql",
     3: "migration_004_review.sql",
     4: "migration_005_readonly_modules.sql",
+    5: "migration_006_readonly_scope.sql",
 }
 _INITIALIZATION_THREAD_LOCK = threading.Lock()
 _INITIALIZATION_LOCK_TIMEOUT_SECONDS = 10.0
@@ -941,6 +945,94 @@ class WorkflowStorage:
                 )
                 for row in rows
             )
+        finally:
+            connection.close()
+
+    def upsert_readonly_scope_assertion(
+        self,
+        *,
+        module: ReadonlyModuleKind,
+        external_id: str,
+        scope_reason: WorkItemScopeReason,
+        confirmed_at: str,
+    ) -> None:
+        external_id = external_id.strip()
+        if not external_id:
+            raise ValueError("readonly scope assertion external_id is required")
+        if not confirmed_at.strip():
+            raise ValueError("readonly scope assertion confirmed_at is required")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                current = connection.execute(
+                    "SELECT 1 FROM readonly_module_current "
+                    "WHERE module = ? AND external_id = ?",
+                    (module.value, external_id),
+                ).fetchone()
+                if current is None:
+                    raise ValueError(
+                        "readonly scope assertion must reference a current object"
+                    )
+                connection.execute(
+                    "INSERT INTO readonly_scope_assertions "
+                    "(module, external_id, scope_reason, evidence_kind, confirmed_at) "
+                    "VALUES (?, ?, ?, 'account_holder_confirmation', ?) "
+                    "ON CONFLICT(module, external_id, scope_reason) DO UPDATE SET "
+                    "evidence_kind = excluded.evidence_kind, "
+                    "confirmed_at = excluded.confirmed_at",
+                    (
+                        module.value,
+                        external_id,
+                        scope_reason.value,
+                        confirmed_at,
+                    ),
+                )
+        finally:
+            connection.close()
+
+    def readonly_scope_assertions(
+        self,
+        module: ReadonlyModuleKind,
+    ) -> dict[str, tuple[WorkItemScopeReason, ...]]:
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT external_id, scope_reason FROM readonly_scope_assertions "
+                "WHERE module = ? ORDER BY external_id, scope_reason",
+                (module.value,),
+            ).fetchall()
+        finally:
+            connection.close()
+        found: dict[str, set[WorkItemScopeReason]] = {}
+        for row in rows:
+            reason = WorkItemScopeReason(str(row["scope_reason"]))
+            found.setdefault(str(row["external_id"]), set()).add(reason)
+        return {
+            external_id: tuple(
+                reason for reason in WorkItemScopeReason if reason in reasons
+            )
+            for external_id, reasons in found.items()
+        }
+
+    def delete_readonly_scope_assertion(
+        self,
+        *,
+        module: ReadonlyModuleKind,
+        external_id: str,
+        scope_reason: WorkItemScopeReason,
+    ) -> bool:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "DELETE FROM readonly_scope_assertions "
+                    "WHERE module = ? AND external_id = ? AND scope_reason = ?",
+                    (module.value, external_id.strip(), scope_reason.value),
+                )
+                return cursor.rowcount == 1
         finally:
             connection.close()
 

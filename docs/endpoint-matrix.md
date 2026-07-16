@@ -134,7 +134,8 @@ not recover the request. The header is scoped to this GET rather than applied to
 the shared client. Because the actively served search action deterministically
 fails upstream, the adapter is GET-only and fails closed whenever the declared
 total differs from the current-page row count. No Payment detail endpoint is
-enabled: the only row action is Edit.
+enabled: the only upstream row action is Edit. The workspace detail drawer reads
+the account-scoped SQLite snapshot and sends no upstream detail request.
 
 ## BizCase query list
 
@@ -151,6 +152,31 @@ five rows on page 6. Pagination posts carry opaque ViewState unchanged and set
 uses the same URL for query, pagination, detail, and potentially writes, POST is
 allowed only after request-body validation; path-only POST allowlisting is
 insufficient.
+
+The BizCase application view is a union of creator visibility and department-role
+visibility. It is therefore retained only as visibility evidence and cannot by
+itself qualify an object as submitted or managed by the account. Personal display
+requires an exact row relation or an account-holder assertion stored only in the
+account SQLite database. The workspace detail drawer reads that local snapshot;
+the mixed edit-capable version form is never requested.
+
+## Travel application list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial travel application list | GET | `/WebPSAOA/Fee/FeeApply/EvectionLoan/List.aspx?helpmenucode=92` | None | observed, HTTP 200 | 2026-07-17 read-only browser probe; counts/schema only |
+| Page postback | POST | same exact list URL, `ctl00$ContentPlaceHolder1$gp` target | Read-only pagination | observed, HTTP 200 | pages 2, 3, and 6 read-only browser probe |
+| Open application | GET | `/WebPSAOA/Fee/FeeApply/EvectionLoan/Add.aspx?oper=edit...` | Write preparation | served-shape; blocked | list row link only; not requested |
+| Add application | navigation/form | same module add controls | Write preparation | served-shape; blocked | list form only |
+| Delete application | postback | same list form delete control | **Mutating** | blocked-write | list form only |
+
+The observed identity-bound list contains 54 rows over six pages: 10 rows on
+pages 1-5 and four rows on page 6. It has a fixed nine-column schema and every
+applicant matched the current Portal identity. Pagination is live-enabled only
+when the form body contains the proven empty filters, fixed ordering, current
+row-state controls, newest ViewState/EventValidation, exact pager target, and a
+bounded numeric page. Unknown controls and all add, edit, query, and delete
+postbacks fail closed. The workspace opens only the committed local snapshot.
 
 ## Attachments
 

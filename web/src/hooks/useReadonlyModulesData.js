@@ -12,7 +12,6 @@ const emptyReadonlyData = {
     my_project_count: 0,
     submitted_by_me_count: 0,
     managed_by_me_count: 0,
-    submitted_or_managed_count: 0,
     items: [],
   },
   bizcases: {
@@ -25,7 +24,18 @@ const emptyReadonlyData = {
     my_project_count: 0,
     submitted_by_me_count: 0,
     managed_by_me_count: 0,
-    submitted_or_managed_count: 0,
+    items: [],
+  },
+  travelApplications: {
+    module: "travel_application",
+    module_label: "出差申请",
+    ownership_scope: "personal_submissions_projects_and_management",
+    synced_at: null,
+    source_total_count: 0,
+    total_count: 0,
+    my_project_count: 0,
+    submitted_by_me_count: 0,
+    managed_by_me_count: 0,
     items: [],
   },
   runs: [],
@@ -47,12 +57,13 @@ export default function useReadonlyModulesData(token, onAuthExpired) {
     }
     if (!loadedRef.current) setLoading(true);
     try {
-      const [payment, bizcases, runs] = await Promise.all([
+      const [payment, bizcases, travelApplications, runs] = await Promise.all([
         apiRequest("/v1/readonly-modules/payment", { token }),
         apiRequest("/v1/readonly-modules/bizcases", { token }),
+        apiRequest("/v1/readonly-modules/travel-applications", { token }),
         apiRequest("/v1/readonly-modules/runs?limit=20", { token }),
       ]);
-      setData({ payment, bizcases, runs });
+      setData({ payment, bizcases, travelApplications, runs });
       loadedRef.current = true;
     } catch (requestError) {
       if (requestError.status === 401) onAuthExpired();

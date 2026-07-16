@@ -186,10 +186,10 @@ def test_bizcase_client_intersects_application_evidence_with_query_source() -> N
         )
 
     with IsstechClient(transport=httpx.MockTransport(handler)) as client:
-        result = client.list_personal_bizcases(max_pages=2)
+        result = client.list_bizcases_with_application_visibility(max_pages=2)
 
     assert result.total_count == 3
-    assert result.submitted_or_managed_ids == (
+    assert result.application_visible_ids == (
         "BC-REDACTED-001-V001",
         "BC-REDACTED-003-V001",
     )
@@ -217,7 +217,7 @@ def test_bizcase_client_rejects_application_record_missing_from_query_source() -
 
     with IsstechClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(PaginationIncompleteError, match="application identity"):
-            client.list_personal_bizcases(max_pages=2)
+            client.list_bizcases_with_application_visibility(max_pages=2)
 
 
 def test_bizcase_client_rejects_page_count_drift_and_max_page_limit() -> None:

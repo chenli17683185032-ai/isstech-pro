@@ -12,9 +12,11 @@ import threading
 
 import pytest
 
+from isstech_replay.models.readonly_modules import ReadonlyModuleKind, ReadonlySnapshot
 from isstech_replay.models.work_items import (
     ChangeKind,
     WorkItemRelation,
+    WorkItemScopeReason,
     WorkflowKind,
     WorkflowSnapshot,
 )
@@ -545,3 +547,111 @@ def test_version_three_database_migrates_without_losing_extractions(tmp_path: Pa
     assert len(extraction["fields"]) == 1
     assert storage.table_count("workflow_drafts") == 0
     assert storage.table_count("draft_audit_events") == 0
+
+
+def test_readonly_scope_assertion_requires_current_object_and_is_reversible(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "scope.sqlite3")
+    payload_json = json.dumps({"id": "BC-REDACTED-1"}, separators=(",", ":"))
+    snapshot = ReadonlySnapshot(
+        module=ReadonlyModuleKind.BIZCASE,
+        external_id="BC-REDACTED-1",
+        observed_at=T1,
+        payload_json=payload_json,
+        payload_hash=hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+    )
+    storage.start_readonly_run(
+        run_id="scope-baseline",
+        module=ReadonlyModuleKind.BIZCASE,
+        started_at=T1,
+        max_pages=20,
+    )
+    storage.complete_readonly_run(
+        run_id="scope-baseline",
+        observed_at=T1,
+        finished_at=T1,
+        source_total_count=1,
+        snapshots=(snapshot,),
+    )
+
+    with pytest.raises(ValueError, match="current object"):
+        storage.upsert_readonly_scope_assertion(
+            module=ReadonlyModuleKind.BIZCASE,
+            external_id="BC-REDACTED-MISSING",
+            scope_reason=WorkItemScopeReason.SUBMITTED_BY_ME,
+            confirmed_at=T2,
+        )
+
+    storage.upsert_readonly_scope_assertion(
+        module=ReadonlyModuleKind.BIZCASE,
+        external_id="BC-REDACTED-1",
+        scope_reason=WorkItemScopeReason.SUBMITTED_BY_ME,
+        confirmed_at=T2,
+    )
+    assert storage.readonly_scope_assertions(ReadonlyModuleKind.BIZCASE) == {
+        "BC-REDACTED-1": (WorkItemScopeReason.SUBMITTED_BY_ME,)
+    }
+    assert storage.delete_readonly_scope_assertion(
+        module=ReadonlyModuleKind.BIZCASE,
+        external_id="BC-REDACTED-1",
+        scope_reason=WorkItemScopeReason.SUBMITTED_BY_ME,
+    )
+    assert storage.readonly_scope_assertions(ReadonlyModuleKind.BIZCASE) == {}
+
+
+def test_version_five_readonly_data_migrates_without_payload_changes(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "version-five.sqlite3"
+    package_root = Path(__file__).parents[1] / "src" / "isstech_replay"
+    connection = sqlite3.connect(database)
+    for script in (
+        "schema.sql",
+        "migration_002_materials.sql",
+        "migration_003_extraction.sql",
+        "migration_004_review.sql",
+        "migration_005_readonly_modules.sql",
+    ):
+        connection.executescript((package_root / script).read_text(encoding="utf-8"))
+    payload_json = '{"id":"BC-REDACTED-1"}'
+    payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    connection.execute(
+        "INSERT INTO readonly_module_runs "
+        "(run_id, module, status, started_at, observed_at, finished_at, max_pages, "
+        "source_total_count, observed_count, snapshot_count, history_rows_inserted, "
+        "changed_count) VALUES "
+        "('existing-readonly', 'bizcase', 'succeeded', ?, ?, ?, 20, 1, 1, 1, 1, 1)",
+        (T1, T1, T1),
+    )
+    connection.execute(
+        "INSERT INTO readonly_module_snapshots "
+        "(run_id, module, external_id, observed_at, payload_json, payload_hash) "
+        "VALUES ('existing-readonly', 'bizcase', 'BC-REDACTED-1', ?, ?, ?)",
+        (T1, payload_json, payload_hash),
+    )
+    connection.execute(
+        "INSERT INTO readonly_module_current "
+        "(module, external_id, first_seen_at, last_seen_at, last_run_id, "
+        "payload_json, payload_hash) VALUES "
+        "('bizcase', 'BC-REDACTED-1', ?, ?, 'existing-readonly', ?, ?)",
+        (T1, T1, payload_json, payload_hash),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+    connection.close()
+
+    storage = WorkflowStorage(database)
+    assert storage.schema_version() == SCHEMA_VERSION
+    assert storage.table_count("readonly_module_runs") == 1
+    assert storage.table_count("readonly_module_snapshots") == 1
+    current = storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)
+    assert len(current) == 1
+    assert current[0].payload_json == payload_json
+    assert current[0].payload_hash == payload_hash
+    assert storage.readonly_scope_assertions(ReadonlyModuleKind.BIZCASE) == {}
+
+    connection = sqlite3.connect(database)
+    assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    connection.close()

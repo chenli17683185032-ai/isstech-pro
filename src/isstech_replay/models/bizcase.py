@@ -81,4 +81,4 @@ class BizCaseListResult:
     total_count: int
     page_count: int
     source_url: str = ""
-    submitted_or_managed_ids: tuple[str, ...] = ()
+    application_visible_ids: tuple[str, ...] = ()

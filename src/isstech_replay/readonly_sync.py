@@ -1,4 +1,4 @@
-"""Independent, failure-isolated synchronization for Payment and BizCase lists."""
+"""Independent, failure-isolated synchronization for read-only business lists."""
 
 from __future__ import annotations
 
@@ -17,6 +17,10 @@ from .models.readonly_modules import (
     ReadonlySyncBatchResult,
     ReadonlySyncResult,
 )
+from .models.travel_application import (
+    TravelApplicationListResult,
+    TravelApplicationRecord,
+)
 from .models.work_items import (
     WorkItemRelation,
     WorkItemScopeReason,
@@ -27,7 +31,11 @@ from .sync import safe_error_message, utc_iso
 from .work_items import personal_scope_reasons, personal_work_item_scope
 
 
-READONLY_MODULES = (ReadonlyModuleKind.PAYMENT, ReadonlyModuleKind.BIZCASE)
+READONLY_MODULES = (
+    ReadonlyModuleKind.PAYMENT,
+    ReadonlyModuleKind.BIZCASE,
+    ReadonlyModuleKind.TRAVEL_APPLICATION,
+)
 
 
 def _personal_project_numbers(storage: WorkflowStorage | None) -> tuple[str, ...]:
@@ -88,10 +96,10 @@ def _bizcase_payload(
     *,
     source_url: str,
     scope_reasons: tuple[WorkItemScopeReason, ...],
-    submitted_or_managed: bool,
+    application_view_visible: bool,
 ) -> dict[str, object]:
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "module": ReadonlyModuleKind.BIZCASE.value,
         "id": record.id,
         "ordinal": record.ordinal,
@@ -105,7 +113,30 @@ def _bizcase_payload(
         "revenue_recognition_type": record.revenue_recognition_type,
         "current_approver": record.current_approver,
         "scope_reasons": [reason.value for reason in scope_reasons],
-        "submitted_or_managed": submitted_or_managed,
+        "application_view_visible": application_view_visible,
+        "fields": record.field_dict(),
+        "source_url": source_url,
+    }
+
+
+def _travel_application_payload(
+    record: TravelApplicationRecord,
+    *,
+    source_url: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "module": ReadonlyModuleKind.TRAVEL_APPLICATION.value,
+        "id": record.id,
+        "ordinal": record.ordinal,
+        "application_no": record.application_no,
+        "project_name": record.project_name,
+        "applicant": record.applicant,
+        "application_date": record.application_date,
+        "status": record.status,
+        "amount": record.amount,
+        "current_approver": record.current_approver,
+        "scope_reasons": [WorkItemScopeReason.SUBMITTED_BY_ME.value],
         "fields": record.field_dict(),
         "source_url": source_url,
     }
@@ -113,7 +144,7 @@ def _bizcase_payload(
 
 def readonly_snapshots(
     module: ReadonlyModuleKind,
-    result: PaymentListResult | BizCaseListResult,
+    result: PaymentListResult | BizCaseListResult | TravelApplicationListResult,
     *,
     observed_at: str,
     display_name: str = "",
@@ -148,15 +179,15 @@ def readonly_snapshots(
                     ),
                 )
             )
-    else:
+    elif module is ReadonlyModuleKind.BIZCASE:
         if not isinstance(result, BizCaseListResult):
             raise TypeError("BizCase sync requires BizCaseListResult")
-        evidence_ids = result.submitted_or_managed_ids
+        evidence_ids = result.application_visible_ids
         if len(set(evidence_ids)) != len(evidence_ids):
-            raise RuntimeError("BizCase contains duplicate joint evidence identity")
+            raise RuntimeError("BizCase contains duplicate application visibility identity")
         record_ids = {record.id for record in result.items}
         if not set(evidence_ids).issubset(record_ids):
-            raise RuntimeError("BizCase contains an unknown joint evidence identity")
+            raise RuntimeError("BizCase contains an unknown application visibility identity")
         evidence_id_set = set(evidence_ids)
         for record in result.items:
             scope_reasons = personal_scope_reasons(
@@ -171,7 +202,28 @@ def readonly_snapshots(
                         record,
                         source_url=result.source_url,
                         scope_reasons=scope_reasons,
-                        submitted_or_managed=record.id in evidence_id_set,
+                        application_view_visible=record.id in evidence_id_set,
+                    ),
+                )
+            )
+    else:
+        if not isinstance(result, TravelApplicationListResult):
+            raise TypeError(
+                "Travel application sync requires TravelApplicationListResult"
+            )
+        if not display_name.strip():
+            raise ValueError("Travel application personal scope requires a display name")
+        for record in result.items:
+            if not display_name_matches(record.applicant, display_name):
+                raise RuntimeError(
+                    "Travel application result contains an unscoped record"
+                )
+            payloads.append(
+                (
+                    record.id,
+                    _travel_application_payload(
+                        record,
+                        source_url=result.source_url,
                     ),
                 )
             )
@@ -224,22 +276,34 @@ def sync_readonly_module(
         run_started = True
 
     try:
-        result: PaymentListResult | BizCaseListResult
-        if module is ReadonlyModuleKind.PAYMENT:
+        result: PaymentListResult | BizCaseListResult | TravelApplicationListResult
+        identity = ""
+        if module in {
+            ReadonlyModuleKind.PAYMENT,
+            ReadonlyModuleKind.TRAVEL_APPLICATION,
+        }:
             identity = (display_name or client.get_portal_display_name()).strip()
+        if module is ReadonlyModuleKind.PAYMENT:
             result = client.list_personal_payment_records(
                 display_name=identity,
                 project_numbers=project_numbers,
                 max_pages=max_pages,
             )
+        elif module is ReadonlyModuleKind.BIZCASE:
+            result = client.list_bizcases_with_application_visibility(
+                max_pages=max_pages
+            )
         else:
-            result = client.list_personal_bizcases(max_pages=max_pages)
+            result = client.list_personal_travel_applications(
+                display_name=identity,
+                max_pages=max_pages,
+            )
         observed_text = utc_iso(observed_at or datetime.now(UTC))
         snapshots = readonly_snapshots(
             module,
             result,
             observed_at=observed_text,
-            display_name=identity if module is ReadonlyModuleKind.PAYMENT else "",
+            display_name=identity,
             project_numbers=project_numbers,
         )
         if result.total_count != len(snapshots):

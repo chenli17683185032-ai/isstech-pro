@@ -2,8 +2,8 @@
 
 ## Goal
 
-Provide a local AI-assisted workflow center over the authorized iPSA Purchase
-Requisition CTF target. Browser tooling is analysis-only; the final runtime is
+Provide a local AI-assisted workflow center over the authorized iPSA CTF target.
+Browser tooling is analysis-only; the final runtime is
 a same-origin Web workspace plus direct HTTP through a single guarded transport.
 
 ## Target surfaces
@@ -42,6 +42,7 @@ sync service  --------------------> SQLite state/audit
      |
      +---------------------------> five complete SearchIndex streams
      +---------------------------> Payment personal queries + BizCase source
+     +---------------------------> identity-bound travel application list
                                          |
                                          v
                               account-visible records + relation labels
@@ -84,7 +85,7 @@ sync service  --------------------> SQLite state/audit
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / Portal identity / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
-| `tools/sync_work_items.py` | Seven-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
+| `tools/sync_work_items.py` | Eight-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
 | `tools/scheduled_sync.py` | LaunchAgent entrypoint; invokes the existing manual sync CLI |
@@ -114,7 +115,11 @@ sync service  --------------------> SQLite state/audit
 9. Portal `#AccountGreetings #Greeting p` supplies an optional display identity.
    Exact normalized applicant matches add relation labels; identity mismatch or a
    missing applicant column never discards an otherwise visible row.
-10. The Web workspace has no upstream execution control. Local material upload,
+10. Payment, BizCase, and travel applications have independent checkpoints.
+    Their API admits only exact personal relations; BizCase application-view
+    visibility is not ownership, and account-holder object assertions remain only
+    in the mode `0600` account database.
+11. The Web workspace has no upstream execution control. Local material upload,
    field review, ready transitions, and SQLite sync are the only mutations it can request.
 
 ## Evidence pipeline
@@ -141,6 +146,16 @@ Write previews stay explicitly inferred until request-stage interception plus
 abort supplies their real shape. Clean-process credential reads are operationally
 replayed; the older browser capture remains insufficient by itself to prove fresh
 ticket issuance.
+
+Payment is limited to its proven personal list queries. BizCase uses an exact
+query entry plus body-validated pager postbacks for its source checkpoint, but
+application-view visibility does not qualify a row for personal display. Travel
+applications use the exact `helpmenucode=92` list GET and a body-validated
+WebForms pager that consumes the newest hidden state on every page. Its fixed
+nine-column schema, page shape, unique identities, and applicant identity must all
+hold before a checkpoint commits. All three details are local SQLite snapshots;
+upstream Payment Edit, BizCase mixed edit forms, and travel `Add.aspx?oper=edit`
+remain blocked.
 
 ## Snapshot transaction
 
@@ -258,8 +273,8 @@ bounded Keychain reads and launches the existing `tools/sync_work_items.py`
 subprocess with credentials only in that child environment.
 
 The child still uses the exact P3 complete-read and transactional SQLite path,
-then reuses the same authenticated client and account storage for the P9.9
-Payment/BizCase checkpoints. Each of the seven streams preserves its own current
+then reuses the same authenticated client and account storage for the Payment,
+BizCase, and travel-application checkpoints. Each of the eight streams preserves its own current
 snapshot on failure; the combined CLI status is non-success when any group is
 partial or failed.
 Launchd stdout/stderr go to `/dev/null`; the wrapper parses child JSON and writes

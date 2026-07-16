@@ -22,6 +22,12 @@ from .models.payment import (
     PaymentRecord,
     payment_query_form,
 )
+from .models.travel_application import (
+    TRAVEL_APPLICATION_PAGE_SIZE,
+    TravelApplicationListResult,
+    TravelApplicationPage,
+    TravelApplicationRecord,
+)
 from .models.procurement import (
     PROCUREMENT_STREAM_BY_WORKFLOW,
     ProcurementListResult,
@@ -39,10 +45,12 @@ from .parsers.payment import parse_payment_query_list
 from .parsers.portal import display_name_matches, parse_portal_display_name
 from .parsers.procurement import parse_procurement_detail, parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
+from .parsers.travel_application import parse_travel_application_page
 from .policy import (
     BIZCASE_APPLICATION_URL,
     BIZCASE_QUERY_URL,
     PAYMENT_QUERY_PATH,
+    TRAVEL_APPLICATION_URL,
     EndpointPolicy,
     PolicyViolation,
     UnsafeRequestError,
@@ -642,8 +650,12 @@ class IsstechClient:
             source_url=str(response.url),
         )
 
-    def list_personal_bizcases(self, *, max_pages: int = 20) -> BizCaseListResult:
-        """Join application-scope evidence to the complete query checkpoint."""
+    def list_bizcases_with_application_visibility(
+        self,
+        *,
+        max_pages: int = 20,
+    ) -> BizCaseListResult:
+        """Join application-view visibility to the complete query checkpoint."""
         applications = self.list_bizcase_applications()
         source = self.list_all_bizcases(max_pages=max_pages)
         source_by_id = {record.id: record for record in source.items}
@@ -671,9 +683,103 @@ class IsstechClient:
                 )
         return replace(
             source,
-            submitted_or_managed_ids=tuple(
+            application_visible_ids=tuple(
                 record.id for record in applications.items
             ),
+        )
+
+    def _read_travel_application_page(
+        self,
+        *,
+        previous: TravelApplicationPage | None = None,
+        page: int = 1,
+    ) -> TravelApplicationPage:
+        url = self._url(TRAVEL_APPLICATION_URL)
+        if previous is None:
+            response = self.get(url)
+        else:
+            response = self.post(
+                url,
+                data=previous.pagination_form(page),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_travel_application_page(
+            response.text,
+            source_url=str(response.url),
+        )
+
+    def list_personal_travel_applications(
+        self,
+        *,
+        display_name: str,
+        max_pages: int = 20,
+    ) -> TravelApplicationListResult:
+        """Replay the identity-bound travel list and fail on incomplete paging."""
+        display_name = display_name.strip()
+        if not display_name:
+            raise ValueError("travel application display_name is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        current = self._read_travel_application_page()
+        if current.current_page != 1:
+            raise PaginationIncompleteError(
+                "Travel application initial response is not page 1"
+            )
+        if current.page_count > max_pages:
+            raise PaginationIncompleteError(
+                "Travel application page count "
+                f"{current.page_count} exceeds max_pages={max_pages}"
+            )
+
+        items: list[TravelApplicationRecord] = []
+        seen: set[str] = set()
+        expected_page_count = current.page_count
+        for page_number in range(1, expected_page_count + 1):
+            if page_number > 1:
+                current = self._read_travel_application_page(
+                    previous=current,
+                    page=page_number,
+                )
+            if current.current_page != page_number:
+                raise PaginationIncompleteError(
+                    "Travel application requested page "
+                    f"{page_number} but received {current.current_page}"
+                )
+            if current.page_count != expected_page_count:
+                raise PaginationIncompleteError(
+                    "Travel application page count changed during pagination: "
+                    f"{expected_page_count} -> {current.page_count}"
+                )
+            if page_number < expected_page_count and len(current.items) != (
+                TRAVEL_APPLICATION_PAGE_SIZE
+            ):
+                raise PaginationIncompleteError(
+                    f"Travel application page {page_number} was short before the last page"
+                )
+            if page_number == expected_page_count and expected_page_count > 1:
+                if not current.items or len(current.items) > TRAVEL_APPLICATION_PAGE_SIZE:
+                    raise PaginationIncompleteError(
+                        "Travel application last-page size is invalid"
+                    )
+            for item in current.items:
+                if not display_name_matches(item.applicant, display_name):
+                    raise PaginationIncompleteError(
+                        "Travel application applicant does not match the current identity"
+                    )
+                if item.id in seen:
+                    raise PaginationIncompleteError(
+                        f"Travel application page {page_number} repeated identity {item.id}"
+                    )
+                seen.add(item.id)
+                items.append(item)
+
+        return TravelApplicationListResult(
+            items=tuple(items),
+            total_count=len(items),
+            page_count=expected_page_count,
+            source_url=current.source_url,
         )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:

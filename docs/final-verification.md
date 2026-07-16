@@ -20,11 +20,14 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-The current P9.8 gate is recorded in the implementation plan after the final run.
-It includes 329 passing tests, Ruff, deterministic OpenAPI, secret/evidence
-verification, a 1,595-module React production build, a 70-file wheel, plist lint,
-and `git diff --check`. Credentialed read-only acceptance returned Payment 1 and
-BizCase 55; the second complete dual-stream run reported zero changes in both.
+The current P9.11 automated gate has 371 passing tests, clean Ruff, deterministic
+OpenAPI, secret/evidence verification, a 1,595-module React production build, a
+73-file wheel, plist lint, schema v5-to-v6 migration, and `git diff --check`.
+Credentialed acceptance left Payment at 10 personal records, BizCase at 55 source
+records and one locally asserted personal record, and returned 54 identity-bound
+travel applications with zero changes on the second travel-only synchronization.
+In-app Browser visual/network QA remains pending because its WebView exposed no
+attachable tab after two bounded retries; do not treat that browser gate as passed.
 
 ## Operator evidence check
 
@@ -109,7 +112,7 @@ unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
 Pass criteria: dry-run leaves no new DB/run file; all five procurement streams
-and both Payment/BizCase streams are `succeeded`; every stream has complete
+and all three Payment/BizCase/travel-application streams are `succeeded`; every stream has complete
 declared/observed parity; all files report mode `600`; a second unchanged sync
 adds history but zero procurement events and zero readonly changes.
 
@@ -192,6 +195,7 @@ mock login -> material in local store -> local_rules extraction -> draft
 -> mock Portal identity + five read-only SearchIndex streams
 -> complete account-visible source records in adapter-scoped SQLite checkpoints
 -> personal-project/submission scope derived by the local API
+-> Payment/BizCase/travel rows open account-scoped local snapshot details
 -> refresh recovery -> stale-version 409 refresh without overwrite
 ```
 
@@ -245,7 +249,7 @@ stat -f '%Lp %N' \
 ```
 
 Expected: agent is loaded with five weekday intervals, installed plist mode is
-`600`, no credential appears in the plist, and a later scheduled run writes seven
+`600`, no credential appears in the plist, and a later scheduled run writes eight
 successful stream results under `data/accounts/<sha256-account-scope>/` plus one
 safe `scheduled-sync.log` line while the FastAPI app is closed. The raw username
 must not appear in the scoped path or log. Do not activate before Keychain is configured.
@@ -324,17 +328,17 @@ bash tools/first-commit.sh
 | Browser login protocol | Yes, redacted CDP is reproducible | Historical browser capture already carried `.iPSA` |
 | Pure HTTP login code | Yes, mocked and credentialed live reads | Credentials remain runtime-only |
 | Five SearchIndex streams and PR Detail | Yes, with live 353/353 schema/count parity | Non-PR upstream Detail remains disabled |
-| Payment and BizCase query lists | Yes; live 1/55, independent checkpoints, second run 0 changes | Payment is GET-only; BizCase details remain disabled |
+| Payment, BizCase, and travel lists | Yes; independent checkpoints, personal scope, and local snapshot details | Upstream edit-capable details remain disabled |
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
 | FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | P7 write execution remains blocked |
-| SQLite snapshot/diff | Yes; five per-stream checkpoints and live 353 current | — |
-| Manual sync CLI | Yes; seven-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
+| SQLite snapshot/diff | Yes; five procurement plus three read-only checkpoints, schema v6 | — |
+| Manual sync CLI | Yes; eight-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
 | Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | P7 remains write-blocked |
-| Weekday scheduled sync | Seven-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
+| Weekday scheduled sync | Eight-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated gates plus credentialed read-only smoke | Write-side P7 excluded |
 

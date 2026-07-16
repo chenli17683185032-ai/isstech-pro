@@ -63,6 +63,9 @@ BIZCASE_APPLICATION_URL = (
     "&urltype=mcontrol"
     f"&helpmenucode={BIZCASE_VIEW_PARAMS['application'][1]}"
 )
+TRAVEL_APPLICATION_PATH = "/WebPSAOA/Fee/FeeApply/EvectionLoan/List.aspx"
+TRAVEL_APPLICATION_URL = f"{TRAVEL_APPLICATION_PATH}?helpmenucode=92"
+TRAVEL_APPLICATION_PAGER_TARGET = "ctl00$ContentPlaceHolder1$gp"
 _BIZCASE_POSTBACK_FIELDS = frozenset(
     {
         "__EVENTTARGET",
@@ -92,6 +95,28 @@ _BIZCASE_REQUIRED_POSTBACK_FIELDS = frozenset(
 )
 _BIZCASE_MAX_BODY_BYTES = 1024 * 1024
 _PAYMENT_QUERY_MAX_BODY_BYTES = 16 * 1024
+_TRAVEL_APPLICATION_MAX_BODY_BYTES = 128 * 1024
+_TRAVEL_APPLICATION_FIXED_FIELDS = frozenset(
+    {
+        "__EVENTTARGET",
+        "__EVENTARGUMENT",
+        "__VIEWSTATE",
+        "__VIEWSTATEGENERATOR",
+        "__VIEWSTATEENCRYPTED",
+        "__EVENTVALIDATION",
+        "ctl00$ContentPlaceHolder1$txtApplyNo",
+        "ctl00$ContentPlaceHolder1$DDListFeeFormStatus1",
+        "ctl00$ContentPlaceHolder1$ApplyStartDate",
+        "ctl00$ContentPlaceHolder1$ApplyEndDate",
+        "ctl00$ContentPlaceHolder1$ddlOrderBy",
+        "ctl00$ContentPlaceHolder1$chkOrderBy",
+        "ctl00$ContentPlaceHolder1$gp_input",
+    }
+)
+_TRAVEL_APPLICATION_ROW_FIELD_RE = re.compile(
+    r"^ctl00\$ContentPlaceHolder1\$MyGridView\$(ctl\d{2})\$"
+    r"(workflowownerid|applyno)$"
+)
 _PAYMENT_QUERY_PAGER_PATH_RE = re.compile(
     r"^/WebPMS/payment/QueryListBySearch/0/1/False/([1-9]\d*)$"
 )
@@ -171,6 +196,22 @@ def _exact_bizcase_query(url: str) -> bool:
     return pairs == [("thUrl", BIZCASE_QUERY_THURL)]
 
 
+def _exact_travel_application_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.path != TRAVEL_APPLICATION_PATH:
+        return False
+    try:
+        pairs = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=2,
+        )
+    except ValueError:
+        return False
+    return pairs == [("helpmenucode", "92")]
+
+
 def _bizcase_get_view(url: str) -> str | None:
     parsed = urlparse(url)
     if parsed.path != BIZCASE_QUERY_PATH:
@@ -213,6 +254,16 @@ def _blocked_payment_query(reason: str) -> PolicyDecision:
         SideEffect.NONE,
         "payment.query",
         "payment.query_post.blocked",
+        reason,
+    )
+
+
+def _blocked_travel_application(reason: str) -> PolicyDecision:
+    return _decision(
+        RequestClass.BUILD_ONLY,
+        SideEffect.UNKNOWN,
+        "travel_application.postback",
+        "travel_application.postback.blocked",
         reason,
     )
 
@@ -342,6 +393,127 @@ def _classify_bizcase_pagination(
     )
 
 
+def _classify_travel_application_pagination(
+    *,
+    headers: Mapping[str, str] | None,
+    body: bytes | None,
+) -> PolicyDecision:
+    if body is None:
+        return _blocked_travel_application(
+            "Travel application POST requires an in-memory form body"
+        )
+    if not body or len(body) > _TRAVEL_APPLICATION_MAX_BODY_BYTES:
+        return _blocked_travel_application(
+            "Travel application form body is empty or exceeds the size limit"
+        )
+    content_type_header = next(
+        (
+            value
+            for name, value in (headers or {}).items()
+            if name.lower() == "content-type"
+        ),
+        "",
+    )
+    content_type = content_type_header.split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return _blocked_travel_application(
+            "Travel application POST must be form URL encoded"
+        )
+    try:
+        pairs = parse_qsl(
+            body.decode("utf-8"),
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=64,
+        )
+    except (UnicodeDecodeError, ValueError):
+        return _blocked_travel_application("Travel application form body is malformed")
+    counts = Counter(name for name, _ in pairs)
+    if any(count != 1 for count in counts.values()):
+        return _blocked_travel_application(
+            "Travel application form contains duplicate fields"
+        )
+    names = frozenset(counts)
+    if not _TRAVEL_APPLICATION_FIXED_FIELDS <= names:
+        return _blocked_travel_application(
+            "Travel application pagination fields are incomplete"
+        )
+    dynamic_names = names - _TRAVEL_APPLICATION_FIXED_FIELDS
+    row_fields: dict[str, set[str]] = {}
+    for name in dynamic_names:
+        match = _TRAVEL_APPLICATION_ROW_FIELD_RE.fullmatch(name)
+        if match is None:
+            return _blocked_travel_application(
+                "Travel application form contains an unapproved control"
+            )
+        row_fields.setdefault(match.group(1), set()).add(match.group(2))
+    if not row_fields or len(row_fields) > 10 or any(
+        fields != {"workflowownerid", "applyno"} for fields in row_fields.values()
+    ):
+        return _blocked_travel_application(
+            "Travel application row state fields are incomplete"
+        )
+
+    values = dict(pairs)
+    if values["__EVENTTARGET"] != TRAVEL_APPLICATION_PAGER_TARGET:
+        return _blocked_travel_application(
+            "Travel application event target is not the proven pager"
+        )
+    page = values["__EVENTARGUMENT"]
+    current_page = values["ctl00$ContentPlaceHolder1$gp_input"]
+    if not re.fullmatch(r"[1-9]\d{0,2}", page) or not re.fullmatch(
+        r"[1-9]\d{0,2}", current_page
+    ):
+        return _blocked_travel_application(
+            "Travel application page values are not bounded positive integers"
+        )
+    if not values["__VIEWSTATE"] or not values["__EVENTVALIDATION"] or not re.fullmatch(
+        r"[A-Fa-f0-9]{8}", values["__VIEWSTATEGENERATOR"]
+    ):
+        return _blocked_travel_application(
+            "Travel application opaque state is missing or malformed"
+        )
+    for name in (
+        "ctl00$ContentPlaceHolder1$txtApplyNo",
+        "ctl00$ContentPlaceHolder1$DDListFeeFormStatus1",
+        "ctl00$ContentPlaceHolder1$ApplyStartDate",
+        "ctl00$ContentPlaceHolder1$ApplyEndDate",
+    ):
+        if values[name]:
+            return _blocked_travel_application(
+                "Travel application pager contains an unapproved filter"
+            )
+    if values["ctl00$ContentPlaceHolder1$ddlOrderBy"] != "AI_ApplyNo" or values[
+        "ctl00$ContentPlaceHolder1$chkOrderBy"
+    ] != "on":
+        return _blocked_travel_application(
+            "Travel application ordering differs from the proven list"
+        )
+    for name in dynamic_names:
+        match = _TRAVEL_APPLICATION_ROW_FIELD_RE.fullmatch(name)
+        assert match is not None
+        value = values[name]
+        if match.group(2) == "applyno" and not re.fullmatch(
+            r"ELA[0-9A-Z-]+", value
+        ):
+            return _blocked_travel_application(
+                "Travel application row identity is malformed"
+            )
+        if match.group(2) == "workflowownerid" and not re.fullmatch(
+            r"[A-Za-z0-9_-]{0,64}", value
+        ):
+            return _blocked_travel_application(
+                "Travel application workflow owner state is malformed"
+            )
+    return _decision(
+        RequestClass.ALLOW_LIVE,
+        SideEffect.NONE,
+        "travel_application.paginate",
+        "travel_application.pagination_post",
+        "Body-validated travel application pager postback",
+    )
+
+
 def _unsafe_path_reason(path: str) -> str | None:
     """Reject path forms that an upstream server may normalize differently."""
     candidate = path
@@ -463,6 +635,35 @@ def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
             "bizcase.unapproved",
             "bizcase.query_mismatch",
             "BizCase path or query does not match the exact read-only entry",
+        )
+    if path == TRAVEL_APPLICATION_PATH:
+        if _exact_travel_application_url(url):
+            if method == "GET":
+                return _decision(
+                    RequestClass.ALLOW_LIVE,
+                    SideEffect.NONE,
+                    "travel_application.list",
+                    "travel_application.list_get",
+                    "Served exact travel application list",
+                )
+            if method == "POST":
+                return _blocked_travel_application(
+                    "Travel application POST is blocked unless its body proves pagination"
+                )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "travel_application.unapproved",
+            "travel_application.query_mismatch",
+            "Travel application path or query does not match the exact list entry",
+        )
+    if path == "/WebPSAOA/Fee/FeeApply/EvectionLoan/Add.aspx":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "travel_application.edit",
+            "travel_application.edit_page",
+            "Travel application Add.aspx is an edit-capable form",
         )
     return None
 
@@ -850,6 +1051,15 @@ class EndpointPolicy:
             and _exact_bizcase_query(url)
         ):
             return _classify_bizcase_pagination(headers=headers, body=body)
+        if (
+            method.upper() == "POST"
+            and decision.rule_id == "travel_application.postback.blocked"
+            and _exact_travel_application_url(url)
+        ):
+            return _classify_travel_application_pagination(
+                headers=headers,
+                body=body,
+            )
         return decision
 
     def assert_live_allowed(self, method: str, url: str) -> PolicyDecision:

@@ -17,7 +17,7 @@ const viewTitles = {
   materials: "项目材料",
   drafts: "审阅草稿",
   "work-items": "催办清单",
-  "readonly-modules": "付款与 BizCase",
+  "readonly-modules": "业务查询",
 };
 
 function restoreToken() {

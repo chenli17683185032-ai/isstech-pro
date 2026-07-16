@@ -47,12 +47,14 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "业务查询" in js.text
     assert "付款申请" in js.text
     assert "BizCase查询" in js.text
-    assert "申请/管理" in js.text
-    assert "submitted_or_managed_count" in js.text
+    assert "出差申请" in js.text
+    assert "查看本地详情" in js.text
+    assert "申请/管理" not in js.text
     assert "个人相关范围" in js.text
     assert "账号可见范围" not in js.text
     assert "/v1/readonly-modules/payment" in js.text
     assert "/v1/readonly-modules/bizcases" in js.text
+    assert "/v1/readonly-modules/travel-applications" in js.text
     assert "/v1/readonly-modules/sync" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200

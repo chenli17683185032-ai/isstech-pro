@@ -12,6 +12,10 @@ import pytest
 from isstech_replay.models.bizcase import BizCaseListResult, BizCaseRecord
 from isstech_replay.models.payment import PaymentListResult, PaymentRecord
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
+from isstech_replay.models.travel_application import (
+    TravelApplicationListResult,
+    TravelApplicationRecord,
+)
 from isstech_replay.readonly_sync import readonly_snapshots, sync_readonly_modules
 from isstech_replay.storage import SCHEMA_VERSION, WorkflowStorage
 
@@ -46,7 +50,7 @@ def _bizcase_result(
     *,
     count: int = 2,
     project_numbers: tuple[str, ...] = (),
-    submitted_or_managed_count: int = 0,
+    application_visible_count: int = 0,
 ) -> BizCaseListResult:
     records = tuple(
         BizCaseRecord(
@@ -71,9 +75,36 @@ def _bizcase_result(
         total_count=count,
         page_count=1,
         source_url="http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=REDACTED",
-        submitted_or_managed_ids=tuple(
-            record.id for record in records[:submitted_or_managed_count]
+        application_visible_ids=tuple(
+            record.id for record in records[:application_visible_count]
         ),
+    )
+
+
+def _travel_result(
+    *,
+    count: int = 2,
+    applicant: str = "USER-A",
+) -> TravelApplicationListResult:
+    records = tuple(
+        TravelApplicationRecord(
+            id=f"ELA-REDACTED-{index:03d}",
+            ordinal=index,
+            application_no=f"ELA-REDACTED-{index:03d}",
+            project_name=f"PROJECT REDACTED {index}",
+            applicant=applicant,
+            application_date=f"2026-07-{index:02d}",
+            status="已通过",
+            amount="￥0.00",
+            fields=(("申请人", applicant),),
+        )
+        for index in range(1, count + 1)
+    )
+    return TravelApplicationListResult(
+        items=records,
+        total_count=count,
+        page_count=1,
+        source_url="http://ipsapro.isstech.com/WebPSAOA/Fee/REDACTED",
     )
 
 
@@ -83,18 +114,22 @@ class FakeReadonlyClient:
         *,
         payment_status: str = "已保存",
         bizcase_count: int = 2,
-        bizcase_submitted_or_managed_count: int = 1,
+        bizcase_application_visible_count: int = 1,
+        travel_count: int = 2,
         fail_payment: bool = False,
         fail_bizcase: bool = False,
+        fail_travel: bool = False,
         fail_identity: bool = False,
     ) -> None:
         self.payment_status = payment_status
         self.bizcase_count = bizcase_count
-        self.bizcase_submitted_or_managed_count = (
-            bizcase_submitted_or_managed_count
+        self.bizcase_application_visible_count = (
+            bizcase_application_visible_count
         )
+        self.travel_count = travel_count
         self.fail_payment = fail_payment
         self.fail_bizcase = fail_bizcase
+        self.fail_travel = fail_travel
         self.fail_identity = fail_identity
 
     def get_portal_display_name(self) -> str:
@@ -116,14 +151,30 @@ class FakeReadonlyClient:
             raise RuntimeError("payment unavailable")
         return _payment_result(status=self.payment_status)
 
-    def list_personal_bizcases(self, *, max_pages: int) -> BizCaseListResult:
+    def list_bizcases_with_application_visibility(
+        self,
+        *,
+        max_pages: int,
+    ) -> BizCaseListResult:
         assert max_pages == 20
         if self.fail_bizcase:
             raise RuntimeError("bizcase unavailable")
         return _bizcase_result(
             count=self.bizcase_count,
-            submitted_or_managed_count=self.bizcase_submitted_or_managed_count,
+            application_visible_count=self.bizcase_application_visible_count,
         )
+
+    def list_personal_travel_applications(
+        self,
+        *,
+        display_name: str,
+        max_pages: int,
+    ) -> TravelApplicationListResult:
+        assert display_name == "USER-A"
+        assert max_pages == 20
+        if self.fail_travel:
+            raise RuntimeError("travel application unavailable")
+        return _travel_result(count=self.travel_count, applicant=display_name)
 
 
 def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) -> None:
@@ -145,16 +196,24 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
 
     assert storage.schema_version() == SCHEMA_VERSION
     assert first.status == "succeeded"
-    assert first.observed_count == 3
-    assert first.changed_count == 3
+    assert [stream.module for stream in first.streams] == [
+        ReadonlyModuleKind.PAYMENT,
+        ReadonlyModuleKind.BIZCASE,
+        ReadonlyModuleKind.TRAVEL_APPLICATION,
+    ]
+    assert first.observed_count == 5
+    assert first.changed_count == 5
     assert second.status == "succeeded"
-    assert second.observed_count == 3
+    assert second.observed_count == 5
     assert second.changed_count == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
-    assert storage.table_count("readonly_module_runs") == 4
-    assert storage.table_count("readonly_module_snapshots") == 6
-    assert storage.table_count("readonly_module_current") == 3
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_APPLICATION)
+    ) == 2
+    assert storage.table_count("readonly_module_runs") == 6
+    assert storage.table_count("readonly_module_snapshots") == 10
+    assert storage.table_count("readonly_module_current") == 5
     payment_payload = json.loads(
         storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)[0].payload_json
     )
@@ -164,10 +223,20 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
         json.loads(snapshot.payload_json)
         for snapshot in storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)
     ]
-    assert [payload["submitted_or_managed"] for payload in bizcase_payloads] == [
+    assert [payload["application_view_visible"] for payload in bizcase_payloads] == [
         True,
         False,
     ]
+    travel_payloads = [
+        json.loads(snapshot.payload_json)
+        for snapshot in storage.current_readonly_snapshots(
+            ReadonlyModuleKind.TRAVEL_APPLICATION
+        )
+    ]
+    assert all(
+        payload["scope_reasons"] == ["submitted_by_me"]
+        for payload in travel_payloads
+    )
 
 
 def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
@@ -175,7 +244,7 @@ def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
         ReadonlyModuleKind.BIZCASE,
         _bizcase_result(
             project_numbers=(" PROJECT-1 ", "PROJECT-OTHER"),
-            submitted_or_managed_count=2,
+            application_visible_count=2,
         ),
         observed_at="2026-07-16T01:00:00+00:00",
         project_numbers=("PROJECT-1",),
@@ -184,18 +253,18 @@ def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
     payloads = [json.loads(snapshot.payload_json) for snapshot in snapshots]
     assert payloads[0]["scope_reasons"] == ["my_project"]
     assert payloads[1]["scope_reasons"] == []
-    assert payloads[0]["submitted_or_managed"] is True
-    assert payloads[1]["submitted_or_managed"] is True
+    assert payloads[0]["application_view_visible"] is True
+    assert payloads[1]["application_view_visible"] is True
 
 
-def test_bizcase_snapshots_reject_unknown_joint_evidence_identity() -> None:
+def test_bizcase_snapshots_reject_unknown_application_visibility_identity() -> None:
     result = _bizcase_result(count=1)
     invalid = replace(
         result,
-        submitted_or_managed_ids=("BC-REDACTED-999-V001",),
+        application_visible_ids=("BC-REDACTED-999-V001",),
     )
 
-    with pytest.raises(RuntimeError, match="joint evidence identity"):
+    with pytest.raises(RuntimeError, match="application visibility identity"):
         readonly_snapshots(
             ReadonlyModuleKind.BIZCASE,
             invalid,
@@ -215,9 +284,16 @@ def test_identity_failure_does_not_block_bizcase_checkpoint(tmp_path: Path) -> N
     )
 
     assert result.status == "partial"
-    assert [stream.status for stream in result.streams] == ["failed", "succeeded"]
+    assert [stream.status for stream in result.streams] == [
+        "failed",
+        "succeeded",
+        "failed",
+    ]
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_APPLICATION)
+    ) == 0
 
 
 def test_readonly_stream_failure_preserves_its_last_successful_snapshot(
@@ -240,7 +316,11 @@ def test_readonly_stream_failure_preserves_its_last_successful_snapshot(
     )
 
     assert result.status == "partial"
-    assert [stream.status for stream in result.streams] == ["failed", "succeeded"]
+    assert [stream.status for stream in result.streams] == [
+        "failed",
+        "succeeded",
+        "succeeded",
+    ]
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 1
     failed_run = storage.get_readonly_run("partial-payment")

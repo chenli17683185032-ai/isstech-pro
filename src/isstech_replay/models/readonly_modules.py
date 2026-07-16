@@ -9,12 +9,14 @@ from enum import StrEnum
 class ReadonlyModuleKind(StrEnum):
     PAYMENT = "payment"
     BIZCASE = "bizcase"
+    TRAVEL_APPLICATION = "travel_application"
 
     @property
     def label(self) -> str:
         return {
             ReadonlyModuleKind.PAYMENT: "付款申请",
             ReadonlyModuleKind.BIZCASE: "BizCase查询",
+            ReadonlyModuleKind.TRAVEL_APPLICATION: "出差申请",
         }[self]
 
 

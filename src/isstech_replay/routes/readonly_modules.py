@@ -52,7 +52,21 @@ class BizCaseRecordOut(BaseModel):
     revenue_recognition_type: str = ""
     current_approver: str = ""
     scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
-    submitted_or_managed: bool = False
+    fields: dict[str, str] = Field(default_factory=dict)
+    source_url: str = ""
+
+
+class TravelApplicationRecordOut(BaseModel):
+    id: str
+    ordinal: int
+    application_no: str
+    project_name: str = ""
+    applicant: str = ""
+    application_date: str = ""
+    status: str = ""
+    amount: str = ""
+    current_approver: str = ""
+    scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
     fields: dict[str, str] = Field(default_factory=dict)
     source_url: str = ""
 
@@ -82,8 +96,21 @@ class BizCaseListOut(BaseModel):
     my_project_count: int = 0
     submitted_by_me_count: int = 0
     managed_by_me_count: int = 0
-    submitted_or_managed_count: int = 0
     items: list[BizCaseRecordOut] = Field(default_factory=list)
+
+
+class TravelApplicationListOut(BaseModel):
+    module: str = ReadonlyModuleKind.TRAVEL_APPLICATION.value
+    module_label: str = ReadonlyModuleKind.TRAVEL_APPLICATION.label
+    source: str = "sqlite_current"
+    ownership_scope: str = "personal_submissions_projects_and_management"
+    synced_at: str | None = None
+    source_total_count: int = 0
+    total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
+    items: list[TravelApplicationRecordOut] = Field(default_factory=list)
 
 
 class ReadonlySyncStreamOut(BaseModel):
@@ -169,26 +196,27 @@ def _payload_scope_reasons(
 def _personal_payloads(
     payloads: list[dict[str, object]],
     *,
-    allow_submitted_or_managed: bool = False,
-) -> tuple[list[dict[str, object]], dict[WorkItemScopeReason, int], int]:
+    asserted_scope_reasons: dict[
+        str, tuple[WorkItemScopeReason, ...]
+    ] | None = None,
+) -> tuple[list[dict[str, object]], dict[WorkItemScopeReason, int]]:
     personal = []
     counts = {reason: 0 for reason in WorkItemScopeReason}
-    submitted_or_managed_count = 0
+    assertions = asserted_scope_reasons or {}
     for payload in payloads:
-        reasons = _payload_scope_reasons(payload)
-        submitted_or_managed = payload.get("submitted_or_managed", False)
-        if not isinstance(submitted_or_managed, bool):
-            raise ValueError("invalid cached BizCase joint scope evidence")
-        if submitted_or_managed and not allow_submitted_or_managed:
-            raise ValueError("joint scope evidence is not valid for this module")
-        if not reasons and not submitted_or_managed:
+        external_id = payload.get("id")
+        if not isinstance(external_id, str) or not external_id:
+            raise ValueError("invalid cached readonly module identity")
+        found = {*_payload_scope_reasons(payload), *assertions.get(external_id, ())}
+        reasons = tuple(reason for reason in WorkItemScopeReason if reason in found)
+        if not reasons:
             continue
-        personal.append(payload)
+        personal_payload = dict(payload)
+        personal_payload["scope_reasons"] = [reason.value for reason in reasons]
+        personal.append(personal_payload)
         for reason in reasons:
             counts[reason] += 1
-        if submitted_or_managed:
-            submitted_or_managed_count += 1
-    return personal, counts, submitted_or_managed_count
+    return personal, counts
 
 
 @router.post("/readonly-modules/sync", response_model=ReadonlySyncOut)
@@ -249,7 +277,7 @@ def list_payment_records(
 ) -> PaymentListOut:
     try:
         cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.PAYMENT)
-        payloads, counts, _ = _personal_payloads(cached)
+        payloads, counts = _personal_payloads(cached)
         items = [PaymentRecordOut.model_validate(payload) for payload in payloads]
     except Exception as exc:
         raise local_storage_error(f"payment cache read failed: {type(exc).__name__}") from exc
@@ -269,10 +297,13 @@ def list_bizcases(
     session: Annotated[SessionRecord, Depends(get_session)],
 ) -> BizCaseListOut:
     try:
-        cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.BIZCASE)
-        payloads, counts, submitted_or_managed_count = _personal_payloads(
+        storage = _storage(session)
+        cached, latest = _current_payloads(storage, ReadonlyModuleKind.BIZCASE)
+        payloads, counts = _personal_payloads(
             cached,
-            allow_submitted_or_managed=True,
+            asserted_scope_reasons=storage.readonly_scope_assertions(
+                ReadonlyModuleKind.BIZCASE
+            ),
         )
         items = sorted(
             (BizCaseRecordOut.model_validate(payload) for payload in payloads),
@@ -287,7 +318,39 @@ def list_bizcases(
         my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
         submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
         managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
-        submitted_or_managed_count=submitted_or_managed_count,
+        items=items,
+    )
+
+
+@router.get(
+    "/readonly-modules/travel-applications",
+    response_model=TravelApplicationListOut,
+)
+def list_travel_applications(
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> TravelApplicationListOut:
+    try:
+        cached, latest = _current_payloads(
+            _storage(session),
+            ReadonlyModuleKind.TRAVEL_APPLICATION,
+        )
+        payloads, counts = _personal_payloads(cached)
+        items = sorted(
+            (TravelApplicationRecordOut.model_validate(payload) for payload in payloads),
+            key=lambda item: (item.application_date, item.application_no),
+            reverse=True,
+        )
+    except Exception as exc:
+        raise local_storage_error(
+            f"travel application cache read failed: {type(exc).__name__}"
+        ) from exc
+    return TravelApplicationListOut(
+        synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
+        source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
+        total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
         items=items,
     )
 
