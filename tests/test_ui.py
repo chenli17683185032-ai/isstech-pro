@@ -43,6 +43,13 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "审批轨迹" in js.text
     assert "上游未返回审批轨迹" in js.text
     assert "筛选流程类型" in js.text
+    assert "业务查询" in js.text
+    assert "付款申请" in js.text
+    assert "BizCase查询" in js.text
+    assert "账号可见范围" in js.text
+    assert "/v1/readonly-modules/payment" in js.text
+    assert "/v1/readonly-modules/bizcases" in js.text
+    assert "/v1/readonly-modules/sync" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")

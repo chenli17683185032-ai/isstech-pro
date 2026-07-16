@@ -1,10 +1,14 @@
 """BizCase WebForms schema, state, and identity guards."""
 
 from pathlib import Path
+from urllib.parse import parse_qs
 
+import httpx
 import pytest
 
+from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.parsers.bizcase import parse_bizcase_page
+from isstech_replay.policy import BIZCASE_QUERY_THURL
 
 
 FIXTURES = Path("tests/fixtures/bizcase")
@@ -77,3 +81,53 @@ def test_bizcase_parser_rejects_login_page() -> None:
     login_html = Path("tests/fixtures/auth/passport_login.html").read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="grid not found"):
         parse_bizcase_page(login_html)
+
+
+def test_bizcase_client_replays_sequential_pager_and_collects_all_rows() -> None:
+    seen: list[tuple[str, str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = parse_qs(request.url.query.decode())
+        assert query == {"thUrl": [BIZCASE_QUERY_THURL]}
+        body = parse_qs(request.content.decode(), keep_blank_values=True)
+        seen.append(
+            (
+                request.method,
+                body.get("__EVENTTARGET", [""])[0],
+                body.get("__EVENTARGUMENT", [""])[0],
+            )
+        )
+        fixture = _html(1 if request.method == "GET" else 2)
+        return httpx.Response(200, text=fixture, request=request)
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        result = client.list_all_bizcases(max_pages=2)
+
+    assert result.total_count == 3
+    assert result.page_count == 2
+    assert [item.ordinal for item in result.items] == [1, 2, 3]
+    assert seen == [("GET", "", ""), ("POST", "ctl05$GridPager1", "2")]
+
+
+def test_bizcase_client_rejects_page_count_drift_and_max_page_limit() -> None:
+    def drifting_handler(request: httpx.Request) -> httpx.Response:
+        fixture = _html(1 if request.method == "GET" else 2).replace(
+            '<option value="1">1</option><option selected value="2">2</option>',
+            (
+                '<option value="1">1</option><option selected value="2">2</option>'
+                '<option value="3">3</option>'
+            ),
+        )
+        return httpx.Response(200, text=fixture, request=request)
+
+    with IsstechClient(transport=httpx.MockTransport(drifting_handler)) as client:
+        with pytest.raises(PaginationIncompleteError, match="page count changed"):
+            client.list_all_bizcases(max_pages=3)
+
+    with IsstechClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, text=_html(), request=request)
+        )
+    ) as client:
+        with pytest.raises(PaginationIncompleteError, match="exceeds max_pages"):
+            client.list_all_bizcases(max_pages=1)

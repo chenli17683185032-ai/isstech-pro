@@ -120,16 +120,21 @@ with 30 non-empty trails and two upstream-empty trails.
 
 | Action | Method | Endpoint | Side effect | State | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Initial payment application list | GET | `/WebPMS/Payment/index` | None | observed, HTTP 200 | `captures/raw/20260716-payment-index-initial.html`, redacted protocol JSON |
+| Initial payment application list | GET | `/WebPMS/Payment/index` | None | observed, HTTP 200; pure HTTP requires `Accept-Language: zh-CN` | browser capture plus 2026-07-16 clean-session header elimination probe |
 | Served search form | POST | `/WebPMS/?Length=7` | Intended read-only filter | replayed twice, HTTP 500 | native successful-control replay; deterministic `NullReferenceException` |
 | Edit payment | GET | `/WebPMS/Payment/Edit/{id}` | Write preparation | served-shape; blocked | initial page script |
 | Delete payment | POST | `/WebPMS/Payment/DelMain` | **Mutating** | blocked-write | initial page script |
 | Add payment | GET | `/WebPMS/selector/selecttype` | Write preparation | served-shape; blocked | initial page script |
 
-The initial page declared one row and one page. Because the actively served
-search action deterministically fails upstream, the adapter is GET-only and
-fails closed whenever the declared total differs from the current-page row
-count. No Payment detail endpoint is enabled: the only row action is Edit.
+The initial page declared one row and one page. A clean pure-HTTP login followed
+by a headerless GET reproducibly returns upstream 500; independent-session
+elimination proved that the minimal sufficient navigation context is
+`Accept-Language: zh-CN`. `Accept`, browser User-Agent, and `Referer` alone did
+not recover the request. The header is scoped to this GET rather than applied to
+the shared client. Because the actively served search action deterministically
+fails upstream, the adapter is GET-only and fails closed whenever the declared
+total differs from the current-page row count. No Payment detail endpoint is
+enabled: the only row action is Edit.
 
 ## BizCase query list
 

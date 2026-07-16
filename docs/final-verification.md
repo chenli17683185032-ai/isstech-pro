@@ -20,9 +20,11 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-The current P9.6 gate is recorded in the implementation plan after the final run.
-It includes the full pytest suite, Ruff, OpenAPI, secret/evidence verification,
-React production build, wheel contents, plist lint, and `git diff --check`.
+The current P9.8 gate is recorded in the implementation plan after the final run.
+It includes 329 passing tests, Ruff, deterministic OpenAPI, secret/evidence
+verification, a 1,595-module React production build, a 70-file wheel, plist lint,
+and `git diff --check`. Credentialed read-only acceptance returned Payment 1 and
+BizCase 55; the second complete dual-stream run reported zero changes in both.
 
 ## Operator evidence check
 
@@ -322,6 +324,7 @@ bash tools/first-commit.sh
 | Browser login protocol | Yes, redacted CDP is reproducible | Historical browser capture already carried `.iPSA` |
 | Pure HTTP login code | Yes, mocked and credentialed live reads | Credentials remain runtime-only |
 | Five SearchIndex streams and PR Detail | Yes, with live 353/353 schema/count parity | Non-PR upstream Detail remains disabled |
+| Payment and BizCase query lists | Yes; live 1/55, independent checkpoints, second run 0 changes | Payment is GET-only; BizCase details remain disabled |
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |

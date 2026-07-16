@@ -20,12 +20,13 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
+| Payment + BizCase read-only queries | Yes; independent checkpoints, failure isolation, cached lists, manual UI sync |
 | SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
 | Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
-| Local Web workspace | Yes; login, overview, materials, evidence review, ready, sync, and follow-up views |
+| Local Web workspace | Yes; login, overview, materials, evidence review, ready, follow-up, and business-query views |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -54,7 +55,7 @@ uv run isstech-api
 
 ### Local Web workspace
 
-The root URL is the operational workspace, not a landing page. Its four views
+The root URL is the operational workspace, not a landing page. Its five views
 cover the minimum closed loop:
 
 ```text
@@ -79,9 +80,11 @@ npm run build
 ```
 
 The material picker uploads only to the local `/v1/materials` endpoint. The UI
-contains no iPSA create, save, submit, approve, delete, or upload action. Manual
-and scheduled workflow synchronization use only the five explicitly policy-gated
-procurement `SearchIndex` read paths.
+contains no iPSA create, save, submit, approve, delete, or upload action. Existing
+work-item and scheduled synchronization use only the five explicitly policy-gated
+procurement `SearchIndex` read paths. The separate business-query view manually
+syncs only the GET-only Payment index and the exact body-gated BizCase pager; its
+records do not enter `/v1/work-items/current`.
 
 ### Durable manual sync
 

@@ -19,6 +19,7 @@ from .routes import (
     materials,
     previews,
     purchase_requisitions,
+    readonly_modules,
     sessions,
     sync as sync_routes,
     work_items,
@@ -59,6 +60,7 @@ def create_app(
     application.include_router(previews.router, prefix="/v1")
     application.include_router(work_items.router, prefix="/v1")
     application.include_router(sync_routes.router, prefix="/v1")
+    application.include_router(readonly_modules.router, prefix="/v1")
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

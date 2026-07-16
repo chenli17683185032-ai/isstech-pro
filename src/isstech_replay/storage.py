@@ -33,6 +33,7 @@ from .models.extraction import (
 )
 from .models.materials import Material, MaterialArtifact, MaterialStatus
 from .models.purchase import PurchaseApprovalStep
+from .models.readonly_modules import ReadonlyModuleKind, ReadonlySnapshot
 from .models.work_items import (
     ChangeEvent,
     ChangeKind,
@@ -42,7 +43,7 @@ from .models.work_items import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -55,19 +56,30 @@ _WORKFLOW_TABLES = {
 _MATERIAL_TABLES = {"material_blobs", "materials", "material_artifacts"}
 _EXTRACTION_TABLES = {"extraction_runs", "extracted_fields"}
 _DRAFT_TABLES = {"workflow_drafts", "draft_fields", "draft_audit_events"}
+_READONLY_MODULE_TABLES = {
+    "readonly_module_runs",
+    "readonly_module_snapshots",
+    "readonly_module_current",
+}
 _REQUIRED_TABLES = (
-    _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES
+    _WORKFLOW_TABLES
+    | _MATERIAL_TABLES
+    | _EXTRACTION_TABLES
+    | _DRAFT_TABLES
+    | _READONLY_MODULE_TABLES
 )
 _REQUIRED_TABLES_BY_VERSION = {
     1: _WORKFLOW_TABLES,
     2: _WORKFLOW_TABLES | _MATERIAL_TABLES,
     3: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES,
-    4: _REQUIRED_TABLES,
+    4: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES,
+    5: _REQUIRED_TABLES,
 }
 _MIGRATIONS = {
     1: "migration_002_materials.sql",
     2: "migration_003_extraction.sql",
     3: "migration_004_review.sql",
+    4: "migration_005_readonly_modules.sql",
 }
 _INITIALIZATION_THREAD_LOCK = threading.Lock()
 _INITIALIZATION_LOCK_TIMEOUT_SECONDS = 10.0
@@ -102,6 +114,12 @@ class DraftStateConflict(StorageError):
 class StorageApplyResult:
     history_rows_inserted: int
     events: tuple[ChangeEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReadonlyStorageApplyResult:
+    history_rows_inserted: int
+    changed_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -691,6 +709,284 @@ class WorkflowStorage:
                 snapshot.payload_hash,
             ),
         )
+
+    def start_readonly_run(
+        self,
+        *,
+        run_id: str,
+        module: ReadonlyModuleKind,
+        started_at: str,
+        max_pages: int,
+    ) -> None:
+        if not run_id:
+            raise ValueError("run_id is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "INSERT INTO readonly_module_runs "
+                    "(run_id, module, status, started_at, max_pages) "
+                    "VALUES (?, ?, 'running', ?, ?)",
+                    (run_id, module.value, started_at, max_pages),
+                )
+        finally:
+            connection.close()
+
+    def fail_readonly_run(
+        self,
+        *,
+        run_id: str,
+        finished_at: str,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE readonly_module_runs SET status = 'failed', finished_at = ?, "
+                    "error_type = ?, error_message = ? "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (finished_at, error_type[:120], error_message[:1000], run_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(f"readonly run is missing or not running: {run_id}")
+        finally:
+            connection.close()
+
+    def complete_readonly_run(
+        self,
+        *,
+        run_id: str,
+        observed_at: str,
+        finished_at: str,
+        source_total_count: int,
+        snapshots: tuple[ReadonlySnapshot, ...],
+    ) -> ReadonlyStorageApplyResult:
+        if source_total_count != len(snapshots):
+            raise StorageError("readonly source_total_count must equal snapshot count")
+        self.initialize()
+        connection = self._connect()
+        history_rows_inserted = 0
+        changed_count = 0
+        seen: set[str] = set()
+        try:
+            with connection:
+                run = connection.execute(
+                    "SELECT module, status FROM readonly_module_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if run is None or run["status"] != "running":
+                    raise StorageError(f"readonly run is missing or not running: {run_id}")
+                newer_current = connection.execute(
+                    "SELECT external_id, last_seen_at FROM readonly_module_current "
+                    "WHERE module = ? AND last_seen_at > ? LIMIT 1",
+                    (run["module"], observed_at),
+                ).fetchone()
+                if newer_current is not None:
+                    raise SnapshotOrderError(
+                        f"measurement {observed_at} predates readonly current "
+                        f"{newer_current['last_seen_at']} for "
+                        f"{run['module']}/{newer_current['external_id']}"
+                    )
+                previous_rows = connection.execute(
+                    "SELECT external_id, payload_hash FROM readonly_module_current "
+                    "WHERE module = ?",
+                    (run["module"],),
+                ).fetchall()
+                previous = {row["external_id"]: row["payload_hash"] for row in previous_rows}
+
+                for snapshot in snapshots:
+                    self._validate_readonly_snapshot(snapshot, observed_at=observed_at)
+                    if snapshot.module.value != run["module"]:
+                        raise StorageError(
+                            f"readonly snapshot module {snapshot.module.value} does not match "
+                            f"run {run['module']}"
+                        )
+                    if snapshot.external_id in seen:
+                        raise SnapshotConflictError(
+                            f"duplicate readonly snapshot: {run['module']}/{snapshot.external_id}"
+                        )
+                    seen.add(snapshot.external_id)
+                    existing = connection.execute(
+                        "SELECT payload_hash FROM readonly_module_snapshots "
+                        "WHERE module = ? AND external_id = ? AND observed_at = ?",
+                        (run["module"], snapshot.external_id, observed_at),
+                    ).fetchone()
+                    if existing is not None and existing["payload_hash"] != snapshot.payload_hash:
+                        raise SnapshotConflictError(
+                            "same readonly module/external_id/observed_at has a different payload"
+                        )
+                    if existing is None:
+                        connection.execute(
+                            "INSERT INTO readonly_module_snapshots "
+                            "(run_id, module, external_id, observed_at, payload_json, payload_hash) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                run_id,
+                                run["module"],
+                                snapshot.external_id,
+                                observed_at,
+                                snapshot.payload_json,
+                                snapshot.payload_hash,
+                            ),
+                        )
+                        history_rows_inserted += 1
+                    if previous.get(snapshot.external_id) != snapshot.payload_hash:
+                        changed_count += 1
+                    connection.execute(
+                        "INSERT INTO readonly_module_current "
+                        "(module, external_id, first_seen_at, last_seen_at, last_run_id, "
+                        "payload_json, payload_hash) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(module, external_id) DO UPDATE SET "
+                        "last_seen_at = excluded.last_seen_at, "
+                        "last_run_id = excluded.last_run_id, "
+                        "payload_json = excluded.payload_json, "
+                        "payload_hash = excluded.payload_hash",
+                        (
+                            run["module"],
+                            snapshot.external_id,
+                            observed_at,
+                            observed_at,
+                            run_id,
+                            snapshot.payload_json,
+                            snapshot.payload_hash,
+                        ),
+                    )
+
+                changed_count += len(set(previous) - seen)
+                if seen:
+                    placeholders = ",".join("?" for _ in seen)
+                    connection.execute(
+                        "DELETE FROM readonly_module_current WHERE module = ? "
+                        f"AND external_id NOT IN ({placeholders})",
+                        (run["module"], *sorted(seen)),
+                    )
+                else:
+                    connection.execute(
+                        "DELETE FROM readonly_module_current WHERE module = ?",
+                        (run["module"],),
+                    )
+                cursor = connection.execute(
+                    "UPDATE readonly_module_runs SET status = 'succeeded', observed_at = ?, "
+                    "finished_at = ?, source_total_count = ?, observed_count = ?, "
+                    "snapshot_count = ?, history_rows_inserted = ?, changed_count = ?, "
+                    "error_type = NULL, error_message = NULL "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (
+                        observed_at,
+                        finished_at,
+                        source_total_count,
+                        len(snapshots),
+                        len(snapshots),
+                        history_rows_inserted,
+                        changed_count,
+                        run_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageError(f"readonly run completion lost state: {run_id}")
+        finally:
+            connection.close()
+        return ReadonlyStorageApplyResult(
+            history_rows_inserted=history_rows_inserted,
+            changed_count=changed_count,
+        )
+
+    @staticmethod
+    def _validate_readonly_snapshot(
+        snapshot: ReadonlySnapshot,
+        *,
+        observed_at: str,
+    ) -> None:
+        if not snapshot.external_id.strip():
+            raise ValueError("readonly snapshot external_id is required")
+        if snapshot.observed_at != observed_at:
+            raise ValueError("all readonly snapshots in a run must share observed_at")
+        if not _HASH_RE.fullmatch(snapshot.payload_hash):
+            raise ValueError("readonly snapshot payload_hash must be lowercase SHA-256")
+        actual_hash = hashlib.sha256(snapshot.payload_json.encode("utf-8")).hexdigest()
+        if actual_hash != snapshot.payload_hash:
+            raise ValueError("readonly snapshot payload_hash does not match payload_json")
+        try:
+            payload = json.loads(snapshot.payload_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("readonly snapshot payload_json is invalid") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("readonly snapshot payload_json must be an object")
+
+    def current_readonly_snapshots(
+        self,
+        module: ReadonlyModuleKind,
+    ) -> tuple[ReadonlySnapshot, ...]:
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM readonly_module_current WHERE module = ? "
+                "ORDER BY external_id",
+                (module.value,),
+            ).fetchall()
+            return tuple(
+                ReadonlySnapshot(
+                    module=module,
+                    external_id=row["external_id"],
+                    observed_at=row["last_seen_at"],
+                    payload_json=row["payload_json"],
+                    payload_hash=row["payload_hash"],
+                )
+                for row in rows
+            )
+        finally:
+            connection.close()
+
+    def latest_readonly_successful_run(
+        self,
+        module: ReadonlyModuleKind,
+    ) -> dict[str, object] | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM readonly_module_runs "
+                "WHERE module = ? AND status = 'succeeded' "
+                "ORDER BY started_at DESC, run_id DESC LIMIT 1",
+                (module.value,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def list_readonly_runs(self, *, limit: int = 20) -> tuple[dict[str, object], ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        self.initialize()
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM readonly_module_runs "
+                "ORDER BY started_at DESC, run_id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return tuple(dict(row) for row in rows)
+        finally:
+            connection.close()
+
+    def get_readonly_run(self, run_id: str) -> dict[str, object] | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM readonly_module_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
 
     def get_run(self, run_id: str) -> dict[str, object] | None:
         self.initialize()

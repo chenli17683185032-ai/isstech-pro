@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
+import httpx
 import pytest
 
+from isstech_replay.client import IsstechClient, PaginationIncompleteError
 from isstech_replay.parsers.payment import parse_payment_list
 
 
@@ -54,3 +56,36 @@ def test_payment_parser_rejects_login_page() -> None:
     login_html = Path("tests/fixtures/auth/passport_login.html").read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="grid not found"):
         parse_payment_list(login_html)
+
+
+def test_payment_client_uses_only_localized_initial_get_and_requires_complete_page() -> None:
+    seen: list[tuple[str, str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (
+                request.method,
+                request.url.path,
+                request.headers.get("accept-language"),
+            )
+        )
+        return httpx.Response(200, text=_html(), request=request)
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        result = client.list_payment_records()
+
+    assert result.total_count == 2
+    assert seen == [("GET", "/WebPMS/Payment/index", "zh-CN")]
+
+
+def test_payment_client_rejects_declared_multi_page_result() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=_html().replace("共1页，当前第1页", "共2页，当前第1页"),
+            request=request,
+        )
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PaginationIncompleteError, match="multiple pages"):
+            client.list_payment_records()

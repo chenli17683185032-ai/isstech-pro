@@ -1,5 +1,6 @@
 import {
   ClipboardCheck,
+  Database,
   Files,
   LayoutDashboard,
   ListTodo,
@@ -14,6 +15,7 @@ const navItems = [
   { id: "materials", label: "材料", icon: Files },
   { id: "drafts", label: "审阅草稿", icon: ClipboardCheck },
   { id: "work-items", label: "催办清单", icon: ListTodo },
+  { id: "readonly-modules", label: "业务查询", icon: Database },
 ];
 
 export default function AppShell({

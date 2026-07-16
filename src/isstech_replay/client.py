@@ -16,6 +16,8 @@ import httpx
 
 from .config import Settings
 from .models.attachment import AttachmentContent, AttachmentMeta
+from .models.bizcase import BizCaseListResult, BizCasePage, BizCaseRecord
+from .models.payment import PaymentListResult
 from .models.procurement import (
     PROCUREMENT_STREAM_BY_WORKFLOW,
     ProcurementListResult,
@@ -27,11 +29,19 @@ from .models.purchase import (
     PurchaseView,
 )
 from .parsers.attachment import parse_attachment_list
+from .parsers.bizcase import parse_bizcase_page
 from .parsers.login import is_login_page
+from .parsers.payment import parse_payment_list
 from .parsers.portal import parse_portal_display_name
 from .parsers.procurement import parse_procurement_detail, parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
-from .policy import EndpointPolicy, PolicyViolation, UnsafeRequestError
+from .policy import (
+    BIZCASE_QUERY_URL,
+    PAYMENT_INDEX_PATH,
+    EndpointPolicy,
+    PolicyViolation,
+    UnsafeRequestError,
+)
 from .transport import GuardedTransport
 from .validation import require_path_segment
 from .models.work_items import WorkflowKind
@@ -382,6 +392,102 @@ class IsstechClient:
             page=1,
             page_size=page_size,
             source_url=first_result.source_url,
+        )
+
+    def list_payment_records(self) -> PaymentListResult:
+        """Read the complete GET-only Payment application list or fail closed."""
+        response = self.get(
+            self._url(PAYMENT_INDEX_PATH),
+            headers={"Accept-Language": "zh-CN"},
+        )
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        result = parse_payment_list(response.text, source_url=str(response.url))
+        if result.current_page != 1 or result.page_count != 1:
+            raise PaginationIncompleteError(
+                "Payment declared multiple pages but no successful read-only pager is available"
+            )
+        if result.total_count != len(result.items):
+            raise PaginationIncompleteError(
+                f"Payment returned {len(result.items)}/{result.total_count} declared records"
+            )
+        return result
+
+    def _read_bizcase_page(
+        self,
+        *,
+        previous: BizCasePage | None = None,
+        page: int = 1,
+    ) -> BizCasePage:
+        url = self._url(BIZCASE_QUERY_URL)
+        if previous is None:
+            response = self.get(url)
+        else:
+            response = self.post(
+                url,
+                data=previous.pagination_form(page),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_bizcase_page(response.text, source_url=str(response.url))
+
+    def list_all_bizcases(self, *, max_pages: int = 20) -> BizCaseListResult:
+        """Sequentially replay the proven WebForms pager with completeness guards."""
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        current = self._read_bizcase_page()
+        if current.current_page != 1:
+            raise PaginationIncompleteError("BizCase initial response is not page 1")
+        if current.page_count > max_pages:
+            raise PaginationIncompleteError(
+                f"BizCase page count {current.page_count} exceeds max_pages={max_pages}"
+            )
+
+        items: list[BizCaseRecord] = []
+        seen: set[str] = set()
+        expected_page_count = current.page_count
+        expected_page_size = len(current.items)
+        if current.page_count > 1 and expected_page_size == 0:
+            raise PaginationIncompleteError("BizCase first page is empty before later pages")
+
+        for page_number in range(1, expected_page_count + 1):
+            if page_number > 1:
+                current = self._read_bizcase_page(previous=current, page=page_number)
+            if current.current_page != page_number:
+                raise PaginationIncompleteError(
+                    f"BizCase requested page {page_number} but received {current.current_page}"
+                )
+            if current.page_count != expected_page_count:
+                raise PaginationIncompleteError(
+                    "BizCase page count changed during pagination: "
+                    f"{expected_page_count} -> {current.page_count}"
+                )
+            if page_number < expected_page_count and len(current.items) != expected_page_size:
+                raise PaginationIncompleteError(
+                    f"BizCase page {page_number} was short before the last page"
+                )
+            if page_number == expected_page_count and expected_page_count > 1:
+                if not current.items or len(current.items) > expected_page_size:
+                    raise PaginationIncompleteError("BizCase last-page size is invalid")
+            for item in current.items:
+                expected_ordinal = len(items) + 1
+                if item.ordinal != expected_ordinal:
+                    raise PaginationIncompleteError(
+                        f"BizCase ordinal changed at {expected_ordinal}: {item.ordinal}"
+                    )
+                if item.id in seen:
+                    raise PaginationIncompleteError(
+                        f"BizCase page {page_number} repeated identity {item.id}"
+                    )
+                seen.add(item.id)
+                items.append(item)
+
+        return BizCaseListResult(
+            items=tuple(items),
+            total_count=len(items),
+            page_count=expected_page_count,
+            source_url=current.source_url,
         )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:

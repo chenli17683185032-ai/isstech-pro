@@ -22,6 +22,8 @@ from isstech_replay.storage import WorkflowStorage
 
 FIXTURES_AUTH = Path(__file__).parent / "fixtures" / "auth"
 FIXTURES_PR = Path(__file__).parent / "fixtures" / "purchase"
+FIXTURES_PAYMENT = Path(__file__).parent / "fixtures" / "payment"
+FIXTURES_BIZCASE = Path(__file__).parent / "fixtures" / "bizcase"
 BUSINESS = "http://ipsapro.isstech.com"
 PASSPORT = "https://passport.isstech.com"
 
@@ -66,6 +68,14 @@ def _account_correlated_search_html() -> str:
 
 def _approval_html() -> str:
     return (FIXTURES_PR / "list_approval_empty.html").read_text(encoding="utf-8")
+
+
+def _payment_html() -> str:
+    return (FIXTURES_PAYMENT / "list.html").read_text(encoding="utf-8")
+
+
+def _bizcase_html(page: int) -> str:
+    return (FIXTURES_BIZCASE / f"page{page}.html").read_text(encoding="utf-8")
 
 
 def _portal_html() -> str:
@@ -144,6 +154,14 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
         )
     if host == "ipsapro.isstech.com" and path.rstrip("/") == "/Portal":
         return httpx.Response(200, text=_portal_html(), request=request)
+    if host == "ipsapro.isstech.com" and path == "/WebPMS/Payment/index":
+        return httpx.Response(200, text=_payment_html(), request=request)
+    if host == "ipsapro.isstech.com" and path == "/WebPMP/Main.aspx":
+        page = 1
+        if request.method == "POST":
+            body = httpx.QueryParams(request.content.decode())
+            page = int(body.get("__EVENTARGUMENT", "0"))
+        return httpx.Response(200, text=_bizcase_html(page), request=request)
     if host == "ipsapro.isstech.com" and path.startswith(
         "/WebTP/PurchaseRequisition/Download/"
     ):
@@ -237,6 +255,10 @@ def test_session_required() -> None:
             ("GET", "/v1/work-items/current"),
             ("GET", "/v1/work-items/missing/detail"),
             ("GET", "/v1/sync/runs"),
+            ("POST", "/v1/readonly-modules/sync"),
+            ("GET", "/v1/readonly-modules/payment"),
+            ("GET", "/v1/readonly-modules/bizcases"),
+            ("GET", "/v1/readonly-modules/runs"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
@@ -432,6 +454,55 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert storage.table_count("sync_runs") == 10
     assert storage.table_count("workflow_current") == 6
     assert storage.table_count("workflow_events") == 6
+
+
+def test_readonly_module_api_syncs_and_replays_cached_lists(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        work_items_sync = client.post("/v1/sync/work-items", headers=headers)
+        before = client.get("/v1/work-items/current", headers=headers)
+        first = client.post("/v1/readonly-modules/sync", headers=headers)
+        second = client.post("/v1/readonly-modules/sync", headers=headers)
+        payment = client.get("/v1/readonly-modules/payment", headers=headers)
+        bizcases = client.get("/v1/readonly-modules/bizcases", headers=headers)
+        runs = client.get("/v1/readonly-modules/runs", headers=headers)
+        after = client.get("/v1/work-items/current", headers=headers)
+
+    assert work_items_sync.status_code == 200
+    assert before.status_code == 200
+    assert first.status_code == 200
+    assert first.json()["status"] == "succeeded"
+    assert first.json()["observed_count"] == 5
+    assert first.json()["changed_count"] == 5
+    assert [stream["module"] for stream in first.json()["streams"]] == [
+        "payment",
+        "bizcase",
+    ]
+    assert second.status_code == 200
+    assert second.json()["changed_count"] == 0
+    assert payment.status_code == 200
+    assert payment.json()["ownership_scope"] == "account_visible"
+    assert payment.json()["total_count"] == 2
+    assert payment.json()["items"][0]["payment_no"] == "PAYMENT-REDACTED-1"
+    assert bizcases.status_code == 200
+    assert bizcases.json()["total_count"] == 3
+    assert [item["ordinal"] for item in bizcases.json()["items"]] == [1, 2, 3]
+    assert runs.status_code == 200
+    assert len(runs.json()) == 4
+    assert after.status_code == 200
+    assert after.json()["total_count"] == before.json()["total_count"] == 3
+
+    storage = WorkflowStorage(
+        account_database_path("alice", base_database_path=database)
+    )
+    assert storage.table_count("readonly_module_runs") == 4
+    assert storage.table_count("readonly_module_current") == 5
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(

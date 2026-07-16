@@ -34,6 +34,135 @@
         "title": "AttachmentOut",
         "type": "object"
       },
+      "BizCaseListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BizCaseRecordOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "module": {
+            "default": "bizcase",
+            "title": "Module",
+            "type": "string"
+          },
+          "module_label": {
+            "default": "BizCase查询",
+            "title": "Module Label",
+            "type": "string"
+          },
+          "ownership_scope": {
+            "default": "account_visible",
+            "title": "Ownership Scope",
+            "type": "string"
+          },
+          "source": {
+            "default": "sqlite_current",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_total_count": {
+            "default": 0,
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "total_count": {
+            "default": 0,
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "title": "BizCaseListOut",
+        "type": "object"
+      },
+      "BizCaseRecordOut": {
+        "properties": {
+          "bizcase_no": {
+            "default": "",
+            "title": "Bizcase No",
+            "type": "string"
+          },
+          "client_name": {
+            "default": "",
+            "title": "Client Name",
+            "type": "string"
+          },
+          "current_approver": {
+            "default": "",
+            "title": "Current Approver",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "profit_center": {
+            "default": "",
+            "title": "Profit Center",
+            "type": "string"
+          },
+          "profit_center_group": {
+            "default": "",
+            "title": "Profit Center Group",
+            "type": "string"
+          },
+          "project_name": {
+            "default": "",
+            "title": "Project Name",
+            "type": "string"
+          },
+          "project_no": {
+            "default": "",
+            "title": "Project No",
+            "type": "string"
+          },
+          "revenue_recognition_type": {
+            "default": "",
+            "title": "Revenue Recognition Type",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "version_no"
+        ],
+        "title": "BizCaseRecordOut",
+        "type": "object"
+      },
       "Body_ingest_material_v1_materials_post": {
         "properties": {
           "file": {
@@ -1081,6 +1210,140 @@
         "title": "MaterialOut",
         "type": "object"
       },
+      "PaymentListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentRecordOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "module": {
+            "default": "payment",
+            "title": "Module",
+            "type": "string"
+          },
+          "module_label": {
+            "default": "付款申请",
+            "title": "Module Label",
+            "type": "string"
+          },
+          "ownership_scope": {
+            "default": "account_visible",
+            "title": "Ownership Scope",
+            "type": "string"
+          },
+          "source": {
+            "default": "sqlite_current",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_total_count": {
+            "default": 0,
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "total_count": {
+            "default": 0,
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "title": "PaymentListOut",
+        "type": "object"
+      },
+      "PaymentRecordOut": {
+        "properties": {
+          "amount": {
+            "default": "",
+            "title": "Amount",
+            "type": "string"
+          },
+          "applicant": {
+            "default": "",
+            "title": "Applicant",
+            "type": "string"
+          },
+          "cost_center": {
+            "default": "",
+            "title": "Cost Center",
+            "type": "string"
+          },
+          "currency": {
+            "default": "",
+            "title": "Currency",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "payee_company": {
+            "default": "",
+            "title": "Payee Company",
+            "type": "string"
+          },
+          "payer_company": {
+            "default": "",
+            "title": "Payer Company",
+            "type": "string"
+          },
+          "payment_no": {
+            "title": "Payment No",
+            "type": "string"
+          },
+          "payment_type": {
+            "default": "",
+            "title": "Payment Type",
+            "type": "string"
+          },
+          "project_name": {
+            "default": "",
+            "title": "Project Name",
+            "type": "string"
+          },
+          "project_no": {
+            "default": "",
+            "title": "Project No",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "payment_no"
+        ],
+        "title": "PaymentRecordOut",
+        "type": "object"
+      },
       "PurchaseApprovalStepOut": {
         "properties": {
           "action": {
@@ -1253,6 +1516,244 @@
           "items"
         ],
         "title": "PurchaseListOut",
+        "type": "object"
+      },
+      "ReadonlyRunOut": {
+        "properties": {
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "module": {
+            "title": "Module",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "observed_count": {
+            "title": "Observed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "module",
+          "status",
+          "started_at",
+          "observed_count",
+          "changed_count"
+        ],
+        "title": "ReadonlyRunOut",
+        "type": "object"
+      },
+      "ReadonlySyncOut": {
+        "properties": {
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "database_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Path"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "finished_at": {
+            "title": "Finished At",
+            "type": "string"
+          },
+          "history_rows_inserted": {
+            "title": "History Rows Inserted",
+            "type": "integer"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "observed_count": {
+            "title": "Observed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "snapshot_count": {
+            "title": "Snapshot Count",
+            "type": "integer"
+          },
+          "source_total_count": {
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/ReadonlySyncStreamOut"
+            },
+            "title": "Streams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "dry_run",
+          "started_at",
+          "observed_at",
+          "finished_at",
+          "source_total_count",
+          "observed_count",
+          "snapshot_count",
+          "history_rows_inserted",
+          "changed_count"
+        ],
+        "title": "ReadonlySyncOut",
+        "type": "object"
+      },
+      "ReadonlySyncStreamOut": {
+        "properties": {
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "history_rows_inserted": {
+            "title": "History Rows Inserted",
+            "type": "integer"
+          },
+          "module": {
+            "title": "Module",
+            "type": "string"
+          },
+          "module_label": {
+            "title": "Module Label",
+            "type": "string"
+          },
+          "observed_count": {
+            "title": "Observed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "snapshot_count": {
+            "title": "Snapshot Count",
+            "type": "integer"
+          },
+          "source_total_count": {
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "module",
+          "module_label",
+          "run_id",
+          "status",
+          "source_total_count",
+          "observed_count",
+          "snapshot_count",
+          "history_rows_inserted",
+          "changed_count"
+        ],
+        "title": "ReadonlySyncStreamOut",
         "type": "object"
       },
       "ReviewEvidenceIn": {
@@ -3844,6 +4345,240 @@
         "summary": "List Attachments",
         "tags": [
           "attachments"
+        ]
+      }
+    },
+    "/v1/readonly-modules/bizcases": {
+      "get": {
+        "operationId": "list_bizcases_v1_readonly_modules_bizcases_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BizCaseListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bizcases",
+        "tags": [
+          "readonly-modules"
+        ]
+      }
+    },
+    "/v1/readonly-modules/payment": {
+      "get": {
+        "operationId": "list_payment_records_v1_readonly_modules_payment_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Payment Records",
+        "tags": [
+          "readonly-modules"
+        ]
+      }
+    },
+    "/v1/readonly-modules/runs": {
+      "get": {
+        "operationId": "list_readonly_runs_v1_readonly_modules_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReadonlyRunOut"
+                  },
+                  "title": "Response List Readonly Runs V1 Readonly Modules Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Readonly Runs",
+        "tags": [
+          "readonly-modules"
+        ]
+      }
+    },
+    "/v1/readonly-modules/sync": {
+      "post": {
+        "operationId": "sync_modules_v1_readonly_modules_sync_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "max_pages",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Max Pages",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadonlySyncOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Modules",
+        "tags": [
+          "readonly-modules"
         ]
       }
     },
