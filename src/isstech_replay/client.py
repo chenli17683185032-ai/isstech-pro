@@ -29,7 +29,7 @@ from .models.purchase import (
 from .parsers.attachment import parse_attachment_list
 from .parsers.login import is_login_page
 from .parsers.portal import parse_portal_display_name
-from .parsers.procurement import parse_procurement_list
+from .parsers.procurement import parse_procurement_detail, parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
 from .policy import EndpointPolicy, PolicyViolation, UnsafeRequestError
 from .transport import GuardedTransport
@@ -391,6 +391,28 @@ class IsstechClient:
         response.raise_for_status()
         self._ensure_not_login(response)
         return parse_purchase_detail(response.text, requisition_id=requisition_id)
+
+    def get_procurement_document_detail(
+        self,
+        workflow: WorkflowKind,
+        external_id: str,
+    ) -> PurchaseRequisitionDetail:
+        """Load one runtime-proven read-only procurement detail page."""
+        try:
+            spec = PROCUREMENT_STREAM_BY_WORKFLOW[workflow]
+        except KeyError as exc:
+            raise ValueError(f"unsupported procurement workflow: {workflow}") from exc
+        external_id = require_path_segment(external_id, f"{workflow.value} id")
+        if workflow is WorkflowKind.PURCHASE_REQUISITION:
+            return self.get_purchase_requisition(external_id)
+        response = self.get(self._url(spec.detail_path(external_id)))
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_procurement_detail(
+            response.text,
+            workflow=workflow,
+            external_id=external_id,
+        )
 
     def list_attachments(self, html: str, *, doc_id: str = "") -> tuple[AttachmentMeta, ...]:
         """Parse attachment rows from already-fetched HTML (edit/detail page)."""

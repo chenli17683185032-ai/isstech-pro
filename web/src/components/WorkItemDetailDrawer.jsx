@@ -17,12 +17,9 @@ const FIELD_LABELS = {
   PR_Remark: "备注",
 };
 const FIELD_ORDER = Object.keys(FIELD_LABELS);
-const RELATION_LABELS = {
-  applicant: "发起人",
-  submitter: "提交人",
-  project_manager: "项目经理",
-  procurement_manager: "采购经理",
-  approver: "审批人",
+const SCOPE_LABELS = {
+  my_project: "我的项目",
+  submitted_by_me: "我提交的",
 };
 
 function detailFields(detail, item) {
@@ -41,6 +38,7 @@ function detailFields(detail, item) {
     ["summary-applicant", "填报人", item.applicant],
     ["summary-date", "填报日期", item.submitted_at],
     ["summary-status", "当前状态", item.status],
+    ["summary-approver", "审批人", item.current_approver],
   ].forEach(([key, label, value]) => {
     if (labels.has(label) || (label === "填报人" && labels.has("申请人"))) return;
     labels.add(label);
@@ -75,10 +73,16 @@ export default function WorkItemDetailDrawer({
 
   const summary = detail?.item || item;
   const steps = detail?.approval_steps || [];
-  const relations = (summary.relations || []).map(
-    (relation) => RELATION_LABELS[relation] || relation,
+  const scopes = (summary.scope_reasons || []).map(
+    (reason) => SCOPE_LABELS[reason] || reason,
   );
   const fields = detailFields(detail, summary);
+  const approvalStatus = detail?.approval_status || "not_fetched";
+  const approvalEmptyLabel = {
+    upstream_empty: "上游未返回审批轨迹",
+    fetch_failed: "审批轨迹同步失败",
+    not_fetched: "审批轨迹尚未同步",
+  }[approvalStatus] || "审批轨迹不可用";
 
   return (
     <div
@@ -98,11 +102,9 @@ export default function WorkItemDetailDrawer({
             <span>{summary.workflow_label || "采购单据"}</span>
             <h2 id="work-detail-title">{summary.reference_no || summary.external_id}</h2>
             <small>{summary.title || "未命名单据"}</small>
-            <div className="work-detail-relations" aria-label="关系标注">
-              <span>关系</span>
-              {relations.length
-                ? relations.map((relation) => <strong key={relation}>{relation}</strong>)
-                : <strong>未标注</strong>}
+            <div className="work-detail-relations" aria-label="单据归属">
+              <span>归属</span>
+              {scopes.map((scope) => <strong key={scope}>{scope}</strong>)}
             </div>
           </div>
           <div className="work-detail-header__actions">
@@ -155,7 +157,7 @@ export default function WorkItemDetailDrawer({
               <section className="work-detail-section work-detail-section--approval">
                 <div className="work-detail-section__heading">
                   <h3>审批轨迹</h3>
-                  <span>{steps.length} 个节点</span>
+                  <span>{steps.length ? `${steps.length} 个节点` : approvalEmptyLabel}</span>
                 </div>
                 {steps.length ? (
                   <ol className="approval-timeline">
@@ -172,7 +174,7 @@ export default function WorkItemDetailDrawer({
                     ))}
                   </ol>
                 ) : (
-                  <div className="work-detail-empty">暂无审批轨迹</div>
+                  <div className="work-detail-empty">{approvalEmptyLabel}</div>
                 )}
               </section>
             </>

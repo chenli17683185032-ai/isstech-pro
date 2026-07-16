@@ -92,7 +92,7 @@ last page. The four added workflows use an explicit empty filter body; replaying
 display-oriented form values can accidentally apply filters and is not part of
 the runtime adapter. List schemas are fixed by observed column headers, and each
 row must expose exactly one `ajax-data` stable ID. The four added flows cache
-their list fields locally; their upstream Detail routes are not live-enabled.
+their list fields locally and enrich only records in the derived personal scope.
 
 ## Detail and approval trail
 
@@ -101,10 +101,20 @@ their list fields locally; their upstream Detail routes are not live-enabled.
 | Open saved detail | GET | `/WebTP/PurchaseRequisition/Detail/{id}` | None | observed, HTTP 200 | `20260715-purchase-detail-01.cdp.json` |
 | Open in-progress detail | GET | `/WebTP/PurchaseRequisition/Detail/{id}` | None | observed, HTTP 200 | `20260715-purchase-in-progress-detail-01.cdp.json` |
 | Detail script | GET | `/WebTP/PurchaseRequisition/JS/Detail` | None | observed | both Detail captures |
+| Procurement contract detail | GET | `/WebTP/ProcurementContract/SearchDetail/{id}` | None | observed, HTTP 200 | 2026-07-16 live structure probe |
+| Procurement order detail | GET | `/WebTP/ProcurementOrder/SearchDetail/{id}` | None | observed, HTTP 200 | 2026-07-16 live structure probe |
+| Cost confirmation detail | GET | `/WebTP/CostConfirmation/Detail/{id}` | None | observed, HTTP 200 | 2026-07-16 live structure probe |
+| Check acceptance detail | GET | `/WebTP/CheckAcceptance/Detail/{id}` | None | observed, HTTP 200 | 2026-07-16 live structure probe |
 
 The in-progress Detail page yielded 11 basic fields and five approval-trail rows.
 Approval-trail columns are sequence, time, approver, position, action, and
 comment. Values remain in raw evidence only.
+
+The four added detail routes were derived from their served SearchIndex view
+actions and then verified with one fixed read-only request per workflow. All
+four returned the same six approval-trail columns. The local sync enriches only
+the derived personal scope; a 2026-07-16 replay classified all 32 personal rows,
+with 30 non-empty trails and two upstream-empty trails.
 
 ## Attachments
 

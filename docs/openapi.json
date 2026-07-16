@@ -70,13 +70,18 @@
             "title": "Matched Count",
             "type": "integer"
           },
+          "my_project_count": {
+            "default": 0,
+            "title": "My Project Count",
+            "type": "integer"
+          },
           "other_count": {
             "default": 0,
             "title": "Other Count",
             "type": "integer"
           },
           "ownership_scope": {
-            "default": "account_visible",
+            "default": "personal_projects_and_submissions",
             "title": "Ownership Scope",
             "type": "string"
           },
@@ -102,6 +107,11 @@
               }
             ],
             "title": "Source Total Count"
+          },
+          "submitted_by_me_count": {
+            "default": 0,
+            "title": "Submitted By Me Count",
+            "type": "integer"
           },
           "synced_at": {
             "anyOf": [
@@ -1837,6 +1847,17 @@
       },
       "WorkItemDetailOut": {
         "properties": {
+          "approval_status": {
+            "default": "not_fetched",
+            "enum": [
+              "available",
+              "upstream_empty",
+              "not_fetched",
+              "fetch_failed"
+            ],
+            "title": "Approval Status",
+            "type": "string"
+          },
           "approval_steps": {
             "items": {
               "$ref": "#/components/schemas/WorkItemApprovalStepOut"
@@ -1948,6 +1969,13 @@
             "title": "Relations",
             "type": "array"
           },
+          "scope_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemScopeReason"
+            },
+            "title": "Scope Reasons",
+            "type": "array"
+          },
           "source_url": {
             "default": "",
             "title": "Source Url",
@@ -2006,6 +2034,14 @@
           "approver"
         ],
         "title": "WorkItemRelation",
+        "type": "string"
+      },
+      "WorkItemScopeReason": {
+        "enum": [
+          "my_project",
+          "submitted_by_me"
+        ],
+        "title": "WorkItemScopeReason",
         "type": "string"
       },
       "WorkflowBody": {

@@ -270,6 +270,20 @@ def _default_rules() -> tuple[EndpointRule, ...]:
             description="Observed read-only SearchIndex and pagination for procurement flows",
         ),
         EndpointRule(
+            rule_id="procurement.detail_get",
+            action="procurement.detail",
+            methods=frozenset({"GET"}),
+            host_suffixes=business,
+            path_pattern=_compile(
+                r"^/WebTP/(?:(?:ProcurementContract|ProcurementOrder)/SearchDetail|"
+                r"(?:CostConfirmation|CheckAcceptance)/Detail)/"
+                r"[A-Za-z0-9_-]+/?$"
+            ),
+            side_effect=SideEffect.NONE,
+            request_class=RequestClass.ALLOW_LIVE,
+            description="Observed read-only detail pages for procurement flows",
+        ),
+        EndpointRule(
             rule_id="webtp.static",
             action="webtp.static",
             methods=frozenset({"GET", "HEAD"}),

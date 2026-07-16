@@ -7,6 +7,8 @@
   `Index`, `ApprovalIndex`, `AdjustIndex`, `RevocationIndex`, `SearchIndex`
 - Read-only `SearchIndex` and observed pagination under `ProcurementContract`,
   `ProcurementOrder`, `CostConfirmation`, and `CheckAcceptance`
+- Read-only personal-scope details at observed `SearchDetail/{id}` or
+  `Detail/{id}` paths under those four modules
 - Downstream purchase flows discovered from those views (e.g. `ProjectSelection`,
   `Edit/{id}`, detail, dictionary, attachment list/download)
 - Authentication redirects and callbacks on `https://passport.isstech.com`

@@ -7,8 +7,18 @@ from isstech_replay.models.procurement import (
     ProcurementListResult,
     ProcurementStreamSpec,
 )
+from isstech_replay.models.purchase import PurchaseRequisitionDetail
+from isstech_replay.models.work_items import WorkflowKind
 
-from .purchase import _TOTAL_RE, _TableParser, _cell_value
+from .purchase import (
+    _TOTAL_RE,
+    _DetailFormParser,
+    _DetailTableParser,
+    _TableParser,
+    _cell_value,
+    _clean_label,
+    _parse_approval_steps,
+)
 
 
 def parse_procurement_list(
@@ -70,4 +80,37 @@ def parse_procurement_list(
         page=page,
         page_size=page_size,
         source_url=source_url,
+    )
+
+
+def parse_procurement_detail(
+    html: str,
+    *,
+    workflow: WorkflowKind,
+    external_id: str,
+) -> PurchaseRequisitionDetail:
+    """Parse the shared read-only field tables and approval trail."""
+    form_parser = _DetailFormParser()
+    form_parser.feed(html)
+    table_parser = _DetailTableParser()
+    table_parser.feed(html)
+
+    fields: dict[str, str] = {}
+    for table in table_parser.tables:
+        for row in table:
+            for index, (tag, label) in enumerate(row[:-1]):
+                if tag != "th" or row[index + 1][0] != "td":
+                    continue
+                field_name = _clean_label(label)
+                if field_name and field_name not in fields:
+                    fields[field_name] = row[index + 1][1]
+    fields.update(form_parser.fields)
+    approval_steps = _parse_approval_steps(table_parser.tables)
+    if not fields and not approval_steps:
+        raise ValueError(f"{workflow.value} detail fields not found")
+    return PurchaseRequisitionDetail(
+        id=external_id,
+        fields=fields,
+        html_title=form_parser.title or workflow.label,
+        approval_steps=approval_steps,
     )

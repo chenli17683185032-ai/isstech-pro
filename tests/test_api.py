@@ -401,22 +401,24 @@ def test_manual_sync_persists_snapshots_and_replay_has_no_events(
     assert second.json()["event_count"] == 0
     assert current.status_code == 200
     assert current.json()["source"] == "sqlite_current"
-    assert current.json()["total_count"] == 6
+    assert current.json()["total_count"] == 3
     assert current.json()["follow_up_count"] == 2
-    assert current.json()["approved_count"] == 3
-    assert current.json()["other_count"] == 1
-    assert current.json()["ownership_scope"] == "account_visible"
+    assert current.json()["approved_count"] == 1
+    assert current.json()["other_count"] == 0
+    assert current.json()["ownership_scope"] == "personal_projects_and_submissions"
     assert current.json()["source_total_count"] == 6
     assert current.json()["matched_count"] == 3
+    assert current.json()["my_project_count"] == 0
+    assert current.json()["submitted_by_me_count"] == 3
     assert current.json()["workflow_counts"] == {
-        workflow.value: (2 if workflow is WorkflowKind.PURCHASE_REQUISITION else 1)
-        for workflow in WorkflowKind
+        WorkflowKind.PURCHASE_REQUISITION.value: 2,
+        WorkflowKind.CHECK_ACCEPTANCE.value: 1,
     }
     assert {item["category"] for item in current.json()["items"]} == {
         "follow_up",
         "approved",
-        "other",
     }
+    assert all(item["scope_reasons"] == ["submitted_by_me"] for item in current.json()["items"])
     assert sum(bool(item["relations"]) for item in current.json()["items"]) == 3
     assert runs.status_code == 200
     assert len(runs.json()) == 10
@@ -476,6 +478,10 @@ def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
         legacy = client.get("/v1/work-items/10001/detail", headers=headers)
         missing = client.get("/v1/work-items/not-owned/detail", headers=headers)
         blank = client.get("/v1/work-items/%20/detail", headers=headers)
+        outside_scope = client.get(
+            "/v1/work-items/procurement_contract/procurement_contract-1/detail",
+            headers=headers,
+        )
 
         with sqlite3.connect(scoped_database) as connection:
             connection.execute(
@@ -490,14 +496,15 @@ def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
     assert owned.json()["item"]["category"] == "approved"
     assert owned.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
     assert len(owned.json()["approval_steps"]) == 2
-    assert legacy.status_code == 200
-    assert legacy.json()["fields"]["PR_RequisitionNo"] == "XQ-REDACTED-101"
+    assert owned.json()["approval_status"] == "available"
+    assert legacy.status_code == 404
     assert missing.status_code == 404
     assert blank.status_code == 404
+    assert outside_scope.status_code == 404
     assert hidden.status_code == 200
     assert hidden.json()["item"]["category"] == "other"
     assert missing.json()["detail"]["code"] == "NOT_FOUND"
-    assert detail_calls == ["10001"]
+    assert detail_calls == []
 
 
 def test_current_work_items_keeps_freshness_when_successful_sync_is_empty(
@@ -601,9 +608,9 @@ def test_persisted_work_items_and_runs_are_isolated_by_login_account(
     assert bob_before.json()["synced_at"] is None
     assert bob_runs_before.json() == []
     assert bob_sync.status_code == 200
-    assert alice_after.json()["total_count"] == 6
+    assert alice_after.json()["total_count"] == 3
     assert alice_after.json()["follow_up_count"] == 2
-    assert alice_after.json()["approved_count"] == 3
+    assert alice_after.json()["approved_count"] == 1
     assert len(alice_runs_after.json()) == 5
     assert account_database_path(
         "alice", base_database_path=database

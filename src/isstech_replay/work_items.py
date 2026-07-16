@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Iterable
 
 from .models.purchase import PurchaseListResult, PurchaseRequisitionSummary
 from .models.work_items import (
     WorkItem,
     WorkItemCategory,
     WorkItemRelation,
+    WorkItemScopeReason,
     WorkflowKind,
     WorkflowSnapshot,
 )
@@ -17,6 +20,45 @@ from .validation import require_path_segment
 
 _PURCHASE_PENDING_STATUSES = {"审批中"}
 _PURCHASE_APPROVED_STATUSES = {"审批通过", "已完成"}
+_SUBMISSION_RELATIONS = {
+    WorkItemRelation.APPLICANT,
+    WorkItemRelation.SUBMITTER,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalWorkflowSnapshot:
+    snapshot: WorkflowSnapshot
+    scope_reasons: tuple[WorkItemScopeReason, ...]
+
+
+def personal_work_item_scope(
+    snapshots: Iterable[WorkflowSnapshot],
+) -> tuple[PersonalWorkflowSnapshot, ...]:
+    """Derive personal submissions and project records from complete source rows."""
+    source = tuple(snapshots)
+    my_project_numbers = {
+        snapshot.project_no.strip()
+        for snapshot in source
+        if snapshot.project_no.strip()
+        and WorkItemRelation.PROJECT_MANAGER in snapshot.relations
+    }
+    scoped: list[PersonalWorkflowSnapshot] = []
+    for snapshot in source:
+        reasons: list[WorkItemScopeReason] = []
+        project_no = snapshot.project_no.strip()
+        if project_no and project_no in my_project_numbers:
+            reasons.append(WorkItemScopeReason.MY_PROJECT)
+        if _SUBMISSION_RELATIONS.intersection(snapshot.relations):
+            reasons.append(WorkItemScopeReason.SUBMITTED_BY_ME)
+        if reasons:
+            scoped.append(
+                PersonalWorkflowSnapshot(
+                    snapshot=snapshot,
+                    scope_reasons=tuple(reasons),
+                )
+            )
+    return tuple(scoped)
 
 
 def is_purchase_active(status: str) -> bool:

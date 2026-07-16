@@ -15,9 +15,17 @@ const RELATION_LABELS = {
   procurement_manager: "采购经理",
   approver: "审批人",
 };
+const SCOPE_LABELS = {
+  my_project: "我的项目",
+  submitted_by_me: "我提交的",
+};
 
 function relationLabels(item) {
   return (item.relations || []).map((relation) => RELATION_LABELS[relation] || relation);
+}
+
+function scopeLabels(item) {
+  return (item.scope_reasons || []).map((reason) => SCOPE_LABELS[reason] || reason);
 }
 
 async function writeClipboardText(text) {
@@ -41,6 +49,7 @@ async function writeClipboardText(text) {
 export default function WorkItemsView({ token, data, notify, onSync, syncing }) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("all");
+  const [scopeMode, setScopeMode] = useState("all");
   const [workflow, setWorkflow] = useState("all");
   const [selectedItem, setSelectedItem] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -56,6 +65,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   const items = useMemo(() => {
     const normalized = deferredQuery.trim().toLowerCase();
     return data.workItems.items.filter((item) => {
+      if (scopeMode !== "all" && !(item.scope_reasons || []).includes(scopeMode)) return false;
       if (workflow !== "all" && item.workflow !== workflow) return false;
       if (mode === "approved" && item.category !== "approved") return false;
       if (mode === "follow_up" && item.category !== "follow_up") return false;
@@ -68,11 +78,12 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         item.applicant,
         item.current_approver,
         item.status,
+        ...scopeLabels(item),
         ...relationLabels(item),
       ]
         .some((value) => String(value || "").toLowerCase().includes(normalized));
     });
-  }, [data.workItems.items, deferredQuery, mode, workflow]);
+  }, [data.workItems.items, deferredQuery, mode, scopeMode, workflow]);
 
   const closeDetail = useCallback(() => setSelectedItem(null), []);
 
@@ -106,9 +117,9 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
       item.reference_no || item.external_id,
       item.workflow_label,
       item.title || item.project_no,
-      `关系：${relationLabels(item).join("、") || "未标注"}`,
+      `归属：${scopeLabels(item).join("、")}`,
       `状态：${item.status || "待确认"}`,
-      item.category === "approved" ? "已过审" : (item.current_approver || "待确认"),
+      `审批人：${item.current_approver || "--"}`,
       item.category === "approved"
         ? "已完成"
         : (item.waiting_days == null ? "天数未知" : `${item.waiting_days}天`),
@@ -124,25 +135,25 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   return (
     <div className="view-stack">
       <section className="work-item-summary">
-        <div><span>账号可见</span><strong>{data.workItems.total_count}</strong></div>
-        <div><span>待处理</span><strong>{data.workItems.follow_up_count}</strong></div>
-        <div><span>已完成</span><strong>{data.workItems.approved_count}</strong></div>
+        <div><span>个人相关</span><strong>{data.workItems.total_count}</strong></div>
+        <div><span>我的项目</span><strong>{data.workItems.my_project_count ?? 0}</strong></div>
+        <div><span>我提交</span><strong>{data.workItems.submitted_by_me_count ?? 0}</strong></div>
         <div><span>快照时间</span><strong>{formatDateTime(data.workItems.synced_at)}</strong></div>
       </section>
       <section className="content-section">
         <div className="work-item-scope">
           <ShieldCheck size={17} aria-hidden="true" />
-          <div><strong>范围：账号可见全集</strong><span>采购立项、合同、订单、成本确认、验收</span></div>
+          <div><strong>范围：我的项目与我提交的</strong><span>采购立项、合同、订单、成本确认、验收</span></div>
           <p>
-            上游对账 <strong>{data.workItems.source_total_count ?? "--"}</strong>
+            源数据 <strong>{data.workItems.source_total_count ?? "--"}</strong>
             <span>·</span>
-            关系标注 <strong>{data.workItems.matched_count ?? 0}</strong>
+            待处理 <strong>{data.workItems.follow_up_count}</strong>
             <span>·</span>
-            其他状态 <strong>{data.workItems.other_count ?? 0}</strong>
+            已完成 <strong>{data.workItems.approved_count}</strong>
           </p>
         </div>
         <div className="table-toolbar">
-          <div className="search-control"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索编号、项目、责任人" aria-label="搜索流程记录" /></div>
+          <div className="search-control"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索编号、项目、审批人" aria-label="搜索流程记录" /></div>
           <div className="workflow-filter">
             <Layers3 size={16} aria-hidden="true" />
             <select value={workflow} onChange={(event) => setWorkflow(event.target.value)} aria-label="筛选流程类型">
@@ -151,7 +162,15 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
             </select>
           </div>
           <div
-            className="segmented"
+            className="segmented segmented--scope"
+            aria-label="单据范围"
+          >
+            <button className={scopeMode === "all" ? "is-active" : ""} onClick={() => setScopeMode("all")} type="button">全部相关</button>
+            <button className={scopeMode === "my_project" ? "is-active" : ""} onClick={() => setScopeMode("my_project")} type="button">我的项目</button>
+            <button className={scopeMode === "submitted_by_me" ? "is-active" : ""} onClick={() => setScopeMode("submitted_by_me")} type="button">我提交的</button>
+          </div>
+          <div
+            className="segmented segmented--status"
             aria-label="单据状态"
           >
             <button className={mode === "all" ? "is-active" : ""} onClick={() => setMode("all")} type="button">全部</button>
@@ -166,7 +185,7 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
         {items.length ? (
           <div className="table-wrap">
             <table className="data-table followup-table">
-              <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>关系</th><th>当前节点</th><th>责任人</th><th>状态</th><th /></tr></thead>
+              <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>归属</th><th>当前节点</th><th>审批人</th><th>状态</th><th /></tr></thead>
               <tbody>
                 {items.map((item) => (
                   <tr
@@ -188,13 +207,11 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
                     <td><strong>{item.title || "未命名单据"}</strong><span>{item.project_no}</span></td>
                     <td>
                       <div className="relation-list">
-                        {relationLabels(item).length
-                          ? relationLabels(item).map((label) => <span className="relation-chip" key={label}>{label}</span>)
-                          : <span className="relation-chip relation-chip--muted">未标注</span>}
+                        {scopeLabels(item).map((label) => <span className="relation-chip" key={label}>{label}</span>)}
                       </div>
                     </td>
                     <td>{item.status || "--"}</td>
-                    <td><strong>{item.category === "approved" ? "流程已完成" : (item.current_approver || "待确认")}</strong></td>
+                    <td><strong>{item.current_approver || "--"}</strong></td>
                     <td><StatusTag value={item.category} label={item.status || "状态未知"} /></td>
                     <td className="align-right">
                       <button

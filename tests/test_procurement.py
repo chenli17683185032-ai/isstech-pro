@@ -17,8 +17,12 @@ from isstech_replay.models.procurement import (
     ProcurementListResult,
     ProcurementStreamSpec,
 )
+from isstech_replay.models.purchase import PurchaseApprovalStep, PurchaseRequisitionDetail
 from isstech_replay.models.work_items import WorkItemRelation, WorkflowKind
-from isstech_replay.parsers.procurement import parse_procurement_list
+from isstech_replay.parsers.procurement import (
+    parse_procurement_detail,
+    parse_procurement_list,
+)
 from isstech_replay.policy import RequestClass
 from isstech_replay.storage import WorkflowStorage, cached_workflow_detail
 from isstech_replay.sync import sync_procurement_workflows
@@ -64,6 +68,21 @@ def _page(
     )
 
 
+def _detail_page() -> str:
+    return """
+    <html><head><title>REDACTED DETAIL</title></head><body>
+      <table>
+        <tr><th>单据编号</th><td>REF-REDACTED</td></tr>
+        <tr><th>项目编号</th><td>PROJECT-REDACTED</td></tr>
+      </table>
+      <table>
+        <tr><th>序号</th><th>时间</th><th>审批人</th><th>职位</th><th>操作</th><th>批注</th></tr>
+        <tr><td>1</td><td>2026-07-01</td><td>USER_A</td><td>ROLE_A</td><td>提交</td><td>REDACTED</td></tr>
+      </table>
+    </body></html>
+    """
+
+
 @pytest.mark.parametrize("spec", PROCUREMENT_STREAMS, ids=lambda spec: spec.workflow.value)
 def test_fixed_schema_parser_normalizes_each_procurement_stream(
     spec: ProcurementStreamSpec,
@@ -87,6 +106,60 @@ def test_fixed_schema_parser_rejects_header_drift_and_missing_identity() -> None
     missing = _page(spec, ("1",), total=1).replace(' ajax-data="1"', "")
     with pytest.raises(ValueError, match="stable identity"):
         parse_procurement_list(missing, spec=spec)
+
+
+def test_generic_procurement_detail_parses_fields_and_approval_trail() -> None:
+    detail = parse_procurement_detail(
+        _detail_page(),
+        workflow=WorkflowKind.PROCUREMENT_CONTRACT,
+        external_id="detail-1",
+    )
+
+    assert detail.fields == {
+        "单据编号": "REF-REDACTED",
+        "项目编号": "PROJECT-REDACTED",
+    }
+    assert detail.html_title == "REDACTED DETAIL"
+    assert len(detail.approval_steps) == 1
+    assert detail.approval_steps[0].action == "提交"
+
+
+@pytest.mark.parametrize(
+    ("workflow", "expected_path"),
+    [
+        (
+            WorkflowKind.PROCUREMENT_CONTRACT,
+            "/WebTP/ProcurementContract/SearchDetail/detail-1",
+        ),
+        (
+            WorkflowKind.PROCUREMENT_ORDER,
+            "/WebTP/ProcurementOrder/SearchDetail/detail-1",
+        ),
+        (
+            WorkflowKind.COST_CONFIRMATION,
+            "/WebTP/CostConfirmation/Detail/detail-1",
+        ),
+        (
+            WorkflowKind.CHECK_ACCEPTANCE,
+            "/WebTP/CheckAcceptance/Detail/detail-1",
+        ),
+    ],
+)
+def test_client_uses_runtime_proven_procurement_detail_paths(
+    workflow: WorkflowKind,
+    expected_path: str,
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, text=_detail_page(), request=request)
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        detail = client.get_procurement_document_detail(workflow, "detail-1")
+
+    assert seen == [expected_path]
+    assert len(detail.approval_steps) == 1
 
 
 def test_client_collects_all_pages_and_posts_only_empty_new_stream_filters() -> None:
@@ -159,6 +232,31 @@ def test_client_rejects_short_page_before_declared_total() -> None:
         (
             "PUT",
             "/WebTP/ProcurementOrder/SearchIndex",
+            RequestClass.DENY,
+        ),
+        (
+            "GET",
+            "/WebTP/ProcurementContract/SearchDetail/1",
+            RequestClass.ALLOW_LIVE,
+        ),
+        (
+            "GET",
+            "/WebTP/ProcurementOrder/SearchDetail/1",
+            RequestClass.ALLOW_LIVE,
+        ),
+        (
+            "GET",
+            "/WebTP/CostConfirmation/Detail/1",
+            RequestClass.ALLOW_LIVE,
+        ),
+        (
+            "GET",
+            "/WebTP/CheckAcceptance/Detail/1",
+            RequestClass.ALLOW_LIVE,
+        ),
+        (
+            "POST",
+            "/WebTP/CheckAcceptance/Detail/1",
             RequestClass.DENY,
         ),
     ],
@@ -259,6 +357,36 @@ class ExpiredProcurementClient(FakeProcurementClient):
         raise PermissionError("session expired")
 
 
+class DetailProcurementClient(FakeProcurementClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.detail_calls: list[WorkflowKind] = []
+
+    def get_procurement_document_detail(
+        self,
+        workflow: WorkflowKind,
+        external_id: str,
+    ) -> PurchaseRequisitionDetail:
+        self.detail_calls.append(workflow)
+        fields = (
+            {"PR_ProjectManagerName": "CURRENT USER"}
+            if workflow is WorkflowKind.PURCHASE_REQUISITION
+            else {"项目编号": "PROJECT-REDACTED"}
+        )
+        return PurchaseRequisitionDetail(
+            id=external_id,
+            fields=fields,
+            html_title=workflow.label,
+            approval_steps=(
+                PurchaseApprovalStep(
+                    sequence="1",
+                    approver_name="USER_APPROVER",
+                    action="提交",
+                ),
+            ),
+        )
+
+
 def test_batch_sync_checkpoints_all_streams_without_cross_workflow_id_collision(
     tmp_path: Path,
 ) -> None:
@@ -289,6 +417,40 @@ def test_batch_sync_checkpoints_all_streams_without_cross_workflow_id_collision(
     )
     assert acceptance.relations == (WorkItemRelation.APPLICANT,)
     assert set(storage.latest_successful_runs_by_adapter()) == set(WorkflowKind)
+
+
+def test_batch_sync_enriches_only_proven_personal_project_records_idempotently(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    client = DetailProcurementClient()
+
+    first = sync_procurement_workflows(
+        client,  # type: ignore[arg-type]
+        storage=storage,
+        observed_at=OBSERVED_1,
+        started_at=OBSERVED_1,
+        run_id="detail-first",
+    )
+    second = sync_procurement_workflows(
+        client,  # type: ignore[arg-type]
+        storage=storage,
+        observed_at=OBSERVED_2,
+        started_at=OBSERVED_2,
+        run_id="detail-second",
+    )
+
+    assert first.status == "succeeded"
+    assert set(client.detail_calls) == set(WorkflowKind)
+    assert second.events == ()
+    assert all(
+        cached_workflow_detail(snapshot).approval_status == "available"  # type: ignore[union-attr]
+        for snapshot in storage.current_snapshots()
+    )
+    assert all(
+        len(cached_workflow_detail(snapshot).approval_steps) == 1  # type: ignore[union-attr]
+        for snapshot in storage.current_snapshots()
+    )
 
 
 def test_batch_sync_keeps_failed_stream_checkpoint_and_updates_other_streams(

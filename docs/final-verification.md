@@ -20,7 +20,7 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-The current P9.5 gate is recorded in the implementation plan after the final run.
+The current P9.6 gate is recorded in the implementation plan after the final run.
 It includes the full pytest suite, Ruff, OpenAPI, secret/evidence verification,
 React production build, wheel contents, plist lint, and `git diff --check`.
 
@@ -188,16 +188,19 @@ Open `http://127.0.0.1:8000/`. The verified local-only browser path was:
 mock login -> material in local store -> local_rules extraction -> draft
 -> three required evidence-backed confirmations -> validated -> ready
 -> mock Portal identity + five read-only SearchIndex streams
--> all account-visible records in adapter-scoped SQLite checkpoints
+-> complete account-visible source records in adapter-scoped SQLite checkpoints
+-> personal-project/submission scope derived by the local API
 -> refresh recovery -> stale-version 409 refresh without overwrite
 ```
 
-P9.5 Browser QA used `1280x720` and `390x844` against the persisted 353-row
-baseline. Workflow filtering produced 57 acceptance records and 9 pending rows;
-the cached-detail drawer opened and closed without losing filters. There was no
-page-level horizontal overflow, blank primary view, overlap, or console warning/
-error. Wide tables scroll only inside their container on mobile. Business-free
-QA screenshots remain in `/tmp` and are not wheel contents.
+P9.6 Browser QA used `1280x720` and `390x844` against 353 persisted source rows
+and the 32-row personal view. Scope filtering produced 32 project rows and 11
+submitted rows; status filtering produced 5 pending rows, and contract filtering
+produced 8 rows. Non-empty and upstream-empty approval trails both rendered with
+accurate states. There was no page-level horizontal overflow, blank primary
+view, overlap, clipped control, framework overlay, or console warning/error.
+Wide tables scroll only inside their container on mobile, and the detail drawer
+stays within the viewport.
 
 The built root, hashed JS, and hashed CSS must return 200 from FastAPI. Common
 icon buttons retain accessible names on mobile, the material button label remains

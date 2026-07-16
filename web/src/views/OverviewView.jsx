@@ -24,7 +24,7 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
   const metrics = [
     { label: "待审草稿", value: reviewDrafts.length, icon: ClipboardCheck, tone: "warning" },
     { label: "待处理", value: data.workItems.follow_up_count, icon: ListTodo, tone: "danger" },
-    { label: "可见单据", value: data.workItems.total_count, icon: CircleCheckBig, tone: "success" },
+    { label: "个人单据", value: data.workItems.total_count, icon: CircleCheckBig, tone: "success" },
     { label: "材料", value: data.materials.length, icon: FileText, tone: "neutral" },
   ];
 
@@ -58,7 +58,7 @@ export default function OverviewView({ data, loading, error, navigate, onSync, s
           {followUpItems.length ? (
             <div className="table-wrap">
               <table className="data-table">
-                <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>责任人</th><th>状态</th></tr></thead>
+                <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>审批人</th><th>状态</th></tr></thead>
                 <tbody>
                   {followUpItems.slice(0, 6).map((item) => (
                     <tr key={item.key}>

@@ -109,6 +109,7 @@ class CachedWorkflowDetail:
     fields: dict[str, str]
     html_title: str
     approval_steps: tuple[PurchaseApprovalStep, ...]
+    approval_status: str
 
 
 def _workflow_payload(payload_json: str) -> dict[str, object]:
@@ -148,6 +149,7 @@ def cached_workflow_detail(
     raw_fields = detail.get("fields")
     html_title = detail.get("html_title")
     raw_steps = detail.get("approval_steps")
+    approval_status = detail.get("approval_status")
     if (
         not isinstance(raw_fields, dict)
         or not isinstance(html_title, str)
@@ -158,6 +160,14 @@ def cached_workflow_detail(
         )
     ):
         return None
+
+    if approval_status not in {
+        "available",
+        "upstream_empty",
+        "not_fetched",
+        "fetch_failed",
+    }:
+        approval_status = "available" if raw_steps else "not_fetched"
 
     step_fields = (
         "sequence",
@@ -179,6 +189,7 @@ def cached_workflow_detail(
         fields=dict(raw_fields),
         html_title=html_title,
         approval_steps=tuple(steps),
+        approval_status=approval_status,
     )
 
 

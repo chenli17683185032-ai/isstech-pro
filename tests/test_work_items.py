@@ -12,16 +12,114 @@ from isstech_replay.models.purchase import (
     PurchaseRequisitionSummary,
     PurchaseView,
 )
-from isstech_replay.models.work_items import WorkItemCategory
+from isstech_replay.models.work_items import (
+    WorkItemCategory,
+    WorkItemRelation,
+    WorkItemScopeReason,
+    WorkflowKind,
+    WorkflowSnapshot,
+)
 from isstech_replay.parsers.purchase import parse_purchase_list
 from isstech_replay.work_items import (
     is_purchase_approved,
+    personal_work_item_scope,
     purchase_center_items,
     purchase_follow_up_items,
 )
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "purchase"
+
+
+def _scope_snapshot(
+    external_id: str,
+    *,
+    workflow: WorkflowKind = WorkflowKind.PURCHASE_REQUISITION,
+    project_no: str = "",
+    relations: tuple[WorkItemRelation, ...] = (),
+) -> WorkflowSnapshot:
+    return WorkflowSnapshot(
+        adapter=workflow,
+        external_id=external_id,
+        observed_at="2026-07-16T00:00:00+00:00",
+        project_no=project_no,
+        relations=relations,
+    )
+
+
+def test_personal_scope_unions_project_records_and_submissions_once() -> None:
+    snapshots = (
+        _scope_snapshot(
+            "project-seed",
+            project_no=" PROJECT-A ",
+            relations=(WorkItemRelation.PROJECT_MANAGER,),
+        ),
+        _scope_snapshot(
+            "same-project-contract",
+            workflow=WorkflowKind.PROCUREMENT_CONTRACT,
+            project_no="PROJECT-A",
+        ),
+        _scope_snapshot(
+            "submission-only",
+            workflow=WorkflowKind.COST_CONFIRMATION,
+            project_no="PROJECT-B",
+            relations=(WorkItemRelation.SUBMITTER,),
+        ),
+        _scope_snapshot(
+            "overlap",
+            workflow=WorkflowKind.CHECK_ACCEPTANCE,
+            project_no="PROJECT-A",
+            relations=(WorkItemRelation.APPLICANT,),
+        ),
+    )
+
+    scoped = personal_work_item_scope(snapshots)
+
+    assert [record.snapshot.external_id for record in scoped] == [
+        "project-seed",
+        "same-project-contract",
+        "submission-only",
+        "overlap",
+    ]
+    assert scoped[1].scope_reasons == (WorkItemScopeReason.MY_PROJECT,)
+    assert scoped[2].scope_reasons == (WorkItemScopeReason.SUBMITTED_BY_ME,)
+    assert scoped[3].scope_reasons == (
+        WorkItemScopeReason.MY_PROJECT,
+        WorkItemScopeReason.SUBMITTED_BY_ME,
+    )
+
+
+def test_personal_scope_excludes_approval_and_procurement_roles_alone() -> None:
+    scoped = personal_work_item_scope(
+        (
+            _scope_snapshot(
+                "approver",
+                relations=(WorkItemRelation.APPROVER,),
+            ),
+            _scope_snapshot(
+                "procurement-manager",
+                relations=(WorkItemRelation.PROCUREMENT_MANAGER,),
+            ),
+            _scope_snapshot("unrelated"),
+        )
+    )
+
+    assert scoped == ()
+
+
+def test_personal_scope_never_joins_empty_project_numbers() -> None:
+    scoped = personal_work_item_scope(
+        (
+            _scope_snapshot(
+                "empty-manager",
+                project_no="   ",
+                relations=(WorkItemRelation.PROJECT_MANAGER,),
+            ),
+            _scope_snapshot("empty-other", project_no=""),
+        )
+    )
+
+    assert scoped == ()
 
 
 def test_purchase_follow_up_items_only_include_active_named_node() -> None:

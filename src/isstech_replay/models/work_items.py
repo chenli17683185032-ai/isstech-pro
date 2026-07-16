@@ -38,6 +38,11 @@ class WorkItemRelation(StrEnum):
     APPROVER = "approver"
 
 
+class WorkItemScopeReason(StrEnum):
+    MY_PROJECT = "my_project"
+    SUBMITTED_BY_ME = "submitted_by_me"
+
+
 class ChangeKind(StrEnum):
     NEW = "new"
     NODE_CHANGED = "node_changed"

@@ -127,9 +127,10 @@ sync service  --------------------> SQLite state/audit
 ## Evidence gates
 
 Exact GET paths for application, approval, adjustment, revocation, search, and
-Detail are runtime-captured and live-enabled. Search filter and pagination POST
-shapes are captured; the other list forms are restricted to their exact served
-read-only paths. Write-preparation pages and all mutating actions remain blocked.
+the five workflow Detail views are runtime-observed and live-enabled. Search
+filter and pagination POST shapes are captured; the other list forms are
+restricted to their exact served read-only paths. Write-preparation pages and all
+mutating actions remain blocked.
 Each of PurchaseRequisition, ProcurementContract, ProcurementOrder,
 CostConfirmation, and CheckAcceptance fails closed when its declared total cannot
 be satisfied, a page repeats, totals drift, schema changes, or the configured page

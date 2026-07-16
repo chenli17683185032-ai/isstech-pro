@@ -19,6 +19,7 @@ class ProcurementStreamSpec:
     submitted_at_field: str = ""
     status_field: str = "单据状态"
     next_approver_field: str = "下一级审批人"
+    detail_action: str = "Detail"
 
     @property
     def search_path(self) -> str:
@@ -30,6 +31,9 @@ class ProcurementStreamSpec:
         if page_size not in {10, 15, 20, 30, 50, 100}:
             raise ValueError("unsupported page size")
         return f"{self.search_path}/0/1/False/{page}/{page_size}"
+
+    def detail_path(self, external_id: str) -> str:
+        return f"/WebTP/{self.module}/{self.detail_action}/{external_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +107,7 @@ PROCUREMENT_STREAMS = (
         title_field="合同名称",
         applicant_field="填报人",
         submitted_at_field="填报日期",
+        detail_action="SearchDetail",
     ),
     ProcurementStreamSpec(
         workflow=WorkflowKind.PROCUREMENT_ORDER,
@@ -128,6 +133,7 @@ PROCUREMENT_STREAMS = (
         title_field="订单名称",
         applicant_field="填报人",
         submitted_at_field="填报日期",
+        detail_action="SearchDetail",
     ),
     ProcurementStreamSpec(
         workflow=WorkflowKind.COST_CONFIRMATION,

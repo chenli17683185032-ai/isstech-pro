@@ -229,6 +229,7 @@ def test_payload_v2_restores_relations_and_cached_detail(tmp_path: Path) -> None
     assert detail.fields == {"PR_PrjName": "REDACTED PROJECT"}
     assert detail.html_title == "REDACTED DETAIL"
     assert detail.approval_steps[0].action == "提交"
+    assert detail.approval_status == "available"
 
 
 def test_payload_v1_remains_readable_without_relations_or_cached_detail(

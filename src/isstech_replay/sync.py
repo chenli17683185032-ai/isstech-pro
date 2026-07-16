@@ -38,6 +38,7 @@ from .storage import WorkflowStorage, cached_workflow_detail
 from .validation import require_path_segment
 from .work_items import (
     is_purchase_active,
+    personal_work_item_scope,
     purchase_follow_up_items,
     snapshot_center_item,
     waiting_days_since,
@@ -460,10 +461,12 @@ def _procurement_payload(
     relations: tuple[WorkItemRelation, ...],
     previous: WorkflowSnapshot | None,
     fresh_detail: PurchaseRequisitionDetail | None = None,
+    detail_fetch_failed: bool = False,
 ) -> tuple[str, str]:
     fields = record.field_dict()
     html_title = record.workflow.label
     approval_steps: list[dict[str, str]] = []
+    approval_status = "not_fetched"
     if previous is not None:
         previous_detail = cached_workflow_detail(previous)
         if previous_detail is not None:
@@ -472,10 +475,14 @@ def _procurement_payload(
             fields = preserved_fields
             html_title = previous_detail.html_title or html_title
             approval_steps = [asdict(step) for step in previous_detail.approval_steps]
+            approval_status = previous_detail.approval_status
     if fresh_detail is not None:
         fields.update(fresh_detail.fields)
         html_title = fresh_detail.html_title or html_title
         approval_steps = [asdict(step) for step in fresh_detail.approval_steps]
+        approval_status = "available" if approval_steps else "upstream_empty"
+    elif detail_fetch_failed and approval_status == "not_fetched":
+        approval_status = "fetch_failed"
     payload = {
         "payload_version": 3,
         "adapter": record.workflow.value,
@@ -485,6 +492,7 @@ def _procurement_payload(
             "fields": fields,
             "html_title": html_title,
             "approval_steps": approval_steps,
+            "approval_status": approval_status,
         },
     }
     payload_json = json.dumps(
@@ -506,6 +514,7 @@ def procurement_snapshots(
     previous_by_id: dict[str, WorkflowSnapshot] | None = None,
     detail_by_id: dict[str, PurchaseRequisitionDetail] | None = None,
     relations_by_id: dict[str, tuple[WorkItemRelation, ...]] | None = None,
+    detail_fetch_failed_ids: set[str] | None = None,
 ) -> tuple[WorkflowSnapshot, ...]:
     spec = PROCUREMENT_STREAM_BY_WORKFLOW[result.workflow]
     snapshots = []
@@ -521,16 +530,13 @@ def procurement_snapshots(
         )
         active = is_purchase_active(record.status)
         actionable = active and bool(record.next_approver)
-        source_url = f"{base_url.rstrip('/')}{spec.search_path}"
-        if result.workflow is WorkflowKind.PURCHASE_REQUISITION:
-            source_url = (
-                f"{base_url.rstrip('/')}/WebTP/PurchaseRequisition/Detail/{external_id}"
-            )
+        source_url = f"{base_url.rstrip('/')}{spec.detail_path(external_id)}"
         payload_json, payload_hash = _procurement_payload(
             record,
             relations=relations,
             previous=previous,
             fresh_detail=(detail_by_id or {}).get(external_id),
+            detail_fetch_failed=external_id in (detail_fetch_failed_ids or set()),
         )
         snapshots.append(
             WorkflowSnapshot(
@@ -555,6 +561,21 @@ def procurement_snapshots(
             )
         )
     return tuple(snapshots)
+
+
+def _read_procurement_detail(
+    client: IsstechClient,
+    workflow: WorkflowKind,
+    external_id: str,
+) -> PurchaseRequisitionDetail | None:
+    for _ in range(_DETAIL_READ_ATTEMPTS):
+        try:
+            return client.get_procurement_document_detail(workflow, external_id)
+        except PermissionError:
+            raise
+        except Exception:
+            continue
+    return None
 
 
 def sync_procurement_stream(
@@ -603,13 +624,14 @@ def sync_procurement_stream(
             }
         detail_by_id: dict[str, PurchaseRequisitionDetail] = {}
         relations_by_id: dict[str, tuple[WorkItemRelation, ...]] = {}
+        detail_fetch_failed_ids: set[str] = set()
         if workflow is WorkflowKind.PURCHASE_REQUISITION and display_name:
             for record in result.items:
                 if not display_name_matches(record.applicant, display_name):
                     continue
-                try:
-                    detail = client.get_purchase_requisition(record.id)
-                except Exception:
+                detail = _read_procurement_detail(client, workflow, record.id)
+                if detail is None:
+                    detail_fetch_failed_ids.add(record.id)
                     continue
                 detail_by_id[record.id] = detail
                 relations_by_id[record.id] = _purchase_relations(
@@ -629,7 +651,50 @@ def sync_procurement_stream(
             previous_by_id=previous_by_id,
             detail_by_id=detail_by_id,
             relations_by_id=relations_by_id,
+            detail_fetch_failed_ids=detail_fetch_failed_ids,
         )
+        if storage is not None and not dry_run:
+            scope_source = tuple(
+                snapshot
+                for snapshot in storage.current_snapshots()
+                if snapshot.adapter is not workflow
+            ) + snapshots
+            personal_ids = {
+                record.snapshot.external_id
+                for record in personal_work_item_scope(scope_source)
+                if record.snapshot.adapter is workflow
+            }
+            records_by_id = {record.id: record for record in result.items}
+            for external_id in personal_ids:
+                if external_id in detail_by_id:
+                    continue
+                detail = _read_procurement_detail(client, workflow, external_id)
+                if detail is None:
+                    detail_fetch_failed_ids.add(external_id)
+                    continue
+                detail_fetch_failed_ids.discard(external_id)
+                detail_by_id[external_id] = detail
+                if workflow is WorkflowKind.PURCHASE_REQUISITION and display_name:
+                    record = records_by_id[external_id]
+                    relations_by_id[external_id] = _purchase_relations(
+                        PurchaseRequisitionSummary(
+                            id=record.id,
+                            creator_name=record.applicant,
+                        ),
+                        detail,
+                        display_name=display_name,
+                    )
+            snapshots = procurement_snapshots(
+                result,
+                base_url=client.settings.base_url,
+                observed_at=observed_text,
+                today=today or date.today(),
+                display_name=display_name,
+                previous_by_id=previous_by_id,
+                detail_by_id=detail_by_id,
+                relations_by_id=relations_by_id,
+                detail_fetch_failed_ids=detail_fetch_failed_ids,
+            )
         if result.total_count != len(snapshots):
             raise RuntimeError(f"{workflow.value} normalization lost records")
         work_items = tuple(snapshot_center_item(snapshot) for snapshot in snapshots)
