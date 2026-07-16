@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 import httpx
 import pytest
 
 from isstech_replay.client import IsstechClient
 from isstech_replay.policy import (
+    BIZCASE_QUERY_URL,
     EndpointPolicy,
     PolicyViolation,
     RequestClass,
@@ -280,4 +283,95 @@ def test_client_constructor_has_no_unguarded_escape_hatch() -> None:
     transport, seen = _tracking_transport()
     with pytest.raises(TypeError):
         IsstechClient(transport=transport, guard=False)  # type: ignore[call-arg]
+    assert seen == []
+
+
+def _bizcase_pagination_form() -> dict[str, str]:
+    return {
+        "__EVENTTARGET": "ctl05$GridPager1",
+        "__EVENTARGUMENT": "2",
+        "__VIEWSTATE": "OPAQUE_STATE",
+        "__VIEWSTATEGENERATOR": "ABCD1234",
+        "ctl05$GridPager1ddlPager": "1",
+    }
+
+
+def test_payment_policy_allows_only_initial_get() -> None:
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        client.get(f"{BUSINESS}/WebPMS/Payment/index")
+        for method, path in (
+            ("POST", "/WebPMS/?Length=7"),
+            ("GET", "/WebPMS/Payment/Edit/1"),
+            ("POST", "/WebPMS/Payment/DelMain"),
+            ("GET", "/WebPMS/selector/selecttype"),
+        ):
+            with pytest.raises(PolicyViolation):
+                client.request(method, f"{BUSINESS}{path}")
+    assert seen == [f"GET {BUSINESS}/WebPMS/Payment/index"]
+
+
+def test_bizcase_policy_requires_exact_query_and_body_validated_pager() -> None:
+    url = f"{BUSINESS}{BIZCASE_QUERY_URL}"
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        client.get(url)
+        client.post(url, data=_bizcase_pagination_form())
+
+    assert seen == [f"GET {url}", f"POST {url}"]
+    assert EndpointPolicy().decide("POST", url).request_class is RequestClass.BUILD_ONLY
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"__EVENTTARGET": "ctl05$dgr$ctl03$lbtnVersionNo"},
+        {"__EVENTARGUMENT": "0"},
+        {"__EVENTARGUMENT": "1000"},
+        {"ctl05$btnQuery": "QUERY"},
+        {"__VIEWSTATEGENERATOR": "not-hex"},
+    ],
+)
+def test_bizcase_policy_blocks_unapproved_postbacks_before_transport(
+    change: dict[str, str],
+) -> None:
+    url = f"{BUSINESS}{BIZCASE_QUERY_URL}"
+    form = _bizcase_pagination_form()
+    form.update(change)
+    transport, seen = _tracking_transport()
+
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.post(url, data=form)
+    assert seen == []
+
+
+def test_bizcase_policy_blocks_json_duplicate_fields_and_query_drift() -> None:
+    url = f"{BUSINESS}{BIZCASE_QUERY_URL}"
+    form = _bizcase_pagination_form()
+    duplicate_form = list(form.items()) + [("__EVENTARGUMENT", "3")]
+    transport, seen = _tracking_transport()
+
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.post(url, json=form)
+        with pytest.raises(PolicyViolation):
+            client.post(
+                url,
+                content=urlencode(duplicate_form),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        with pytest.raises(PolicyViolation):
+            client.get(url + "&oper=editfp")
+    assert seen == []
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+def test_new_module_unobserved_methods_are_blocked(method: str) -> None:
+    transport, seen = _tracking_transport()
+    with IsstechClient(transport=transport) as client:
+        with pytest.raises(PolicyViolation):
+            client.request(method, f"{BUSINESS}/WebPMS/Payment/index")
+        with pytest.raises(PolicyViolation):
+            client.request(method, f"{BUSINESS}{BIZCASE_QUERY_URL}")
     assert seen == []

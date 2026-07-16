@@ -30,7 +30,16 @@ class GuardedTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         try:
-            self.policy.assert_live_allowed(request.method, str(request.url))
+            try:
+                body: bytes | None = request.content
+            except httpx.RequestNotRead:
+                body = None
+            self.policy.assert_request_live_allowed(
+                request.method,
+                str(request.url),
+                headers=request.headers,
+                body=body,
+            )
         except PolicyViolation as exc:
             if self._on_blocked is not None:
                 self._on_blocked(request, exc)

@@ -7,10 +7,53 @@ matching rules. Unknown endpoints are denied. Some GET paths are mutating
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
 import re
+
+
+PAYMENT_INDEX_PATH = "/WebPMS/Payment/index"
+BIZCASE_QUERY_PATH = "/WebPMP/Main.aspx"
+BIZCASE_QUERY_THURL = (
+    "28^mcontrol^iss.psa.webui.bizcasemanage.bizcasequery.list^"
+    "PMP/BuiltItemM/Bizcase_title.gif^0"
+)
+BIZCASE_QUERY_URL = (
+    "/WebPMP/Main.aspx?"
+    "thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5e"
+    "PMP%2fBuiltItemM%2fBizcase_title.gif%5e0"
+)
+_BIZCASE_POSTBACK_FIELDS = frozenset(
+    {
+        "__EVENTTARGET",
+        "__EVENTARGUMENT",
+        "__VIEWSTATE",
+        "__VIEWSTATEGENERATOR",
+        "ctl03$CheckDashboard",
+        "ctl03$IsShowScorecard",
+        "ctl05$txtNo$NewCustTextBox",
+        "ctl05$txtClientName$NewCustTextBox",
+        "ctl05$txtBGName$NewCustTextBox",
+        "ctl05$txtBUName$NewCustTextBox",
+        "ctl05$ddlRevRecognitionType",
+        "ctl05$ddlStatus",
+        "ctl05$txtPrjName$TextBox1",
+        "ctl05$GridPager1ddlPager",
+    }
+)
+_BIZCASE_REQUIRED_POSTBACK_FIELDS = frozenset(
+    {
+        "__EVENTTARGET",
+        "__EVENTARGUMENT",
+        "__VIEWSTATE",
+        "__VIEWSTATEGENERATOR",
+        "ctl05$GridPager1ddlPager",
+    }
+)
+_BIZCASE_MAX_BODY_BYTES = 1024 * 1024
 
 
 class SideEffect(StrEnum):
@@ -55,6 +98,108 @@ def _compile(path_regex: str) -> re.Pattern[str]:
     return re.compile(path_regex)
 
 
+def _decision(
+    request_class: RequestClass,
+    side_effect: SideEffect,
+    action: str,
+    rule_id: str,
+    reason: str,
+) -> PolicyDecision:
+    return PolicyDecision(
+        request_class=request_class,
+        side_effect=side_effect,
+        action=action,
+        rule_id=rule_id,
+        reason=reason,
+    )
+
+
+def _exact_bizcase_query(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.path != BIZCASE_QUERY_PATH:
+        return False
+    try:
+        pairs = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=2,
+        )
+    except ValueError:
+        return False
+    return pairs == [("thUrl", BIZCASE_QUERY_THURL)]
+
+
+def _blocked_bizcase_postback(reason: str) -> PolicyDecision:
+    return _decision(
+        RequestClass.BUILD_ONLY,
+        SideEffect.UNKNOWN,
+        "bizcase.postback",
+        "bizcase.postback.blocked",
+        reason,
+    )
+
+
+def _classify_bizcase_pagination(
+    *,
+    headers: Mapping[str, str] | None,
+    body: bytes | None,
+) -> PolicyDecision:
+    if body is None:
+        return _blocked_bizcase_postback("BizCase POST requires an in-memory form body")
+    if not body or len(body) > _BIZCASE_MAX_BODY_BYTES:
+        return _blocked_bizcase_postback("BizCase form body is empty or exceeds the size limit")
+    content_type_header = next(
+        (
+            value
+            for name, value in (headers or {}).items()
+            if name.lower() == "content-type"
+        ),
+        "",
+    )
+    content_type = content_type_header.split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return _blocked_bizcase_postback("BizCase POST must be form URL encoded")
+    try:
+        encoded = body.decode("utf-8")
+        pairs = parse_qsl(
+            encoded,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=32,
+        )
+    except (UnicodeDecodeError, ValueError):
+        return _blocked_bizcase_postback("BizCase form body is malformed")
+    counts = Counter(name for name, _ in pairs)
+    names = frozenset(counts)
+    if any(count != 1 for count in counts.values()):
+        return _blocked_bizcase_postback("BizCase form contains duplicate fields")
+    if not _BIZCASE_REQUIRED_POSTBACK_FIELDS <= names:
+        return _blocked_bizcase_postback("BizCase pagination fields are incomplete")
+    if names - _BIZCASE_POSTBACK_FIELDS:
+        return _blocked_bizcase_postback("BizCase form contains an unapproved control")
+    values = dict(pairs)
+    if values["__EVENTTARGET"] != "ctl05$GridPager1":
+        return _blocked_bizcase_postback("BizCase event target is not the proven pager")
+    page = values["__EVENTARGUMENT"]
+    selected_page = values["ctl05$GridPager1ddlPager"]
+    if not re.fullmatch(r"[1-9]\d{0,2}", page) or not re.fullmatch(
+        r"[1-9]\d{0,2}", selected_page
+    ):
+        return _blocked_bizcase_postback("BizCase page values are not bounded positive integers")
+    if not values["__VIEWSTATE"] or not re.fullmatch(
+        r"[A-Fa-f0-9]{8}", values["__VIEWSTATEGENERATOR"]
+    ):
+        return _blocked_bizcase_postback("BizCase opaque state is missing or malformed")
+    return _decision(
+        RequestClass.ALLOW_LIVE,
+        SideEffect.NONE,
+        "bizcase.paginate",
+        "bizcase.pagination_post",
+        "Body-validated BizCase GridPager postback",
+    )
+
+
 def _unsafe_path_reason(path: str) -> str | None:
     """Reject path forms that an upstream server may normalize differently."""
     candidate = path
@@ -76,6 +221,84 @@ def _unsafe_path_reason(path: str) -> str | None:
 
     if "//" in candidate:
         return "Path contains an empty segment"
+    return None
+
+
+def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+
+    if path == PAYMENT_INDEX_PATH and not parsed.query:
+        if method == "GET":
+            return _decision(
+                RequestClass.ALLOW_LIVE,
+                SideEffect.NONE,
+                "payment.list",
+                "payment.index_get",
+                "Observed GET-only Payment application list",
+            )
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "payment.write_or_filter",
+            "payment.index_non_get",
+            "Payment index writes and filters are not enabled",
+        )
+
+    if re.fullmatch(r"/WebPMS/Payment/Edit/[A-Za-z0-9_-]+/?", path):
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "payment.edit",
+            "payment.edit_page",
+            "Payment Edit is write preparation",
+        )
+    if path.rstrip("/") == "/WebPMS/Payment/DelMain":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.MUTATING,
+            "payment.delete",
+            "payment.delete",
+            "Payment DelMain is mutating",
+        )
+    if path.rstrip("/") == "/WebPMS/selector/selecttype":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "payment.create_prepare",
+            "payment.create_prepare",
+            "Payment selector starts a write flow",
+        )
+    if path.rstrip("/") == "/WebPMS" and method == "POST":
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.NONE,
+            "payment.filter_unavailable",
+            "payment.broken_filter",
+            "The served Payment filter action deterministically returns HTTP 500",
+        )
+
+    if path == BIZCASE_QUERY_PATH:
+        if _exact_bizcase_query(url):
+            if method == "GET":
+                return _decision(
+                    RequestClass.ALLOW_LIVE,
+                    SideEffect.NONE,
+                    "bizcase.list",
+                    "bizcase.query_get",
+                    "Observed exact BizCase query entry",
+                )
+            if method == "POST":
+                return _blocked_bizcase_postback(
+                    "BizCase POST is blocked unless its form body proves pagination"
+                )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "bizcase.unapproved",
+            "bizcase.query_mismatch",
+            "BizCase path or query does not match the exact read-only entry",
+        )
     return None
 
 
@@ -418,6 +641,10 @@ class EndpointPolicy:
                 reason=unsafe_reason,
             )
 
+        module_decision = _module_url_decision(method_u, url)
+        if module_decision is not None:
+            return module_decision
+
         for rule in self.rules:
             if method_u not in rule.methods:
                 continue
@@ -441,6 +668,23 @@ class EndpointPolicy:
             reason="No matching allow rule; deny by default",
         )
 
+    def decide_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+    ) -> PolicyDecision:
+        decision = self.decide(method, url)
+        if (
+            method.upper() == "POST"
+            and decision.rule_id == "bizcase.postback.blocked"
+            and _exact_bizcase_query(url)
+        ):
+            return _classify_bizcase_pagination(headers=headers, body=body)
+        return decision
+
     def assert_live_allowed(self, method: str, url: str) -> PolicyDecision:
         decision = self.decide(method, url)
         if not decision.allows_transport:
@@ -449,6 +693,19 @@ class EndpointPolicy:
                 url,
                 decision,
             )
+        return decision
+
+    def assert_request_live_allowed(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+    ) -> PolicyDecision:
+        decision = self.decide_request(method, url, headers=headers, body=body)
+        if not decision.allows_transport:
+            raise PolicyViolation(method, url, decision)
         return decision
 
 
