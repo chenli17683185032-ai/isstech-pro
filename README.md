@@ -20,7 +20,7 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
-| Payment + BizCase read-only queries | Yes; independent checkpoints, failure isolation, cached lists, manual UI sync |
+| Payment + BizCase read-only queries | Yes; independent checkpoints, failure isolation, cached lists, manual/UI/scheduled sync |
 | SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
 | Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
@@ -82,9 +82,10 @@ npm run build
 The material picker uploads only to the local `/v1/materials` endpoint. The UI
 contains no iPSA create, save, submit, approve, delete, or upload action. Existing
 work-item and scheduled synchronization use only the five explicitly policy-gated
-procurement `SearchIndex` read paths. The separate business-query view manually
-syncs only the GET-only Payment index and the exact body-gated BizCase pager; its
-records do not enter `/v1/work-items/current`.
+procurement `SearchIndex` read paths, the exact body-gated Payment personal query,
+and the exact BizCase pager. Payment/BizCase keep independent checkpoints and do
+not enter `/v1/work-items/current`; their list APIs separately fail closed to the
+same personal-scope contract.
 
 ### Durable manual sync
 
@@ -118,7 +119,9 @@ data/accounts/<sha256-account-scope>/exports/YYYY-MM-DD-work-items.csv
 used in paths. Legacy `data/workflow-center.sqlite3` data is retained for audit
 but is not shown as any logged-in account's current work-item state. The sync reads
 the complete account-visible PurchaseRequisition, ProcurementContract,
-ProcurementOrder, CostConfirmation, and CheckAcceptance SearchIndex streams.
+ProcurementOrder, CostConfirmation, and CheckAcceptance SearchIndex streams, then
+uses the same authenticated client for Payment personal queries and the BizCase
+source checkpoint.
 Portal identity adds relation labels when it matches a trustworthy applicant field;
 it is not a record-discard gate. Each stream owns an independent checkpoint, so a
 declared-total mismatch, repeated/short page, schema drift, stale measurement, or
@@ -126,9 +129,10 @@ local transaction error preserves that stream's previous complete current state.
 
 ### Weekday scheduled sync
 
-The committed default is Monday-Friday at 08:30 local time. The facility is not
-activated until the account holder configures Keychain and runs the installer.
-Neither tool accepts a password command-line argument.
+The committed default is Monday-Friday at 08:30 local time. Activation requires
+local Keychain configuration and the reversible installer; neither tool accepts
+a password command-line argument. The current workstation activation state is
+recorded in `docs/unified-workflow-center-plan.md`.
 
 ```bash
 cd /Users/ethan/Documents/isstech
@@ -152,9 +156,9 @@ tail -n 20 data/logs/scheduled-sync.log
 
 Use `--hour H --minute M` on the installer to choose another local time. The
 installed plist is mode `0600` under `~/Library/LaunchAgents/`; it contains no
-username, password, Cookie, ticket, or API key. Scheduled execution calls the
-same `tools/sync_work_items.py --json --csv` path as manual sync, with a 10-second
-Keychain timeout and 15-minute sync timeout.
+username, password, Cookie, ticket, or API key. Scheduled execution calls the same
+seven-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
+login, a 10-second Keychain timeout, and a 15-minute sync timeout.
 
 The wrapper captures detailed CLI output in memory and appends only timestamp,
 run ID, status, counts, exit code, and a redacted error to

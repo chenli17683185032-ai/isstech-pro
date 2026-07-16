@@ -26,6 +26,11 @@ from isstech_replay.models.procurement import (
     ProcurementDocumentSummary,
     ProcurementListResult,
 )
+from isstech_replay.models.readonly_modules import (
+    ReadonlyModuleKind,
+    ReadonlyStreamSummary,
+    ReadonlySyncBatchResult,
+)
 from isstech_replay.models.work_items import (
     ChangeKind,
     WorkItem,
@@ -44,6 +49,39 @@ from tools import sync_work_items as cli
 
 OBSERVED_1 = datetime(2026, 7, 15, 1, 0, tzinfo=UTC)
 OBSERVED_2 = datetime(2026, 7, 16, 1, 0, tzinfo=UTC)
+
+
+def _readonly_batch(
+    *,
+    status: str = "succeeded",
+    dry_run: bool = False,
+    observed_count: int = 3,
+    changed_count: int = 2,
+) -> ReadonlySyncBatchResult:
+    return ReadonlySyncBatchResult(
+        run_id="readonly-batch",
+        status=status,
+        dry_run=dry_run,
+        started_at=OBSERVED_1.isoformat(),
+        observed_at=OBSERVED_1.isoformat(),
+        finished_at=OBSERVED_1.isoformat(),
+        source_total_count=observed_count,
+        observed_count=observed_count,
+        snapshot_count=observed_count,
+        history_rows_inserted=0 if dry_run else observed_count,
+        changed_count=changed_count,
+        streams=(
+            ReadonlyStreamSummary(
+                module=ReadonlyModuleKind.PAYMENT,
+                run_id="readonly-payment",
+                status=status,
+                source_total_count=observed_count,
+                observed_count=observed_count,
+                snapshot_count=observed_count,
+                changed_count=changed_count,
+            ),
+        ),
+    )
 
 
 def _result(
@@ -553,6 +591,16 @@ def test_cli_writes_database_summary_and_csv_with_restrictive_modes(
         "login_with_settings",
         lambda username, password: (fake_client, object()),
     )
+    readonly_calls = []
+
+    def sync_readonly(client, **kwargs):
+        assert client is fake_client
+        assert kwargs["storage"] is kwargs["scope_storage"]
+        assert kwargs["dry_run"] is False
+        readonly_calls.append(kwargs)
+        return _readonly_batch()
+
+    monkeypatch.setattr(cli, "sync_readonly_modules", sync_readonly)
 
     exit_code = cli.main(
         [
@@ -567,6 +615,12 @@ def test_cli_writes_database_summary_and_csv_with_restrictive_modes(
     payload = json.loads(captured.out)
     assert payload["status"] == "succeeded"
     assert payload["actionable_count"] == 1
+    assert payload["procurement_observed_count"] == 2
+    assert payload["readonly_observed_count"] == 3
+    assert payload["readonly_changed_count"] == 2
+    assert payload["observed_count"] == 5
+    assert payload["readonly_modules"]["run_id"] == "readonly-batch"
+    assert len(readonly_calls) == 1
     assert fake_client.closed is True
 
     scoped_dir = account_runtime_dir(tmp_path, "TEST_USER")
@@ -580,3 +634,81 @@ def test_cli_writes_database_summary_and_csv_with_restrictive_modes(
     assert summaries[0].stat().st_mode & 0o777 == 0o600
     assert exports[0].stat().st_mode & 0o777 == 0o600
     assert json.loads(summaries[0].read_text())["status"] == "succeeded"
+
+
+def test_cli_combined_dry_run_does_not_create_account_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_client = FakeClient()
+    login_calls = []
+    monkeypatch.setenv("ISSTECH_USERNAME", "TEST_USER")
+    monkeypatch.setenv("ISSTECH_PASSWORD", "TEST_PASSWORD")
+
+    def login(username: str, password: str):
+        login_calls.append((username, password))
+        return fake_client, object()
+
+    def sync_readonly(client, **kwargs):
+        assert client is fake_client
+        assert kwargs["storage"] is None
+        assert kwargs["scope_storage"] is None
+        assert kwargs["dry_run"] is True
+        return _readonly_batch(
+            status="dry_run",
+            dry_run=True,
+            observed_count=1,
+            changed_count=0,
+        )
+
+    monkeypatch.setattr(cli, "login_with_settings", login)
+    monkeypatch.setattr(cli, "sync_readonly_modules", sync_readonly)
+
+    exit_code = cli.main(["--data-dir", str(tmp_path), "--dry-run", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "dry_run"
+    assert payload["observed_count"] == 3
+    assert login_calls == [("TEST_USER", "TEST_PASSWORD")]
+    assert fake_client.closed is True
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cli_returns_nonzero_and_keeps_summary_when_readonly_is_partial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_client = FakeClient()
+    monkeypatch.setenv("ISSTECH_USERNAME", "TEST_USER")
+    monkeypatch.setenv("ISSTECH_PASSWORD", "TEST_PASSWORD")
+    monkeypatch.setattr(
+        cli,
+        "login_with_settings",
+        lambda username, password: (fake_client, object()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "sync_readonly_modules",
+        lambda client, **kwargs: _readonly_batch(
+            status="partial",
+            observed_count=1,
+            changed_count=0,
+        ),
+    )
+
+    exit_code = cli.main(["--data-dir", str(tmp_path), "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1
+    assert payload["status"] == "partial"
+    assert "status=partial" in captured.err
+    scoped_dir = account_runtime_dir(tmp_path, "TEST_USER")
+    summaries = list((scoped_dir / "runs").glob("*/summary.json"))
+    assert len(summaries) == 1
+    assert json.loads(summaries[0].read_text())["status"] == "partial"
+    storage = WorkflowStorage(scoped_dir / "workflow-center.sqlite3")
+    assert storage.table_count("workflow_current") == 2

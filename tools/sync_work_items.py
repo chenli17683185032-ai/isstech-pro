@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import asdict
 from datetime import UTC, date, datetime
 import io
 import json
@@ -17,7 +18,9 @@ from uuid import uuid4
 
 from isstech_replay.account_scope import account_database_path, account_runtime_dir
 from isstech_replay.auth import login_with_settings
-from isstech_replay.models.work_items import WorkItem, WorkflowKind
+from isstech_replay.models.readonly_modules import ReadonlySyncBatchResult
+from isstech_replay.models.work_items import SyncBatchResult, WorkItem, WorkflowKind
+from isstech_replay.readonly_sync import sync_readonly_modules
 from isstech_replay.storage import DEFAULT_DATABASE_NAME, WorkflowStorage
 from isstech_replay.sync import (
     safe_error_message,
@@ -96,9 +99,47 @@ def render_work_items_csv(items: tuple[WorkItem, ...]) -> str:
     return stream.getvalue()
 
 
+def workspace_sync_result_dict(
+    procurement: SyncBatchResult,
+    readonly: ReadonlySyncBatchResult,
+) -> dict[str, object]:
+    summary = sync_result_dict(procurement)
+    if procurement.status == "succeeded" and readonly.status == "succeeded":
+        status = "succeeded"
+    elif procurement.status == "dry_run" and readonly.status == "dry_run":
+        status = "dry_run"
+    elif procurement.status == "failed" and readonly.status == "failed":
+        status = "failed"
+    else:
+        status = "partial"
+    summary.update(
+        {
+            "status": status,
+            "dry_run": procurement.dry_run and readonly.dry_run,
+            "started_at": min(procurement.started_at, readonly.started_at),
+            "finished_at": max(procurement.finished_at, readonly.finished_at),
+            "source_total_count": (
+                procurement.source_total_count + readonly.source_total_count
+            ),
+            "observed_count": procurement.observed_count + readonly.observed_count,
+            "snapshot_count": procurement.snapshot_count + readonly.snapshot_count,
+            "history_rows_inserted": (
+                procurement.history_rows_inserted
+                + readonly.history_rows_inserted
+            ),
+            "procurement_observed_count": procurement.observed_count,
+            "procurement_event_count": len(procurement.events),
+            "readonly_observed_count": readonly.observed_count,
+            "readonly_changed_count": readonly.changed_count,
+            "readonly_modules": asdict(readonly),
+        }
+    )
+    return summary
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Read all procurement workflow pages and update local snapshots."
+        description="Read all workflow-center streams and update local snapshots."
     )
     parser.add_argument(
         "--data-dir",
@@ -141,28 +182,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_human(result: object, summary_path: Path | None, csv_path: Path | None) -> None:
-    data = sync_result_dict(result)  # type: ignore[arg-type]
+def _print_human(
+    data: dict[str, object],
+    work_items: tuple[WorkItem, ...],
+    summary_path: Path | None,
+    csv_path: Path | None,
+) -> None:
     print(f"run_id {data['run_id']}")
     print(f"status {data['status']}")
     print(f"observed_count {data['observed_count']}")
     print(f"actionable_count {data['actionable_count']}")
-    print(f"event_count {len(data['events'])}")
+    print(f"event_count {data['procurement_event_count']}")
+    print(f"readonly_observed_count {data['readonly_observed_count']}")
+    print(f"readonly_changed_count {data['readonly_changed_count']}")
     if data.get("database_path"):
         print(f"database {data['database_path']}")
     if summary_path is not None:
         print(f"summary {summary_path}")
     if csv_path is not None:
         print(f"csv {csv_path}")
-    for item in data["work_items"]:
-        waiting = item["waiting_days"] if item["waiting_days"] is not None else "unknown"
+    for item in work_items:
+        waiting = item.waiting_days if item.waiting_days is not None else "unknown"
         print(
             "todo",
-            item["reference_no"] or item["external_id"],
-            item["current_approver"],
-            item["status"],
+            item.reference_no or item.external_id,
+            item.current_approver,
+            item.status,
             f"days={waiting}",
-            item["source_url"],
+            item.source_url,
             sep="\t",
         )
 
@@ -199,14 +246,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_started_at = datetime.now(UTC)
     try:
         client, _ = login_with_settings(username, password)
+        measurement_time = datetime.now(UTC)
         result = sync_procurement_workflows(
             client,
             storage=storage,
             max_pages=args.max_pages,
             dry_run=args.dry_run,
+            observed_at=measurement_time,
             run_id=run_id,
             started_at=run_started_at,
         )
+        scope_storage = storage
+        if args.dry_run and database_path.is_file():
+            scope_storage = WorkflowStorage(database_path)
+        readonly_result = sync_readonly_modules(
+            client,
+            storage=storage,
+            scope_storage=scope_storage,
+            max_pages=args.max_pages,
+            dry_run=args.dry_run,
+            observed_at=measurement_time,
+            started_at=run_started_at,
+            run_id=f"{run_id}-readonly",
+        )
+        summary = workspace_sync_result_dict(result, readonly_result)
 
         summary_path: Path | None = None
         if not args.dry_run:
@@ -214,7 +277,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _atomic_write_text(
                 summary_path,
                 json.dumps(
-                    sync_result_dict(result),
+                    summary,
                     ensure_ascii=False,
                     indent=2,
                     sort_keys=True,
@@ -236,7 +299,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.json:
             print(
                 json.dumps(
-                    sync_result_dict(result),
+                    summary,
                     ensure_ascii=False,
                     indent=2,
                     sort_keys=True,
@@ -247,10 +310,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if csv_path is not None:
                 print(f"csv {csv_path}", file=sys.stderr)
         else:
-            _print_human(result, summary_path, csv_path)
-        if result.status != "succeeded":
+            _print_human(summary, result.work_items, summary_path, csv_path)
+        if summary["status"] not in {"succeeded", "dry_run"}:
             print(
-                f"SYNC_FAILED run_id={result.run_id} status={result.status}",
+                f"SYNC_FAILED run_id={result.run_id} status={summary['status']}",
                 file=sys.stderr,
             )
             return 1

@@ -108,10 +108,10 @@ stat -f '%Lp %N' \
 unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
-Pass criteria: dry-run leaves no new DB/run file; all five real stream runs are
-`succeeded`; every stream has `source_total_count == observed_count`; current is
-the sum of the five declared totals; all files report mode `600`; a second
-unchanged sync adds history but zero change events.
+Pass criteria: dry-run leaves no new DB/run file; all five procurement streams
+and both Payment/BizCase streams are `succeeded`; every stream has complete
+declared/observed parity; all files report mode `600`; a second unchanged sync
+adds history but zero procurement events and zero readonly changes.
 
 ## Material ingestion smoke (offline)
 
@@ -245,10 +245,10 @@ stat -f '%Lp %N' \
 ```
 
 Expected: agent is loaded with five weekday intervals, installed plist mode is
-`600`, no credential appears in the plist, and a later scheduled run writes a
-successful SQLite run under `data/accounts/<sha256-account-scope>/` plus one safe
-`scheduled-sync.log` line while the FastAPI app is closed. The raw username must
-not appear in the scoped path or log. Do not activate before Keychain is configured.
+`600`, no credential appears in the plist, and a later scheduled run writes seven
+successful stream results under `data/accounts/<sha256-account-scope>/` plus one
+safe `scheduled-sync.log` line while the FastAPI app is closed. The raw username
+must not appear in the scoped path or log. Do not activate before Keychain is configured.
 
 ## Zero write egress check
 
@@ -330,11 +330,11 @@ bash tools/first-commit.sh
 | Write previews | Inferred and non-sendable | Intercepted bodies |
 | FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | P7 write execution remains blocked |
 | SQLite snapshot/diff | Yes; five per-stream checkpoints and live 353 current | — |
-| Manual sync CLI | Yes; dry-run/JSON/CSV/non-zero failures and live run | — |
+| Manual sync CLI | Yes; seven-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
 | Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | P7 remains write-blocked |
-| Weekday scheduled sync | Facility and Keychain-backed wrapper live run verified | LaunchAgent bootstrap remains optional |
+| Weekday scheduled sync | Seven-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated gates plus credentialed read-only smoke | Write-side P7 excluded |
 

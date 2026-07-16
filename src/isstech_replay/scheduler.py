@@ -222,6 +222,15 @@ def run_scheduled_sync(
             "observed_count": int(payload["observed_count"]),
             "actionable_count": int(payload["actionable_count"]),
             "event_count": len(payload.get("events", [])),
+            "procurement_observed_count": int(
+                payload.get("procurement_observed_count", payload["observed_count"])
+            ),
+            "readonly_observed_count": int(
+                payload.get("readonly_observed_count", 0)
+            ),
+            "readonly_changed_count": int(
+                payload.get("readonly_changed_count", 0)
+            ),
         }
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         _record_failure(

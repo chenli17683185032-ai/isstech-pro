@@ -41,6 +41,7 @@ React workspace --> FastAPI /v1 --> session store --> IsstechClient
 sync service  --------------------> SQLite state/audit
      |
      +---------------------------> five complete SearchIndex streams
+     +---------------------------> Payment personal queries + BizCase source
                                          |
                                          v
                               account-visible records + relation labels
@@ -83,7 +84,7 @@ sync service  --------------------> SQLite state/audit
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / Portal identity / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
-| `tools/sync_work_items.py` | Manual/LaunchAgent-compatible sync, JSON summary, CSV export |
+| `tools/sync_work_items.py` | Seven-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
 | `tools/scheduled_sync.py` | LaunchAgent entrypoint; invokes the existing manual sync CLI |
@@ -256,7 +257,11 @@ the app window to remain open. It starts `tools/scheduled_sync.py`, which perfor
 bounded Keychain reads and launches the existing `tools/sync_work_items.py`
 subprocess with credentials only in that child environment.
 
-The child still uses the exact P3 complete-read and transactional SQLite path.
+The child still uses the exact P3 complete-read and transactional SQLite path,
+then reuses the same authenticated client and account storage for the P9.9
+Payment/BizCase checkpoints. Each of the seven streams preserves its own current
+snapshot on failure; the combined CLI status is non-success when any group is
+partial or failed.
 Launchd stdout/stderr go to `/dev/null`; the wrapper parses child JSON and writes
 only safe counts/outcome data to a mode `0600` JSON-lines log. Child stderr is
 redacted before failure logging. Keychain lookup, sync, `plutil`, and `launchctl`
@@ -265,5 +270,6 @@ commands all have explicit timeouts.
 Installation is reversible: an existing plist is copied to a mode `0600`
 `.backup`; the new plist is atomically written and linted before the old service
 is stopped. Any later bootstrap/enable/print failure restores the old file and,
-if it had been loaded, attempts to bootstrap it again. The current deployment
-does not activate this agent until runtime credentials are configured locally.
+if it had been loaded, attempts to bootstrap it again. The current workstation
+has the credential-free plist loaded for five weekday 08:30 triggers; runtime
+credentials remain only in the local Keychain.
