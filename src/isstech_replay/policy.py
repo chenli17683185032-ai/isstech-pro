@@ -57,6 +57,12 @@ BIZCASE_VIEW_PARAMS = {
         "280104",
     ),
 }
+BIZCASE_APPLICATION_URL = (
+    f"{BIZCASE_QUERY_URL}"
+    f"&url={BIZCASE_VIEW_PARAMS['application'][0]}"
+    "&urltype=mcontrol"
+    f"&helpmenucode={BIZCASE_VIEW_PARAMS['application'][1]}"
+)
 _BIZCASE_POSTBACK_FIELDS = frozenset(
     {
         "__EVENTTARGET",

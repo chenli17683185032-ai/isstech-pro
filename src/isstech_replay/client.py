@@ -33,13 +33,14 @@ from .models.purchase import (
     PurchaseView,
 )
 from .parsers.attachment import parse_attachment_list
-from .parsers.bizcase import parse_bizcase_page
+from .parsers.bizcase import parse_bizcase_application_page, parse_bizcase_page
 from .parsers.login import is_login_page
 from .parsers.payment import parse_payment_query_list
 from .parsers.portal import display_name_matches, parse_portal_display_name
 from .parsers.procurement import parse_procurement_detail, parse_procurement_list
 from .parsers.purchase import parse_purchase_detail, parse_purchase_list
 from .policy import (
+    BIZCASE_APPLICATION_URL,
     BIZCASE_QUERY_URL,
     PAYMENT_QUERY_PATH,
     EndpointPolicy,
@@ -628,6 +629,51 @@ class IsstechClient:
             total_count=len(items),
             page_count=expected_page_count,
             source_url=current.source_url,
+        )
+
+    def list_bizcase_applications(self) -> BizCaseListResult:
+        """Read the identity-bound, single-page BizCase application view."""
+        url = self._url(BIZCASE_APPLICATION_URL)
+        response = self.get(url)
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_bizcase_application_page(
+            response.text,
+            source_url=str(response.url),
+        )
+
+    def list_personal_bizcases(self, *, max_pages: int = 20) -> BizCaseListResult:
+        """Join application-scope evidence to the complete query checkpoint."""
+        applications = self.list_bizcase_applications()
+        source = self.list_all_bizcases(max_pages=max_pages)
+        source_by_id = {record.id: record for record in source.items}
+        shared_fields = (
+            "bizcase_no",
+            "client_name",
+            "profit_center_group",
+            "profit_center",
+            "project_no",
+            "project_name",
+            "revenue_recognition_type",
+        )
+        for application in applications.items:
+            matched = source_by_id.get(application.id)
+            if matched is None:
+                raise PaginationIncompleteError(
+                    "BizCase application identity is absent from the query source"
+                )
+            if any(
+                getattr(application, field) != getattr(matched, field)
+                for field in shared_fields
+            ):
+                raise PaginationIncompleteError(
+                    "BizCase application identity conflicts with the query source"
+                )
+        return replace(
+            source,
+            submitted_or_managed_ids=tuple(
+                record.id for record in applications.items
+            ),
         )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:

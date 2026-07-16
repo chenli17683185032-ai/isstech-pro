@@ -18,6 +18,20 @@ BIZCASE_HEADERS = (
     "当前审批人",
 )
 
+BIZCASE_APPLICATION_HEADERS = (
+    "序号",
+    "BizCase版本号",
+    "BizCase编号",
+    "客户名称",
+    "利润中心组",
+    "利润中心",
+    "项目编号",
+    "项目名称",
+    "收入确认类型",
+    "BizCase状态",
+    "操作",
+)
+
 BIZCASE_PAGER_TARGET = "ctl05$GridPager1"
 
 
@@ -67,4 +81,4 @@ class BizCaseListResult:
     total_count: int
     page_count: int
     source_url: str = ""
-
+    submitted_or_managed_ids: tuple[str, ...] = ()

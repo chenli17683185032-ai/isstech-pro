@@ -88,9 +88,10 @@ def _bizcase_payload(
     *,
     source_url: str,
     scope_reasons: tuple[WorkItemScopeReason, ...],
+    submitted_or_managed: bool,
 ) -> dict[str, object]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "module": ReadonlyModuleKind.BIZCASE.value,
         "id": record.id,
         "ordinal": record.ordinal,
@@ -104,6 +105,7 @@ def _bizcase_payload(
         "revenue_recognition_type": record.revenue_recognition_type,
         "current_approver": record.current_approver,
         "scope_reasons": [reason.value for reason in scope_reasons],
+        "submitted_or_managed": submitted_or_managed,
         "fields": record.field_dict(),
         "source_url": source_url,
     }
@@ -149,6 +151,13 @@ def readonly_snapshots(
     else:
         if not isinstance(result, BizCaseListResult):
             raise TypeError("BizCase sync requires BizCaseListResult")
+        evidence_ids = result.submitted_or_managed_ids
+        if len(set(evidence_ids)) != len(evidence_ids):
+            raise RuntimeError("BizCase contains duplicate joint evidence identity")
+        record_ids = {record.id for record in result.items}
+        if not set(evidence_ids).issubset(record_ids):
+            raise RuntimeError("BizCase contains an unknown joint evidence identity")
+        evidence_id_set = set(evidence_ids)
         for record in result.items:
             scope_reasons = personal_scope_reasons(
                 project_no=record.project_no,
@@ -162,6 +171,7 @@ def readonly_snapshots(
                         record,
                         source_url=result.source_url,
                         scope_reasons=scope_reasons,
+                        submitted_or_managed=record.id in evidence_id_set,
                     ),
                 )
             )
@@ -223,7 +233,7 @@ def sync_readonly_module(
                 max_pages=max_pages,
             )
         else:
-            result = client.list_all_bizcases(max_pages=max_pages)
+            result = client.list_personal_bizcases(max_pages=max_pages)
         observed_text = utc_iso(observed_at or datetime.now(UTC))
         snapshots = readonly_snapshots(
             module,

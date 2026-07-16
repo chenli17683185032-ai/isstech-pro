@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+
+import pytest
 
 from isstech_replay.models.bizcase import BizCaseListResult, BizCaseRecord
 from isstech_replay.models.payment import PaymentListResult, PaymentRecord
@@ -43,6 +46,7 @@ def _bizcase_result(
     *,
     count: int = 2,
     project_numbers: tuple[str, ...] = (),
+    submitted_or_managed_count: int = 0,
 ) -> BizCaseListResult:
     records = tuple(
         BizCaseRecord(
@@ -67,6 +71,9 @@ def _bizcase_result(
         total_count=count,
         page_count=1,
         source_url="http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=REDACTED",
+        submitted_or_managed_ids=tuple(
+            record.id for record in records[:submitted_or_managed_count]
+        ),
     )
 
 
@@ -76,12 +83,16 @@ class FakeReadonlyClient:
         *,
         payment_status: str = "已保存",
         bizcase_count: int = 2,
+        bizcase_submitted_or_managed_count: int = 1,
         fail_payment: bool = False,
         fail_bizcase: bool = False,
         fail_identity: bool = False,
     ) -> None:
         self.payment_status = payment_status
         self.bizcase_count = bizcase_count
+        self.bizcase_submitted_or_managed_count = (
+            bizcase_submitted_or_managed_count
+        )
         self.fail_payment = fail_payment
         self.fail_bizcase = fail_bizcase
         self.fail_identity = fail_identity
@@ -105,11 +116,14 @@ class FakeReadonlyClient:
             raise RuntimeError("payment unavailable")
         return _payment_result(status=self.payment_status)
 
-    def list_all_bizcases(self, *, max_pages: int) -> BizCaseListResult:
+    def list_personal_bizcases(self, *, max_pages: int) -> BizCaseListResult:
         assert max_pages == 20
         if self.fail_bizcase:
             raise RuntimeError("bizcase unavailable")
-        return _bizcase_result(count=self.bizcase_count)
+        return _bizcase_result(
+            count=self.bizcase_count,
+            submitted_or_managed_count=self.bizcase_submitted_or_managed_count,
+        )
 
 
 def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) -> None:
@@ -146,6 +160,14 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
     )
     assert payment_payload["payment_no"] == "PAYMENT-REDACTED-1"
     assert payment_payload["scope_reasons"] == ["submitted_by_me"]
+    bizcase_payloads = [
+        json.loads(snapshot.payload_json)
+        for snapshot in storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)
+    ]
+    assert [payload["submitted_or_managed"] for payload in bizcase_payloads] == [
+        True,
+        False,
+    ]
 
 
 def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
@@ -153,6 +175,7 @@ def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
         ReadonlyModuleKind.BIZCASE,
         _bizcase_result(
             project_numbers=(" PROJECT-1 ", "PROJECT-OTHER"),
+            submitted_or_managed_count=2,
         ),
         observed_at="2026-07-16T01:00:00+00:00",
         project_numbers=("PROJECT-1",),
@@ -161,6 +184,23 @@ def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:
     payloads = [json.loads(snapshot.payload_json) for snapshot in snapshots]
     assert payloads[0]["scope_reasons"] == ["my_project"]
     assert payloads[1]["scope_reasons"] == []
+    assert payloads[0]["submitted_or_managed"] is True
+    assert payloads[1]["submitted_or_managed"] is True
+
+
+def test_bizcase_snapshots_reject_unknown_joint_evidence_identity() -> None:
+    result = _bizcase_result(count=1)
+    invalid = replace(
+        result,
+        submitted_or_managed_ids=("BC-REDACTED-999-V001",),
+    )
+
+    with pytest.raises(RuntimeError, match="joint evidence identity"):
+        readonly_snapshots(
+            ReadonlyModuleKind.BIZCASE,
+            invalid,
+            observed_at="2026-07-16T01:00:00+00:00",
+        )
 
 
 def test_identity_failure_does_not_block_bizcase_checkpoint(tmp_path: Path) -> None:

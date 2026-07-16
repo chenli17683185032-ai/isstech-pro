@@ -87,6 +87,10 @@ def _bizcase_html(page: int) -> str:
     return (FIXTURES_BIZCASE / f"page{page}.html").read_text(encoding="utf-8")
 
 
+def _bizcase_application_html() -> str:
+    return (FIXTURES_BIZCASE / "application.html").read_text(encoding="utf-8")
+
+
 def _portal_html() -> str:
     return (
         '<div id="AccountGreetings"><div id="Greeting">'
@@ -168,6 +172,12 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
     if host == "ipsapro.isstech.com" and path == "/WebPMS/payment/QueryListBySearch":
         return httpx.Response(200, text=_payment_query_html(), request=request)
     if host == "ipsapro.isstech.com" and path == "/WebPMP/Main.aspx":
+        if request.url.params.get("helpmenucode") == "280101":
+            return httpx.Response(
+                200,
+                text=_bizcase_application_html(),
+                request=request,
+            )
         page = 1
         if request.method == "POST":
             body = httpx.QueryParams(request.content.decode())
@@ -509,7 +519,7 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
         )
         monkeypatch.setattr(
             IsstechClient,
-            "list_all_bizcases",
+            "list_personal_bizcases",
             unexpected_upstream_call,
         )
         payment = client.get("/v1/readonly-modules/payment", headers=headers)
@@ -542,11 +552,16 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert payment.json()["items"][0]["scope_reasons"] == ["submitted_by_me"]
     assert bizcases.status_code == 200
     assert bizcases.json()["source_total_count"] == 3
-    assert bizcases.json()["total_count"] == 0
-    assert bizcases.json()["items"] == []
+    assert bizcases.json()["total_count"] == 2
+    assert len(bizcases.json()["items"]) == 2
     assert bizcases.json()["submitted_by_me_count"] == 0
     assert bizcases.json()["my_project_count"] == 0
     assert bizcases.json()["managed_by_me_count"] == 0
+    assert bizcases.json()["submitted_or_managed_count"] == 2
+    assert all(
+        item["submitted_or_managed"] is True
+        for item in bizcases.json()["items"]
+    )
     assert runs.status_code == 200
     assert len(runs.json()) == 4
     assert after.status_code == 200

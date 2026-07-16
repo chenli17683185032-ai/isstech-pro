@@ -12,6 +12,7 @@ const emptyReadonlyData = {
     my_project_count: 0,
     submitted_by_me_count: 0,
     managed_by_me_count: 0,
+    submitted_or_managed_count: 0,
     items: [],
   },
   bizcases: {
@@ -24,6 +25,7 @@ const emptyReadonlyData = {
     my_project_count: 0,
     submitted_by_me_count: 0,
     managed_by_me_count: 0,
+    submitted_or_managed_count: 0,
     items: [],
   },
   runs: [],

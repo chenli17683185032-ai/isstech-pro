@@ -7,8 +7,14 @@ import httpx
 import pytest
 
 from isstech_replay.client import IsstechClient, PaginationIncompleteError
-from isstech_replay.parsers.bizcase import parse_bizcase_page
-from isstech_replay.policy import BIZCASE_QUERY_THURL
+from isstech_replay.parsers.bizcase import (
+    parse_bizcase_application_page,
+    parse_bizcase_page,
+)
+from isstech_replay.policy import (
+    BIZCASE_APPLICATION_URL,
+    BIZCASE_QUERY_THURL,
+)
 
 
 FIXTURES = Path("tests/fixtures/bizcase")
@@ -16,6 +22,59 @@ FIXTURES = Path("tests/fixtures/bizcase")
 
 def _html(page: int = 1) -> str:
     return (FIXTURES / f"page{page}.html").read_text(encoding="utf-8")
+
+
+def _application_html() -> str:
+    return (FIXTURES / "application.html").read_text(encoding="utf-8")
+
+
+def test_bizcase_application_parser_reads_complete_single_page() -> None:
+    result = parse_bizcase_application_page(
+        _application_html(),
+        source_url="http://example.test/bizcase-application",
+    )
+
+    assert result.total_count == 2
+    assert result.page_count == 1
+    assert [item.ordinal for item in result.items] == [1, 2]
+    assert [item.id for item in result.items] == [
+        "BC-REDACTED-001-V001",
+        "BC-REDACTED-003-V001",
+    ]
+    assert result.items[0].field_dict()["BizCase状态"] == "已保存"
+
+
+def test_bizcase_application_parser_fails_closed_on_drift_or_pager() -> None:
+    with pytest.raises(ValueError, match="application schema changed"):
+        parse_bizcase_application_page(
+            _application_html().replace("BizCase状态", "UNKNOWN", 1)
+        )
+
+    duplicate = _application_html().replace(
+        "BC-REDACTED-003",
+        "BC-REDACTED-001",
+    )
+    with pytest.raises(ValueError, match="duplicate stable identity"):
+        parse_bizcase_application_page(duplicate)
+
+    paged = _application_html().replace(
+        "</form>",
+        (
+            '<select name="ctl05$GridPager1ddlPager">'
+            '<option selected value="1">1</option><option value="2">2</option>'
+            "</select></form>"
+        ),
+    )
+    with pytest.raises(ValueError, match="single page"):
+        parse_bizcase_application_page(paged)
+
+    scope_drift = _application_html().replace(
+        'name="__VIEWSTATE" value="',
+        'name="__VIEWSTATE" value="Tk9fUEVSU09OQUxfU0NPUEU=ignored-',
+        1,
+    )
+    with pytest.raises(ValueError, match="personal scope predicate changed"):
+        parse_bizcase_application_page(scope_drift)
 
 
 def test_bizcase_parser_reads_fixed_schema_and_opaque_state() -> None:
@@ -107,6 +166,58 @@ def test_bizcase_client_replays_sequential_pager_and_collects_all_rows() -> None
     assert result.page_count == 2
     assert [item.ordinal for item in result.items] == [1, 2, 3]
     assert seen == [("GET", "", ""), ("POST", "ctl05$GridPager1", "2")]
+
+
+def test_bizcase_client_intersects_application_evidence_with_query_source() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = parse_qs(request.url.query.decode())
+        if str(request.url).endswith(BIZCASE_APPLICATION_URL):
+            assert request.method == "GET"
+            seen.append(("application", request.method))
+            return httpx.Response(200, text=_application_html(), request=request)
+        assert query == {"thUrl": [BIZCASE_QUERY_THURL]}
+        seen.append(("query", request.method))
+        return httpx.Response(
+            200,
+            text=_html(1 if request.method == "GET" else 2),
+            request=request,
+        )
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        result = client.list_personal_bizcases(max_pages=2)
+
+    assert result.total_count == 3
+    assert result.submitted_or_managed_ids == (
+        "BC-REDACTED-001-V001",
+        "BC-REDACTED-003-V001",
+    )
+    assert seen == [
+        ("application", "GET"),
+        ("query", "GET"),
+        ("query", "POST"),
+    ]
+
+
+def test_bizcase_client_rejects_application_record_missing_from_query_source() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith(BIZCASE_APPLICATION_URL):
+            html = _application_html().replace(
+                "BC-REDACTED-003-V001",
+                "BC-REDACTED-999-V001",
+                1,
+            ).replace("BC-REDACTED-003", "BC-REDACTED-999", 1)
+            return httpx.Response(200, text=html, request=request)
+        return httpx.Response(
+            200,
+            text=_html(1 if request.method == "GET" else 2),
+            request=request,
+        )
+
+    with IsstechClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PaginationIncompleteError, match="application identity"):
+            client.list_personal_bizcases(max_pages=2)
 
 
 def test_bizcase_client_rejects_page_count_drift_and_max_page_limit() -> None:

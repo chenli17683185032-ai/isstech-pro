@@ -148,6 +148,7 @@ export default function ReadonlyModulesView({
             <span>我申请</span><strong>{current.submitted_by_me_count}</strong>
             <span>我的项目</span><strong>{current.my_project_count}</strong>
             <span>我管理</span><strong>{current.managed_by_me_count}</strong>
+            <span>申请/管理</span><strong>{current.submitted_or_managed_count}</strong>
           </p>
         </div>
 

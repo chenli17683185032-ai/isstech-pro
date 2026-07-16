@@ -52,6 +52,7 @@ class BizCaseRecordOut(BaseModel):
     revenue_recognition_type: str = ""
     current_approver: str = ""
     scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
+    submitted_or_managed: bool = False
     fields: dict[str, str] = Field(default_factory=dict)
     source_url: str = ""
 
@@ -81,6 +82,7 @@ class BizCaseListOut(BaseModel):
     my_project_count: int = 0
     submitted_by_me_count: int = 0
     managed_by_me_count: int = 0
+    submitted_or_managed_count: int = 0
     items: list[BizCaseRecordOut] = Field(default_factory=list)
 
 
@@ -166,17 +168,27 @@ def _payload_scope_reasons(
 
 def _personal_payloads(
     payloads: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], dict[WorkItemScopeReason, int]]:
+    *,
+    allow_submitted_or_managed: bool = False,
+) -> tuple[list[dict[str, object]], dict[WorkItemScopeReason, int], int]:
     personal = []
     counts = {reason: 0 for reason in WorkItemScopeReason}
+    submitted_or_managed_count = 0
     for payload in payloads:
         reasons = _payload_scope_reasons(payload)
-        if not reasons:
+        submitted_or_managed = payload.get("submitted_or_managed", False)
+        if not isinstance(submitted_or_managed, bool):
+            raise ValueError("invalid cached BizCase joint scope evidence")
+        if submitted_or_managed and not allow_submitted_or_managed:
+            raise ValueError("joint scope evidence is not valid for this module")
+        if not reasons and not submitted_or_managed:
             continue
         personal.append(payload)
         for reason in reasons:
             counts[reason] += 1
-    return personal, counts
+        if submitted_or_managed:
+            submitted_or_managed_count += 1
+    return personal, counts, submitted_or_managed_count
 
 
 @router.post("/readonly-modules/sync", response_model=ReadonlySyncOut)
@@ -237,7 +249,7 @@ def list_payment_records(
 ) -> PaymentListOut:
     try:
         cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.PAYMENT)
-        payloads, counts = _personal_payloads(cached)
+        payloads, counts, _ = _personal_payloads(cached)
         items = [PaymentRecordOut.model_validate(payload) for payload in payloads]
     except Exception as exc:
         raise local_storage_error(f"payment cache read failed: {type(exc).__name__}") from exc
@@ -258,7 +270,10 @@ def list_bizcases(
 ) -> BizCaseListOut:
     try:
         cached, latest = _current_payloads(_storage(session), ReadonlyModuleKind.BIZCASE)
-        payloads, counts = _personal_payloads(cached)
+        payloads, counts, submitted_or_managed_count = _personal_payloads(
+            cached,
+            allow_submitted_or_managed=True,
+        )
         items = sorted(
             (BizCaseRecordOut.model_validate(payload) for payload in payloads),
             key=lambda item: item.ordinal,
@@ -272,6 +287,7 @@ def list_bizcases(
         my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
         submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
         managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
+        submitted_or_managed_count=submitted_or_managed_count,
         items=items,
     )
 
