@@ -9,8 +9,9 @@
 | 计划版本 | `v1.8` |
 | 最后更新 | `2026-07-16` |
 | 仓库 | `/Users/ethan/Documents/isstech` |
+| GitHub | `https://github.com/chenli17683185032-ai/isstech-pro` |
 | 基线提交 | `5a7ed71 Implement policy-gated Purchase Requisition replay baseline.` |
-| 当前分支 | `main` |
+| 当前分支 | `main`，跟踪 `origin/main` |
 | 当前总阶段 | `P9.7 五类流程栏目语义修复已完成` |
 | 当前安全模式 | `CTF_SAFE` |
 | 计划维护规则 | 每完成一个门禁，立即更新本文件的状态、结果、文件和下一步 |
@@ -1964,14 +1965,14 @@ displayed = submitted_by_me OR my_project
 
 1. 运行全量 pytest、Ruff、OpenAPI、秘密/证据、Vite、wheel 和 diff 门禁。
 2. Browser 验证五类流程选项、采购订单空态、个人总数 32、桌面布局和 console。
-3. 更新本节实际结果并提交本地 `main`；无 Git remote 时不猜测 GitHub 地址。
+3. 更新本节实际结果，提交 `main` 并推送账号持有人指定的 GitHub 远端。
 
 完成门禁：五类流程栏目语义可解释、个人数据无越界、空流程可重复验证、代码可回滚。
 
 实际结果：`298 passed`；Ruff、OpenAPI、秘密扫描、证据哈希和权限、Vite 生产构建、
 wheel、plist 与 `git diff --check` 全部通过。桌面端恢复为“全部流程”后为 32 行；本地
-服务运行于 `127.0.0.1:8000`。仓库无 Git remote，因此只完成本地 `main` 阶段提交，
-不猜测或创建 GitHub 远端。
+服务运行于 `127.0.0.1:8000`。实现提交 `eb7eb25` 已推送至账号持有人明确指定的
+`chenli17683185032-ai/isstech-pro` 仓库 `main`；本地分支已跟踪 `origin/main`。
 
 ### 回滚
 
