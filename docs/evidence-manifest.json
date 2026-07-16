@@ -1,7 +1,7 @@
 {
   "version": 2,
   "project": "isstech-replay",
-  "generatedAt": "2026-07-15T04:44:35Z",
+  "generatedAt": "2026-07-16T09:55:14Z",
   "notes": [
     "Hashes are SHA-256 of on-disk bytes at inventory time.",
     "Raw and login-fail artifacts are gitignored; hashes still pin them for operators with local copies.",
@@ -230,6 +230,92 @@
       "description": "Read-only revocation-list page and actively served form structure"
     },
     {
+      "path": "captures/raw/20260716-payment-index-initial.html",
+      "sha256": "d9b1cf2c922a3ee7f47df543708137d4ff7e0d2500ebc6f1462cfc092e1471f4",
+      "source": "Authenticated Chrome GET /WebPMS/Payment/index",
+      "capturedAt": "2026-07-16T09:06:16Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Payment application list, fixed headers, served query form, pager, and blocked edit/delete/add shapes"
+    },
+    {
+      "path": "captures/raw/20260716-payment-empty-query-native-controls.html",
+      "sha256": "8ad314b465ba0255ee549d429de32f3cebfa93b6fc6a56adeb0f71082ec4352e",
+      "source": "Direct HTTP replay of Payment form native successful controls",
+      "capturedAt": "2026-07-16T09:50:00Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Deterministic HTTP 500 NullReferenceException from the actively served search action; no credentials or Cookie values persisted"
+    },
+    {
+      "path": "captures/raw/20260716-bizcase-query-initial.html",
+      "sha256": "a607c9f7e911974bbe08bdaa72d0141258a96342a5175d2e9f4eccbdf7994f31",
+      "source": "Authenticated Chrome GET of the exact WebPMP BizCase query URL",
+      "capturedAt": "2026-07-16T09:18:08Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "WebForms list schema, hidden fields, first-page rows, pager, and postback shapes"
+    },
+    {
+      "path": "captures/raw/20260716-bizcase-query-page-2.html",
+      "sha256": "2b24ba8ebb149382ce78e54cce20a030df0771882b9618f984e2950680198f41",
+      "source": "Authenticated Chrome pagination postback to BizCase page 2",
+      "capturedAt": "2026-07-16T09:45:00Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "HTTP 200 page 2 with ten rows; opaque ViewState remains raw-only"
+    },
+    {
+      "path": "captures/raw/20260716-bizcase-query-page-2-pure-http.html",
+      "sha256": "5403041d4c11b3cc37924e29aee4a4c4b81399968962f4430a2ebbdba14a7491",
+      "source": "Direct HTTP replay of the captured BizCase page-2 postback",
+      "capturedAt": "2026-07-16T09:52:00Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "Browser-independent HTTP 200 page 2 with ordinals 11 through 20; Cookie values remained in memory"
+    },
+    {
+      "path": "captures/raw/20260716-bizcase-query-page-6-pure-http.html",
+      "sha256": "f4d2cc99818c3cd74f509e9b782f79f198ad63c6bd85c3f5f617aac0c94ff73b",
+      "source": "Direct HTTP replay of the BizCase last-page postback",
+      "capturedAt": "2026-07-16T09:54:00Z",
+      "sensitivity": "high",
+      "status": "active",
+      "git": "ignored",
+      "expectedMode": "0600",
+      "description": "HTTP 200 page 6 with five rows and terminal ordinal 55"
+    },
+    {
+      "path": "captures/redacted/payment-index-protocol.json",
+      "sha256": "9ffb2f6c51b8c86716001cf09d3fad97f6e500d86508d314e4a4da05478e38a3",
+      "source": "Reviewed schema and runtime decisions derived from local-only Payment captures",
+      "capturedAt": "2026-07-16T09:55:14Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Field names, headers, counts, HTTP statuses, GET-only decision, and blocked write paths"
+    },
+    {
+      "path": "captures/redacted/bizcase-query-protocol.json",
+      "sha256": "7f1130a568c668ac26b8d0a2472eb4798b7c672d4a4829db19886cb279fe9ee1",
+      "source": "Reviewed schema and runtime decisions derived from local-only BizCase captures",
+      "capturedAt": "2026-07-16T09:55:14Z",
+      "sensitivity": "low",
+      "status": "active",
+      "git": "tracked",
+      "description": "Fixed list schema, pagination event shape, 55-row count, pure-HTTP proof, and blocked detail decision"
+    },
+    {
       "path": "captures/redacted/login-success-protocol.json",
       "sha256": "1fdf9c7b09024cd543b44d46fb2e51b7b6a034fe1a81fcffd89f9ee9f207c8c4",
       "source": "tools/redact_login_cdp.py applied to 20260715-login-attempt-01.cdp.json",
@@ -281,6 +367,11 @@
     }
   ],
   "gaps": [
+    {
+      "id": "payment-filter-pagination",
+      "neededPath": "a future served Payment search or pager action that returns a successful read-only response",
+      "reason": "The current served POST /WebPMS/?Length=7 deterministically returns HTTP 500; the GET-only adapter must fail closed if the initial page ever declares more rows than it contains"
+    },
     {
       "id": "pure-http-live-smoke",
       "neededPath": "runtime environment variables only; no credential artifact may be saved",

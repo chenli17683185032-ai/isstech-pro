@@ -116,6 +116,37 @@ four returned the same six approval-trail columns. The local sync enriches only
 the derived personal scope; a 2026-07-16 replay classified all 32 personal rows,
 with 30 non-empty trails and two upstream-empty trails.
 
+## Payment application list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial payment application list | GET | `/WebPMS/Payment/index` | None | observed, HTTP 200 | `captures/raw/20260716-payment-index-initial.html`, redacted protocol JSON |
+| Served search form | POST | `/WebPMS/?Length=7` | Intended read-only filter | replayed twice, HTTP 500 | native successful-control replay; deterministic `NullReferenceException` |
+| Edit payment | GET | `/WebPMS/Payment/Edit/{id}` | Write preparation | served-shape; blocked | initial page script |
+| Delete payment | POST | `/WebPMS/Payment/DelMain` | **Mutating** | blocked-write | initial page script |
+| Add payment | GET | `/WebPMS/selector/selecttype` | Write preparation | served-shape; blocked | initial page script |
+
+The initial page declared one row and one page. Because the actively served
+search action deterministically fails upstream, the adapter is GET-only and
+fails closed whenever the declared total differs from the current-page row
+count. No Payment detail endpoint is enabled: the only row action is Edit.
+
+## BizCase query list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial BizCase list | GET | exact `/WebPMP/Main.aspx?thUrl=28%5e...%5e0` | None | observed, HTTP 200 | `captures/raw/20260716-bizcase-query-initial.html`, redacted protocol JSON |
+| Page postback | POST | same exact `Main.aspx?thUrl=...` | Read-only pagination | observed and pure-HTTP replayed, HTTP 200 | page 2 and page 6 raw captures |
+| Version-number postback | POST | same path, `ctl05$dgr$ctlNN$lbtnVersionNo` | Opens mixed edit-capable form | observed once; blocked in adapter | response action contains `oper=editfp`; submit controls present |
+| Advanced query | POST | same path, `ctl05$cbtnAdQuery` | Unknown | blocked | served form only |
+
+The observed list contains 55 rows over six pages: 10 rows on pages 1-5 and
+five rows on page 6. Pagination posts carry opaque ViewState unchanged and set
+`__EVENTTARGET=ctl05$GridPager1` with a numeric page argument. Since WebForms
+uses the same URL for query, pagination, detail, and potentially writes, POST is
+allowed only after request-body validation; path-only POST allowlisting is
+insufficient.
+
 ## Attachments
 
 | Action | Method | Endpoint | Side effect | State | Evidence |
@@ -151,3 +182,5 @@ future shape discovery must use request-stage pause plus abort and remain in
    broader controller-prefix allowlist.
 5. The remaining protocol gap is intercepted-and-aborted write shape; runtime
    credentials and authenticated response bodies remain intentionally uncommitted.
+6. WebForms endpoints that multiplex actions on one URL require body-aware
+   policy checks. Unknown event targets and submit controls default to deny.

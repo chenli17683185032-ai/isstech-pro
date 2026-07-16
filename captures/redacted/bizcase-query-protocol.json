@@ -1,0 +1,239 @@
+{
+  "capturedAt": "2026-07-16",
+  "entry": {
+    "method": "GET",
+    "url": "http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5ePMP%2fBuiltItemM%2fBizcase_title.gif%5e0",
+    "status": 200,
+    "contentType": "text/html"
+  },
+  "form": {
+    "method": "POST",
+    "action": "Main.aspx?thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5ePMP%2fBuiltItemM%2fBizcase_title.gif%5e0",
+    "fields": [
+      {
+        "name": "__EVENTTARGET",
+        "id": "__EVENTTARGET",
+        "type": "hidden"
+      },
+      {
+        "name": "__EVENTARGUMENT",
+        "id": "__EVENTARGUMENT",
+        "type": "hidden"
+      },
+      {
+        "name": "__VIEWSTATE",
+        "id": "__VIEWSTATE",
+        "type": "hidden"
+      },
+      {
+        "name": "__VIEWSTATEGENERATOR",
+        "id": "__VIEWSTATEGENERATOR",
+        "type": "hidden"
+      },
+      {
+        "name": "ctl03$CheckDashboard",
+        "id": "ctl03_CheckDashboard",
+        "type": "hidden"
+      },
+      {
+        "name": "ctl03$IsShowScorecard",
+        "id": "ctl03_IsShowScorecard",
+        "type": "hidden"
+      },
+      {
+        "name": "ctl05$txtNo$NewCustTextBox",
+        "id": "ctl05_txtNo_NewCustTextBox",
+        "type": "text"
+      },
+      {
+        "name": "ctl05$btnQuery",
+        "id": "ctl05_btnQuery",
+        "type": "submit"
+      },
+      {
+        "name": "ctl05$cbtnAdQuery",
+        "id": "ctl05_cbtnAdQuery",
+        "type": "submit"
+      },
+      {
+        "name": "ctl05$txtClientName$NewCustTextBox",
+        "id": "ctl05_txtClientName_NewCustTextBox",
+        "type": "text"
+      },
+      {
+        "name": "ctl05$txtBGName$NewCustTextBox",
+        "id": "ctl05_txtBGName_NewCustTextBox",
+        "type": "text"
+      },
+      {
+        "name": "ctl05$txtBUName$NewCustTextBox",
+        "id": "ctl05_txtBUName_NewCustTextBox",
+        "type": "text"
+      },
+      {
+        "name": "ctl05$ddlRevRecognitionType",
+        "id": "ctl05_ddlRevRecognitionType",
+        "type": "select",
+        "optionCount": 11
+      },
+      {
+        "name": "ctl05$ddlStatus",
+        "id": "ctl05_ddlStatus",
+        "type": "select",
+        "optionCount": 5
+      },
+      {
+        "name": "ctl05$txtPrjName$TextBox1",
+        "id": "ctl05_txtPrjName_TextBox1",
+        "type": "text"
+      },
+      {
+        "name": "ctl05$GridPager1ddlPager",
+        "id": "ctl05_GridPager1ddlPager",
+        "type": "select",
+        "optionCount": 6
+      },
+      {
+        "name": "ctl05$GridPager1",
+        "id": null,
+        "type": "Submit"
+      },
+      {
+        "name": null,
+        "id": "btnQueryForKeyDown",
+        "type": "hidden"
+      }
+    ]
+  },
+  "list": {
+    "headers": [
+      "序号",
+      "BizCase版本号",
+      "BizCase编号",
+      "客户名称",
+      "利润中心组",
+      "利润中心",
+      "项目编号",
+      "项目名称",
+      "收入确认类型",
+      "当前审批人"
+    ],
+    "currentPageRows": 10,
+    "completeCount": 55,
+    "pageOptions": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6"
+    ],
+    "detailPostbackTargetShape": "ctl05$dgr$ctlNN$lbtnVersionNo"
+  },
+  "pagination": {
+    "method": "POST",
+    "eventTarget": "ctl05$GridPager1",
+    "eventArgumentShape": "1..pageCount",
+    "requiredOpaqueFields": [
+      "__VIEWSTATE",
+      "__VIEWSTATEGENERATOR"
+    ],
+    "page2": {
+      "status": 200,
+      "rowCount": 10,
+      "firstOrdinal": 11,
+      "lastOrdinal": 20
+    },
+    "lastPage": {
+      "page": 6,
+      "status": 200,
+      "rowCount": 5,
+      "firstOrdinal": 51,
+      "lastOrdinal": 55
+    },
+    "pureHttpReplay": "confirmed outside browser with the same authenticated cookie scope"
+  },
+  "detailDecision": {
+    "observedPostbackTargetShape": "ctl05$dgr$ctlNN$lbtnVersionNo",
+    "responseStatus": 200,
+    "responseFormActionShape": "Main.aspx?...&oper=editfp&fowd=True&&BC_ID={numeric}&...",
+    "enabledSubmitControlsPresent": true,
+    "classification": "blocked-write-preparation",
+    "decision": "MVP exposes list rows only; no detail postback is transported"
+  },
+  "transportDecision": {
+    "get": "allow exact Main.aspx thUrl query",
+    "post": "allow only body-validated ctl05$GridPager1 numeric pagination postbacks",
+    "blockedPostbacks": [
+      "ctl05$dgr$ctlNN$lbtnVersionNo",
+      "ctl05$cbtnAdQuery",
+      "all unknown submit controls"
+    ]
+  },
+  "commands": [
+    {
+      "name": "ctl05$btnQuery",
+      "label": "查询",
+      "classification": "read-only-candidate"
+    },
+    {
+      "name": "ctl05$cbtnAdQuery",
+      "label": "高级查询",
+      "classification": "unknown-blocked"
+    },
+    {
+      "name": "ctl05$GridPager1",
+      "label": "GO",
+      "classification": "body-validated-read-only"
+    }
+  ],
+  "observedNetwork": [
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5ePMP%2fBuiltItemM%2fBizcase_title.gif%5e0",
+      "type": "Document"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=28%5emcontrol%5eiss.psa.webui.bizcasemanage.bizcasequery.list%5ePMP%2fBuiltItemM%2fBizcase_title.gif%5e0",
+      "status": 200,
+      "type": "Document",
+      "mimeType": "text/html"
+    },
+    {
+      "kind": "request",
+      "method": "POST",
+      "url": "http://ipsapro.isstech.com/portal/ajax/getNavBar",
+      "type": "XHR"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/portal/ajax/getNavBar",
+      "status": 200,
+      "type": "XHR",
+      "mimeType": "text/html"
+    },
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMP/Common/Script/My97Calendar/My97DatePicker.htm",
+      "type": "Document"
+    },
+    {
+      "kind": "request",
+      "method": "POST",
+      "url": "http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=REDACTED_FIXED_BIZCASE_QUERY",
+      "type": "Document",
+      "eventTarget": "ctl05$GridPager1",
+      "eventArgument": "2"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMP/Main.aspx?thUrl=REDACTED_FIXED_BIZCASE_QUERY",
+      "status": 200,
+      "type": "Document",
+      "mimeType": "text/html"
+    }
+  ]
+}

@@ -1,0 +1,220 @@
+{
+  "capturedAt": "2026-07-16",
+  "entry": {
+    "method": "GET",
+    "url": "http://ipsapro.isstech.com/WebPMS/Payment/index",
+    "status": 200,
+    "contentType": "text/html"
+  },
+  "form": {
+    "method": "POST",
+    "action": "/WebPMS/?Length=7",
+    "fields": [
+      {
+        "name": "PM_ApplyNo",
+        "id": "PM_ApplyNo",
+        "type": "text"
+      },
+      {
+        "name": "PM_SDName",
+        "id": "PM_SDName",
+        "type": "text"
+      },
+      {
+        "name": "PM_PayType",
+        "id": "PM_PayType",
+        "type": "select",
+        "options": [
+          "--全部--",
+          "A.项目第三方软硬件采购",
+          "B.项目第三方其他服务采购",
+          "D.非第三方采购（含无合同）",
+          "Q.代理机构(社保公积金)",
+          "R.自缴(社保)",
+          "S.自缴(公积金)",
+          "T.社保公积金代理费",
+          "U.生育报销/津贴",
+          "V.员工社保公积金代扣代缴",
+          "W.商业保险",
+          "O.员工借款",
+          "P.员工报销",
+          "H.固定资产/装修",
+          "L.税金支付",
+          "M.日常固定支出(水电/物业/房租/保安保洁/租车)",
+          "F.支付投资/并购款",
+          "G.定期付款",
+          "Z.关联方支付（停用）",
+          "Y.履约保证金",
+          "N.其他支出",
+          "C.投标保证金",
+          "K.项目性/非项目性关联方交易支付",
+          "UA.生育报销",
+          "UB.生育津贴",
+          "EA.员工工资",
+          "EB.员工奖金",
+          "EC.离职补偿金"
+        ]
+      },
+      {
+        "name": "PaymentType",
+        "id": "PaymentType",
+        "type": "hidden"
+      },
+      {
+        "name": "PM_ProjectNo",
+        "id": "PM_ProjectNo",
+        "type": "text"
+      },
+      {
+        "name": "PM_Status",
+        "id": "PM_Status",
+        "type": "select",
+        "options": [
+          "不限",
+          "已保存",
+          "审批拒绝"
+        ]
+      },
+      {
+        "name": "Status",
+        "id": "Status",
+        "type": "hidden"
+      },
+      {
+        "name": null,
+        "id": "btnSearch",
+        "type": "submit"
+      },
+      {
+        "name": null,
+        "id": "index_btnAdd",
+        "type": "button"
+      }
+    ]
+  },
+  "list": {
+    "headers": [
+      "操作",
+      "付款单编号",
+      "付款类别",
+      "申请人",
+      "项目编号",
+      "项目名称",
+      "核算成本中心名称",
+      "收款公司",
+      "付款公司",
+      "金额",
+      "币种",
+      "状态"
+    ],
+    "rowCount": 1,
+    "pagerText": "总共1条记录，共1页，当前第1页首页上一页下一页末页"
+  },
+  "commands": [
+    {
+      "id": "btnSearch",
+      "label": "查询",
+      "classification": "upstream-error-not-enabled"
+    },
+    {
+      "id": "index_btnAdd",
+      "label": "新增",
+      "classification": "blocked-write"
+    }
+  ],
+  "queryProbe": {
+    "method": "POST",
+    "url": "http://ipsapro.isstech.com/WebPMS/?Length=7",
+    "contentType": "application/x-www-form-urlencoded",
+    "browserSuccessfulControlNames": [
+      "PM_ApplyNo",
+      "PM_SDName",
+      "PaymentType",
+      "PM_ProjectNo",
+      "PM_Status",
+      "Status"
+    ],
+    "responseStatus": 500,
+    "responseContentType": "text/html; charset=utf-8",
+    "errorType": "System.NullReferenceException",
+    "repeatable": true,
+    "decision": "Do not enable POST search; the served form action fails in live runtime"
+  },
+  "runtimeDecision": {
+    "readPath": "GET /WebPMS/Payment/index only",
+    "completenessGate": "declared total must equal parsed current-page rows",
+    "detail": "not available; the only row action is Edit/{id}",
+    "blockedPaths": [
+      "GET /WebPMS/Payment/Edit/{id}",
+      "POST /WebPMS/Payment/DelMain",
+      "GET /WebPMS/selector/selecttype"
+    ]
+  },
+  "observedNetwork": [
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMS/Payment/index",
+      "type": "Document"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMS/Payment/index",
+      "status": 200,
+      "type": "Document",
+      "mimeType": "text/html"
+    },
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMS/styles/bootstrap-multiselect.css",
+      "type": "Stylesheet"
+    },
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMS/styles/pms-site.css",
+      "type": "Stylesheet"
+    },
+    {
+      "kind": "request",
+      "method": "GET",
+      "url": "http://ipsapro.isstech.com/WebPMS/scripts/bootstrap-multiselect.js",
+      "type": "Script"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMS/styles/pms-site.css",
+      "status": 200,
+      "type": "Stylesheet",
+      "mimeType": "text/css"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMS/styles/bootstrap-multiselect.css",
+      "status": 200,
+      "type": "Stylesheet",
+      "mimeType": "text/css"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMS/scripts/bootstrap-multiselect.js",
+      "status": 200,
+      "type": "Script",
+      "mimeType": "application/x-javascript"
+    },
+    {
+      "kind": "request",
+      "method": "POST",
+      "url": "http://ipsapro.isstech.com/WebPMS/?Length=7",
+      "type": "Document"
+    },
+    {
+      "kind": "response",
+      "url": "http://ipsapro.isstech.com/WebPMS/?Length=7",
+      "status": 500,
+      "type": "Document",
+      "mimeType": "text/html"
+    }
+  ]
+}
