@@ -71,6 +71,21 @@ class TravelApplicationRecordOut(BaseModel):
     source_url: str = ""
 
 
+class DailyExpenseRecordOut(BaseModel):
+    id: str
+    ordinal: int
+    application_no: str
+    project_name: str = ""
+    applicant: str = ""
+    application_date: str = ""
+    status: str = ""
+    amount: str = ""
+    current_approver: str = ""
+    scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
+    fields: dict[str, str] = Field(default_factory=dict)
+    source_url: str = ""
+
+
 class PaymentListOut(BaseModel):
     module: str = ReadonlyModuleKind.PAYMENT.value
     module_label: str = ReadonlyModuleKind.PAYMENT.label
@@ -111,6 +126,20 @@ class TravelApplicationListOut(BaseModel):
     submitted_by_me_count: int = 0
     managed_by_me_count: int = 0
     items: list[TravelApplicationRecordOut] = Field(default_factory=list)
+
+
+class DailyExpenseListOut(BaseModel):
+    module: str = ReadonlyModuleKind.DAILY_EXPENSE.value
+    module_label: str = ReadonlyModuleKind.DAILY_EXPENSE.label
+    source: str = "sqlite_current"
+    ownership_scope: str = "personal_submissions_projects_and_management"
+    synced_at: str | None = None
+    source_total_count: int = 0
+    total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
+    items: list[DailyExpenseRecordOut] = Field(default_factory=list)
 
 
 class ReadonlySyncStreamOut(BaseModel):
@@ -345,6 +374,39 @@ def list_travel_applications(
             f"travel application cache read failed: {type(exc).__name__}"
         ) from exc
     return TravelApplicationListOut(
+        synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
+        source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
+        total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
+        items=items,
+    )
+
+
+@router.get(
+    "/readonly-modules/daily-expenses",
+    response_model=DailyExpenseListOut,
+)
+def list_daily_expenses(
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> DailyExpenseListOut:
+    try:
+        cached, latest = _current_payloads(
+            _storage(session),
+            ReadonlyModuleKind.DAILY_EXPENSE,
+        )
+        payloads, counts = _personal_payloads(cached)
+        items = sorted(
+            (DailyExpenseRecordOut.model_validate(payload) for payload in payloads),
+            key=lambda item: (item.application_date, item.application_no),
+            reverse=True,
+        )
+    except Exception as exc:
+        raise local_storage_error(
+            f"daily expense cache read failed: {type(exc).__name__}"
+        ) from exc
+    return DailyExpenseListOut(
         synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
         source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
         total_count=len(items),

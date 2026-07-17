@@ -44,7 +44,7 @@ from .models.work_items import (
 )
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -77,6 +77,7 @@ _REQUIRED_TABLES_BY_VERSION = {
     4: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES,
     5: _REQUIRED_TABLES - {"readonly_scope_assertions"},
     6: _REQUIRED_TABLES,
+    7: _REQUIRED_TABLES,
 }
 _MIGRATIONS = {
     1: "migration_002_materials.sql",
@@ -84,6 +85,7 @@ _MIGRATIONS = {
     3: "migration_004_review.sql",
     4: "migration_005_readonly_modules.sql",
     5: "migration_006_readonly_scope.sql",
+    6: "migration_007_daily_expense.sql",
 }
 _INITIALIZATION_THREAD_LOCK = threading.Lock()
 _INITIALIZATION_LOCK_TIMEOUT_SECONDS = 10.0

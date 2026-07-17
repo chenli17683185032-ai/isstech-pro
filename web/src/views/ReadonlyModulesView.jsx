@@ -6,6 +6,7 @@ import {
   Eye,
   PlaneTakeoff,
   RefreshCw,
+  ReceiptText,
   Search,
   ShieldCheck,
   X,
@@ -20,7 +21,16 @@ const MODULES = [
   { key: "payment", module: "payment", label: "付款申请", icon: CreditCard, placeholder: "搜索编号、项目、公司" },
   { key: "bizcases", module: "bizcase", label: "BizCase查询", icon: BriefcaseBusiness, placeholder: "搜索 BizCase、客户、项目" },
   { key: "travelApplications", module: "travel_application", label: "出差申请", icon: PlaneTakeoff, placeholder: "搜索单据、项目、申请人" },
+  { key: "dailyExpenses", module: "daily_expense", label: "日常报销申请", icon: ReceiptText, placeholder: "搜索申请、项目、申请人" },
 ];
+
+const SYSTEMS = [
+  { key: "payment", label: "付款申请", icon: CreditCard },
+  { key: "bizcases", label: "BizCase查询", icon: BriefcaseBusiness },
+  { key: "feeManagement", label: "费用管理", icon: ReceiptText },
+];
+
+const FEE_MODULE_KEYS = ["dailyExpenses", "travelApplications"];
 
 const SCOPE_LABELS = {
   my_project: "我的项目",
@@ -138,10 +148,10 @@ function BizCaseTable({ items, onOpen }) {
   );
 }
 
-function TravelApplicationTable({ items, onOpen }) {
+function FeeApplicationTable({ items, label, onOpen }) {
   return (
     <div className="table-wrap">
-      <table className="data-table readonly-table travel-application-table" aria-label="出差申请记录">
+      <table className="data-table readonly-table fee-application-table" aria-label={`${label}记录`}>
         <thead>
           <tr><th>单据编号</th><th>项目</th><th>申请人</th><th>申请日期</th><th>金额</th><th>下一级审批人</th><th>状态</th><th aria-label="操作" /></tr>
         </thead>
@@ -247,9 +257,11 @@ export default function ReadonlyModulesView({
   onSync,
   syncing,
 }) {
-  const [activeModule, setActiveModule] = useState("payment");
+  const [activeSystem, setActiveSystem] = useState("payment");
+  const [activeFeeModule, setActiveFeeModule] = useState("dailyExpenses");
   const [query, setQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
+  const activeModule = activeSystem === "feeManagement" ? activeFeeModule : activeSystem;
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const definition = MODULES.find((module) => module.key === activeModule) || MODULES[0];
   const current = data[definition.key];
@@ -262,6 +274,9 @@ export default function ReadonlyModulesView({
   const emptyTitle = deferredQuery
     ? `没有匹配的${definition.label}记录`
     : `暂无个人相关的${definition.label}记录`;
+  const feeManagementCount = (
+    data.travelApplications.total_count + data.dailyExpenses.total_count
+  );
 
   return (
     <div className="view-stack">
@@ -276,7 +291,7 @@ export default function ReadonlyModulesView({
       <section className="readonly-summary" aria-label="业务查询指标">
         <div><span>付款申请</span><strong>{loading ? "--" : data.payment.total_count}</strong></div>
         <div><span>BizCase查询</span><strong>{loading ? "--" : data.bizcases.total_count}</strong></div>
-        <div><span>出差申请</span><strong>{loading ? "--" : data.travelApplications.total_count}</strong></div>
+        <div><span>费用管理</span><strong>{loading ? "--" : feeManagementCount}</strong></div>
         <div><span>当前快照</span><strong>{formatDateTime(current.synced_at)}</strong></div>
         <div className="readonly-summary__state">
           <span>最近运行</span>
@@ -300,23 +315,52 @@ export default function ReadonlyModulesView({
         </div>
 
         <div className="table-toolbar readonly-toolbar">
-          <div className="segmented segmented--modules" aria-label="业务查询模块">
-            {MODULES.map(({ key, label, icon: Icon }) => (
-              <button
-                className={activeModule === key ? "is-active" : ""}
-                key={key}
-                onClick={() => {
-                  setActiveModule(key);
-                  setSelectedItem(null);
-                }}
-                type="button"
-                aria-pressed={activeModule === key}
-              >
-                <Icon size={14} aria-hidden="true" />
-                <span>{label}</span>
-                <strong>{data[key].total_count}</strong>
-              </button>
-            ))}
+          <div className="readonly-module-controls">
+            <div className="segmented segmented--modules" aria-label="同级业务系统">
+              {SYSTEMS.map(({ key, label, icon: Icon }) => {
+                const count = key === "feeManagement" ? feeManagementCount : data[key].total_count;
+                return (
+                  <button
+                    className={activeSystem === key ? "is-active" : ""}
+                    key={key}
+                    onClick={() => {
+                      setActiveSystem(key);
+                      setSelectedItem(null);
+                    }}
+                    type="button"
+                    aria-pressed={activeSystem === key}
+                  >
+                    <Icon size={14} aria-hidden="true" />
+                    <span>{label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                );
+              })}
+            </div>
+            {activeSystem === "feeManagement" ? (
+              <div className="segmented segmented--submodules" aria-label="费用管理子项">
+                {FEE_MODULE_KEYS.map((key) => {
+                  const module = MODULES.find((candidate) => candidate.key === key);
+                  const Icon = module.icon;
+                  return (
+                    <button
+                      className={activeFeeModule === key ? "is-active" : ""}
+                      key={key}
+                      onClick={() => {
+                        setActiveFeeModule(key);
+                        setSelectedItem(null);
+                      }}
+                      type="button"
+                      aria-pressed={activeFeeModule === key}
+                    >
+                      <Icon size={14} aria-hidden="true" />
+                      <span>{module.label}</span>
+                      <strong>{data[key].total_count}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           <div className="search-control readonly-search">
             <Search size={16} aria-hidden="true" />
@@ -335,7 +379,7 @@ export default function ReadonlyModulesView({
               ? <PaymentTable items={items} onOpen={setSelectedItem} />
               : activeModule === "bizcases"
                 ? <BizCaseTable items={items} onOpen={setSelectedItem} />
-                : <TravelApplicationTable items={items} onOpen={setSelectedItem} />
+                : <FeeApplicationTable items={items} label={definition.label} onOpen={setSelectedItem} />
           ) : (
             <EmptyState
               icon={activeModule === "payment" ? CreditCard : Database}

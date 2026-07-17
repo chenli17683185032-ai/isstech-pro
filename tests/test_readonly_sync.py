@@ -10,6 +10,10 @@ from pathlib import Path
 import pytest
 
 from isstech_replay.models.bizcase import BizCaseListResult, BizCaseRecord
+from isstech_replay.models.daily_expense import (
+    DailyExpenseListResult,
+    DailyExpenseRecord,
+)
 from isstech_replay.models.payment import PaymentListResult, PaymentRecord
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
 from isstech_replay.models.travel_application import (
@@ -108,6 +112,33 @@ def _travel_result(
     )
 
 
+def _daily_expense_result(
+    *,
+    count: int = 2,
+    applicant: str = "USER-A",
+) -> DailyExpenseListResult:
+    records = tuple(
+        DailyExpenseRecord(
+            id=f"DEA-REDACTED-{index:03d}",
+            ordinal=index,
+            application_no=f"DEA-REDACTED-{index:03d}",
+            project_name=f"PROJECT REDACTED {index}",
+            applicant=applicant,
+            application_date=f"2026-07-{index:02d}",
+            status="已提交",
+            amount="￥0.00",
+            fields=(("申请人", applicant),),
+        )
+        for index in range(1, count + 1)
+    )
+    return DailyExpenseListResult(
+        items=records,
+        total_count=count,
+        page_count=1,
+        source_url="http://ipsapro.isstech.com/WebPSAOA/Fee/REDACTED",
+    )
+
+
 class FakeReadonlyClient:
     def __init__(
         self,
@@ -116,9 +147,11 @@ class FakeReadonlyClient:
         bizcase_count: int = 2,
         bizcase_application_visible_count: int = 1,
         travel_count: int = 2,
+        daily_expense_count: int = 2,
         fail_payment: bool = False,
         fail_bizcase: bool = False,
         fail_travel: bool = False,
+        fail_daily_expense: bool = False,
         fail_identity: bool = False,
     ) -> None:
         self.payment_status = payment_status
@@ -127,9 +160,11 @@ class FakeReadonlyClient:
             bizcase_application_visible_count
         )
         self.travel_count = travel_count
+        self.daily_expense_count = daily_expense_count
         self.fail_payment = fail_payment
         self.fail_bizcase = fail_bizcase
         self.fail_travel = fail_travel
+        self.fail_daily_expense = fail_daily_expense
         self.fail_identity = fail_identity
 
     def get_portal_display_name(self) -> str:
@@ -176,6 +211,21 @@ class FakeReadonlyClient:
             raise RuntimeError("travel application unavailable")
         return _travel_result(count=self.travel_count, applicant=display_name)
 
+    def list_personal_daily_expenses(
+        self,
+        *,
+        display_name: str,
+        max_pages: int,
+    ) -> DailyExpenseListResult:
+        assert display_name == "USER-A"
+        assert max_pages == 20
+        if self.fail_daily_expense:
+            raise RuntimeError("daily expense unavailable")
+        return _daily_expense_result(
+            count=self.daily_expense_count,
+            applicant=display_name,
+        )
+
 
 def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) -> None:
     storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
@@ -200,20 +250,24 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
         ReadonlyModuleKind.PAYMENT,
         ReadonlyModuleKind.BIZCASE,
         ReadonlyModuleKind.TRAVEL_APPLICATION,
+        ReadonlyModuleKind.DAILY_EXPENSE,
     ]
-    assert first.observed_count == 5
-    assert first.changed_count == 5
+    assert first.observed_count == 7
+    assert first.changed_count == 7
     assert second.status == "succeeded"
-    assert second.observed_count == 5
+    assert second.observed_count == 7
     assert second.changed_count == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
     assert len(
         storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_APPLICATION)
     ) == 2
-    assert storage.table_count("readonly_module_runs") == 6
-    assert storage.table_count("readonly_module_snapshots") == 10
-    assert storage.table_count("readonly_module_current") == 5
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.DAILY_EXPENSE)
+    ) == 2
+    assert storage.table_count("readonly_module_runs") == 8
+    assert storage.table_count("readonly_module_snapshots") == 14
+    assert storage.table_count("readonly_module_current") == 7
     payment_payload = json.loads(
         storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)[0].payload_json
     )
@@ -236,6 +290,16 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
     assert all(
         payload["scope_reasons"] == ["submitted_by_me"]
         for payload in travel_payloads
+    )
+    daily_expense_payloads = [
+        json.loads(snapshot.payload_json)
+        for snapshot in storage.current_readonly_snapshots(
+            ReadonlyModuleKind.DAILY_EXPENSE
+        )
+    ]
+    assert all(
+        payload["scope_reasons"] == ["submitted_by_me"]
+        for payload in daily_expense_payloads
     )
 
 
@@ -288,11 +352,15 @@ def test_identity_failure_does_not_block_bizcase_checkpoint(tmp_path: Path) -> N
         "failed",
         "succeeded",
         "failed",
+        "failed",
     ]
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
     assert len(
         storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_APPLICATION)
+    ) == 0
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.DAILY_EXPENSE)
     ) == 0
 
 
@@ -318,6 +386,7 @@ def test_readonly_stream_failure_preserves_its_last_successful_snapshot(
     assert result.status == "partial"
     assert [stream.status for stream in result.streams] == [
         "failed",
+        "succeeded",
         "succeeded",
         "succeeded",
     ]

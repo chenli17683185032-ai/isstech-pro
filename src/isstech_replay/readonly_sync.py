@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .client import IsstechClient
 from .models.bizcase import BizCaseListResult, BizCaseRecord
+from .models.daily_expense import DailyExpenseListResult, DailyExpenseRecord
 from .models.payment import PaymentListResult, PaymentRecord
 from .models.readonly_modules import (
     ReadonlyModuleKind,
@@ -35,6 +36,7 @@ READONLY_MODULES = (
     ReadonlyModuleKind.PAYMENT,
     ReadonlyModuleKind.BIZCASE,
     ReadonlyModuleKind.TRAVEL_APPLICATION,
+    ReadonlyModuleKind.DAILY_EXPENSE,
 )
 
 
@@ -142,9 +144,37 @@ def _travel_application_payload(
     }
 
 
+def _daily_expense_payload(
+    record: DailyExpenseRecord,
+    *,
+    source_url: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "module": ReadonlyModuleKind.DAILY_EXPENSE.value,
+        "id": record.id,
+        "ordinal": record.ordinal,
+        "application_no": record.application_no,
+        "project_name": record.project_name,
+        "applicant": record.applicant,
+        "application_date": record.application_date,
+        "status": record.status,
+        "amount": record.amount,
+        "current_approver": record.current_approver,
+        "scope_reasons": [WorkItemScopeReason.SUBMITTED_BY_ME.value],
+        "fields": record.field_dict(),
+        "source_url": source_url,
+    }
+
+
 def readonly_snapshots(
     module: ReadonlyModuleKind,
-    result: PaymentListResult | BizCaseListResult | TravelApplicationListResult,
+    result: (
+        PaymentListResult
+        | BizCaseListResult
+        | TravelApplicationListResult
+        | DailyExpenseListResult
+    ),
     *,
     observed_at: str,
     display_name: str = "",
@@ -206,7 +236,7 @@ def readonly_snapshots(
                     ),
                 )
             )
-    else:
+    elif module is ReadonlyModuleKind.TRAVEL_APPLICATION:
         if not isinstance(result, TravelApplicationListResult):
             raise TypeError(
                 "Travel application sync requires TravelApplicationListResult"
@@ -222,6 +252,23 @@ def readonly_snapshots(
                 (
                     record.id,
                     _travel_application_payload(
+                        record,
+                        source_url=result.source_url,
+                    ),
+                )
+            )
+    else:
+        if not isinstance(result, DailyExpenseListResult):
+            raise TypeError("Daily expense sync requires DailyExpenseListResult")
+        if not display_name.strip():
+            raise ValueError("Daily expense personal scope requires a display name")
+        for record in result.items:
+            if not display_name_matches(record.applicant, display_name):
+                raise RuntimeError("Daily expense result contains an unscoped record")
+            payloads.append(
+                (
+                    record.id,
+                    _daily_expense_payload(
                         record,
                         source_url=result.source_url,
                     ),
@@ -276,11 +323,17 @@ def sync_readonly_module(
         run_started = True
 
     try:
-        result: PaymentListResult | BizCaseListResult | TravelApplicationListResult
+        result: (
+            PaymentListResult
+            | BizCaseListResult
+            | TravelApplicationListResult
+            | DailyExpenseListResult
+        )
         identity = ""
         if module in {
             ReadonlyModuleKind.PAYMENT,
             ReadonlyModuleKind.TRAVEL_APPLICATION,
+            ReadonlyModuleKind.DAILY_EXPENSE,
         }:
             identity = (display_name or client.get_portal_display_name()).strip()
         if module is ReadonlyModuleKind.PAYMENT:
@@ -293,8 +346,13 @@ def sync_readonly_module(
             result = client.list_bizcases_with_application_visibility(
                 max_pages=max_pages
             )
-        else:
+        elif module is ReadonlyModuleKind.TRAVEL_APPLICATION:
             result = client.list_personal_travel_applications(
+                display_name=identity,
+                max_pages=max_pages,
+            )
+        else:
+            result = client.list_personal_daily_expenses(
                 display_name=identity,
                 max_pages=max_pages,
             )

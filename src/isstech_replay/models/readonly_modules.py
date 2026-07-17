@@ -10,6 +10,7 @@ class ReadonlyModuleKind(StrEnum):
     PAYMENT = "payment"
     BIZCASE = "bizcase"
     TRAVEL_APPLICATION = "travel_application"
+    DAILY_EXPENSE = "daily_expense"
 
     @property
     def label(self) -> str:
@@ -17,6 +18,7 @@ class ReadonlyModuleKind(StrEnum):
             ReadonlyModuleKind.PAYMENT: "付款申请",
             ReadonlyModuleKind.BIZCASE: "BizCase查询",
             ReadonlyModuleKind.TRAVEL_APPLICATION: "出差申请",
+            ReadonlyModuleKind.DAILY_EXPENSE: "日常报销申请",
         }[self]
 
 

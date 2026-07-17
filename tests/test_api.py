@@ -26,6 +26,7 @@ FIXTURES_PR = Path(__file__).parent / "fixtures" / "purchase"
 FIXTURES_PAYMENT = Path(__file__).parent / "fixtures" / "payment"
 FIXTURES_BIZCASE = Path(__file__).parent / "fixtures" / "bizcase"
 FIXTURES_TRAVEL = Path(__file__).parent / "fixtures" / "travel_application"
+FIXTURES_DAILY_EXPENSE = Path(__file__).parent / "fixtures" / "daily_expense"
 BUSINESS = "http://ipsapro.isstech.com"
 PASSPORT = "https://passport.isstech.com"
 
@@ -116,6 +117,12 @@ def _travel_application_html(page: int) -> str:
         )
         html = html.replace(f"id={1000 + index}&amp;", f"id={1000 + global_index}&amp;")
     return html.replace("USER-A", "USER_B")
+
+
+def _daily_expense_html() -> str:
+    return (FIXTURES_DAILY_EXPENSE / "page1.html").read_text(
+        encoding="utf-8"
+    ).replace("USER-A", "USER_B")
 
 
 def _portal_html() -> str:
@@ -224,6 +231,11 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
             text=_travel_application_html(page),
             request=request,
         )
+    if (
+        host == "ipsapro.isstech.com"
+        and path == "/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx"
+    ):
+        return httpx.Response(200, text=_daily_expense_html(), request=request)
     if host == "ipsapro.isstech.com" and path.startswith(
         "/WebTP/PurchaseRequisition/Download/"
     ):
@@ -577,10 +589,19 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
             "list_personal_travel_applications",
             unexpected_upstream_call,
         )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_personal_daily_expenses",
+            unexpected_upstream_call,
+        )
         payment = client.get("/v1/readonly-modules/payment", headers=headers)
         bizcases = client.get("/v1/readonly-modules/bizcases", headers=headers)
         travel = client.get(
             "/v1/readonly-modules/travel-applications",
+            headers=headers,
+        )
+        daily_expenses = client.get(
+            "/v1/readonly-modules/daily-expenses",
             headers=headers,
         )
         runs = client.get("/v1/readonly-modules/runs", headers=headers)
@@ -590,12 +611,13 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert before.status_code == 200
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
-    assert first.json()["observed_count"] == 58
-    assert first.json()["changed_count"] == 58
+    assert first.json()["observed_count"] == 59
+    assert first.json()["changed_count"] == 59
     assert [stream["module"] for stream in first.json()["streams"]] == [
         "payment",
         "bizcase",
         "travel_application",
+        "daily_expense",
     ]
     assert second.status_code == 200
     assert second.json()["changed_count"] == 0
@@ -628,16 +650,23 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert "ELA-REDACTED-001" in {
         item["application_no"] for item in travel.json()["items"]
     }
+    assert daily_expenses.status_code == 200
+    assert daily_expenses.json()["source_total_count"] == 1
+    assert daily_expenses.json()["total_count"] == 1
+    assert daily_expenses.json()["submitted_by_me_count"] == 1
+    assert daily_expenses.json()["items"][0]["application_no"] == (
+        "DEA-REDACTED-001"
+    )
     assert runs.status_code == 200
-    assert len(runs.json()) == 6
+    assert len(runs.json()) == 8
     assert after.status_code == 200
     assert after.json()["total_count"] == before.json()["total_count"] == 3
 
     storage = WorkflowStorage(
         account_database_path("alice", base_database_path=database)
     )
-    assert storage.table_count("readonly_module_runs") == 6
-    assert storage.table_count("readonly_module_current") == 58
+    assert storage.table_count("readonly_module_runs") == 8
+    assert storage.table_count("readonly_module_current") == 59
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(

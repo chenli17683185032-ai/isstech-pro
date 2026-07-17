@@ -314,6 +314,11 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f3; color:
 .segmented--modules button { min-width: 126px; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .segmented--modules button strong { min-width: 20px; color: var(--muted); font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 10px; text-align: right; }
 .segmented--modules button.is-active svg { color: var(--accent); }
+.readonly-module-controls { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.segmented--submodules { height: 36px; background: #eef4f1; }
+.segmented--submodules button { min-width: 116px; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.segmented--submodules button strong { min-width: 16px; color: var(--muted); font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 10px; text-align: right; }
+.segmented--submodules button.is-active svg { color: var(--accent); }
 .readonly-search { width: min(360px, 38%); }
 .readonly-search input { width: 100%; min-width: 0; }
 .segmented--scope button { min-width: 62px; }
@@ -343,7 +348,7 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f3; color:
 .payment-table th:nth-child(6), .payment-table td:nth-child(6) { width: 11%; }
 .payment-table th:last-child, .payment-table td:last-child,
 .bizcase-table th:last-child, .bizcase-table td:last-child,
-.travel-application-table th:last-child, .travel-application-table td:last-child { width: 44px; }
+.fee-application-table th:last-child, .fee-application-table td:last-child { width: 44px; }
 .bizcase-table { min-width: 1160px; }
 .bizcase-table th:first-child, .bizcase-table td:first-child { width: 6%; }
 .bizcase-table th:nth-child(2), .bizcase-table td:nth-child(2) { width: 16%; }
@@ -351,9 +356,9 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f3; color:
 .bizcase-table th:nth-child(4), .bizcase-table td:nth-child(4) { width: 20%; }
 .bizcase-table th:nth-child(5), .bizcase-table td:nth-child(5) { width: 15%; }
 .bizcase-table th:nth-child(6), .bizcase-table td:nth-child(6) { width: 14%; }
-.travel-application-table { min-width: 1120px; }
-.travel-application-table th:first-child, .travel-application-table td:first-child { width: 16%; }
-.travel-application-table th:nth-child(2), .travel-application-table td:nth-child(2) { width: 25%; }
+.fee-application-table { min-width: 1120px; }
+.fee-application-table th:first-child, .fee-application-table td:first-child { width: 16%; }
+.fee-application-table th:nth-child(2), .fee-application-table td:nth-child(2) { width: 25%; }
 .readonly-detail-meta dd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 10px; }
 .readonly-loading { min-height: 260px; padding: 0 12px; display: grid; align-content: start; }
 .readonly-loading > div { min-height: 52px; display: grid; grid-template-columns: 1.2fr .8fr 1.7fr 1fr; align-items: center; gap: 28px; border-bottom: 1px solid #e9eeeb; }
@@ -470,6 +475,9 @@ input:disabled, select:disabled, textarea:disabled { background: #f2f4f3; color:
   .table-toolbar__actions .button { flex: 1; }
   .readonly-toolbar .segmented--modules { width: 100%; }
   .readonly-toolbar .segmented--modules button { min-width: 0; flex: 1; }
+  .readonly-module-controls { width: 100%; }
+  .readonly-toolbar .segmented--submodules { width: 100%; }
+  .readonly-toolbar .segmented--submodules button { min-width: 0; flex: 1; }
   .readonly-search { width: 100%; }
   .work-detail-drawer { width: 100%; }
   .toast { left: 12px; right: 12px; bottom: 70px; max-width: none; }

@@ -20,7 +20,7 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
-| Payment + BizCase read-only queries | Yes; independent checkpoints, failure isolation, cached lists, manual/UI/scheduled sync |
+| Payment + BizCase + Fee Management read-only queries | Yes; four independent checkpoints, personal scope, cached lists, manual/UI/scheduled sync |
 | SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
 | Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
@@ -83,9 +83,12 @@ The material picker uploads only to the local `/v1/materials` endpoint. The UI
 contains no iPSA create, save, submit, approve, delete, or upload action. Existing
 work-item and scheduled synchronization use only the five explicitly policy-gated
 procurement `SearchIndex` read paths, the exact body-gated Payment personal query,
-and the exact BizCase pager. Payment/BizCase keep independent checkpoints and do
-not enter `/v1/work-items/current`; their list APIs separately fail closed to the
-same personal-scope contract.
+the exact BizCase pager, the identity-bound travel pager, and the exact GET-only
+daily-expense list. Payment, BizCase, travel, and daily expense keep independent
+checkpoints and do not enter `/v1/work-items/current`; their list APIs separately
+fail closed to the same personal-scope contract. The workspace presents Payment,
+BizCase, and Fee Management as peers, with travel and daily expense below Fee
+Management.
 
 ### Durable manual sync
 
@@ -121,7 +124,7 @@ but is not shown as any logged-in account's current work-item state. The sync re
 the complete account-visible PurchaseRequisition, ProcurementContract,
 ProcurementOrder, CostConfirmation, and CheckAcceptance SearchIndex streams, then
 uses the same authenticated client for Payment personal queries and the BizCase
-source checkpoint.
+source checkpoint, followed by the identity-bound travel and daily-expense lists.
 Portal identity adds relation labels when it matches a trustworthy applicant field;
 it is not a record-discard gate. Each stream owns an independent checkpoint, so a
 declared-total mismatch, repeated/short page, schema drift, stale measurement, or
@@ -157,7 +160,7 @@ tail -n 20 data/logs/scheduled-sync.log
 Use `--hour H --minute M` on the installer to choose another local time. The
 installed plist is mode `0600` under `~/Library/LaunchAgents/`; it contains no
 username, password, Cookie, ticket, or API key. Scheduled execution calls the same
-seven-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
+nine-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
 login, a 10-second Keychain timeout, and a 15-minute sync timeout.
 
 The wrapper captures detailed CLI output in memory and appends only timestamp,

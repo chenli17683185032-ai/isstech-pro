@@ -17,6 +17,7 @@ import httpx
 from .config import Settings
 from .models.attachment import AttachmentContent, AttachmentMeta
 from .models.bizcase import BizCaseListResult, BizCasePage, BizCaseRecord
+from .models.daily_expense import DailyExpenseListResult
 from .models.payment import (
     PaymentListResult,
     PaymentRecord,
@@ -40,6 +41,7 @@ from .models.purchase import (
 )
 from .parsers.attachment import parse_attachment_list
 from .parsers.bizcase import parse_bizcase_application_page, parse_bizcase_page
+from .parsers.daily_expense import parse_daily_expense_page
 from .parsers.login import is_login_page
 from .parsers.payment import parse_payment_query_list
 from .parsers.portal import display_name_matches, parse_portal_display_name
@@ -49,6 +51,7 @@ from .parsers.travel_application import parse_travel_application_page
 from .policy import (
     BIZCASE_APPLICATION_URL,
     BIZCASE_QUERY_URL,
+    DAILY_EXPENSE_URL,
     PAYMENT_QUERY_PATH,
     TRAVEL_APPLICATION_URL,
     EndpointPolicy,
@@ -780,6 +783,41 @@ class IsstechClient:
             total_count=len(items),
             page_count=expected_page_count,
             source_url=current.source_url,
+        )
+
+    def list_personal_daily_expenses(
+        self,
+        *,
+        display_name: str,
+        max_pages: int = 20,
+    ) -> DailyExpenseListResult:
+        """Read the proven single-page, identity-bound daily expense list."""
+        display_name = display_name.strip()
+        if not display_name:
+            raise ValueError("daily expense display_name is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        response = self.get(self._url(DAILY_EXPENSE_URL))
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        page = parse_daily_expense_page(
+            response.text,
+            source_url=str(response.url),
+        )
+        if page.current_page != 1 or page.page_count != 1:
+            raise PaginationIncompleteError(
+                "Daily expense response exceeds the proven single page"
+            )
+        for item in page.items:
+            if not display_name_matches(item.applicant, display_name):
+                raise PaginationIncompleteError(
+                    "Daily expense applicant does not match the current identity"
+                )
+        return DailyExpenseListResult(
+            items=page.items,
+            total_count=len(page.items),
+            page_count=page.page_count,
+            source_url=page.source_url,
         )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:

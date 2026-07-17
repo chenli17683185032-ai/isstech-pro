@@ -66,6 +66,8 @@ BIZCASE_APPLICATION_URL = (
 TRAVEL_APPLICATION_PATH = "/WebPSAOA/Fee/FeeApply/EvectionLoan/List.aspx"
 TRAVEL_APPLICATION_URL = f"{TRAVEL_APPLICATION_PATH}?helpmenucode=92"
 TRAVEL_APPLICATION_PAGER_TARGET = "ctl00$ContentPlaceHolder1$gp"
+DAILY_EXPENSE_PATH = "/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx"
+DAILY_EXPENSE_URL = f"{DAILY_EXPENSE_PATH}?helpmenucode=90"
 _BIZCASE_POSTBACK_FIELDS = frozenset(
     {
         "__EVENTTARGET",
@@ -210,6 +212,22 @@ def _exact_travel_application_url(url: str) -> bool:
     except ValueError:
         return False
     return pairs == [("helpmenucode", "92")]
+
+
+def _exact_daily_expense_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.path != DAILY_EXPENSE_PATH:
+        return False
+    try:
+        pairs = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=2,
+        )
+    except ValueError:
+        return False
+    return pairs == [("helpmenucode", "90")]
 
 
 def _bizcase_get_view(url: str) -> str | None:
@@ -664,6 +682,38 @@ def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
             "travel_application.edit",
             "travel_application.edit_page",
             "Travel application Add.aspx is an edit-capable form",
+        )
+    if path == DAILY_EXPENSE_PATH:
+        if method == "GET" and _exact_daily_expense_url(url):
+            return _decision(
+                RequestClass.ALLOW_LIVE,
+                SideEffect.NONE,
+                "daily_expense.list",
+                "daily_expense.list_get",
+                "Served exact daily expense application list",
+            )
+        if _exact_daily_expense_url(url):
+            return _decision(
+                RequestClass.BUILD_ONLY,
+                SideEffect.UNKNOWN,
+                "daily_expense.postback",
+                "daily_expense.postback.blocked",
+                "Daily expense POST has no proven read-only pager shape",
+            )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "daily_expense.unapproved",
+            "daily_expense.query_mismatch",
+            "Daily expense path or query does not match the exact list entry",
+        )
+    if path == "/WebPSAOA/Fee/FeeApply/DailyExpense/Add.aspx":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "daily_expense.edit",
+            "daily_expense.edit_page",
+            "Daily expense Add.aspx is an edit-capable form",
         )
     return None
 

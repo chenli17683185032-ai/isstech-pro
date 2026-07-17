@@ -178,6 +178,24 @@ row-state controls, newest ViewState/EventValidation, exact pager target, and a
 bounded numeric page. Unknown controls and all add, edit, query, and delete
 postbacks fail closed. The workspace opens only the committed local snapshot.
 
+## Daily expense application list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial daily expense list | GET | `/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx?helpmenucode=90` | None | observed and pure-HTTP replayed, HTTP 200 | 2026-07-17 read-only browser probe; counts/schema only |
+| Query or page postback | POST | same exact list URL | Unknown; no proven read-only shape | blocked | served form only; not requested |
+| Open application | GET | `/WebPSAOA/Fee/FeeApply/DailyExpense/Add.aspx?oper=edit...` | Write preparation | served-shape; blocked | list row link only; not requested |
+| Add application | submit control | same module add form | Write preparation | served-shape; blocked | list form only |
+| Delete application | image postback | same list form delete control | **Mutating** | blocked-write | list form only |
+
+The observed identity-bound list contains one row on page 1. It has the fixed
+nine-column DailyExpense schema, empty application/date filters, all-status
+selection, unique application identity, and an applicant that exactly matches the
+current Portal identity. The pager input is 1, GO is disabled, and there is no
+live pager target. The adapter therefore sends exactly one GET and fails closed
+if active pagination appears later; it never guesses a query or pager POST. The
+workspace opens only the committed local snapshot.
+
 ## Attachments
 
 | Action | Method | Endpoint | Side effect | State | Evidence |

@@ -301,6 +301,147 @@
         "title": "CurrentWorkItemListOut",
         "type": "object"
       },
+      "DailyExpenseListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DailyExpenseRecordOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "managed_by_me_count": {
+            "default": 0,
+            "title": "Managed By Me Count",
+            "type": "integer"
+          },
+          "module": {
+            "default": "daily_expense",
+            "title": "Module",
+            "type": "string"
+          },
+          "module_label": {
+            "default": "日常报销申请",
+            "title": "Module Label",
+            "type": "string"
+          },
+          "my_project_count": {
+            "default": 0,
+            "title": "My Project Count",
+            "type": "integer"
+          },
+          "ownership_scope": {
+            "default": "personal_submissions_projects_and_management",
+            "title": "Ownership Scope",
+            "type": "string"
+          },
+          "source": {
+            "default": "sqlite_current",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_total_count": {
+            "default": 0,
+            "title": "Source Total Count",
+            "type": "integer"
+          },
+          "submitted_by_me_count": {
+            "default": 0,
+            "title": "Submitted By Me Count",
+            "type": "integer"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          },
+          "total_count": {
+            "default": 0,
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "title": "DailyExpenseListOut",
+        "type": "object"
+      },
+      "DailyExpenseRecordOut": {
+        "properties": {
+          "amount": {
+            "default": "",
+            "title": "Amount",
+            "type": "string"
+          },
+          "applicant": {
+            "default": "",
+            "title": "Applicant",
+            "type": "string"
+          },
+          "application_date": {
+            "default": "",
+            "title": "Application Date",
+            "type": "string"
+          },
+          "application_no": {
+            "title": "Application No",
+            "type": "string"
+          },
+          "current_approver": {
+            "default": "",
+            "title": "Current Approver",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "project_name": {
+            "default": "",
+            "title": "Project Name",
+            "type": "string"
+          },
+          "scope_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItemScopeReason"
+            },
+            "title": "Scope Reasons",
+            "type": "array"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "application_no"
+        ],
+        "title": "DailyExpenseRecordOut",
+        "type": "object"
+      },
       "DraftAuditEventOut": {
         "properties": {
           "actor": {
@@ -4613,6 +4754,55 @@
           }
         },
         "summary": "List Bizcases",
+        "tags": [
+          "readonly-modules"
+        ]
+      }
+    },
+    "/v1/readonly-modules/daily-expenses": {
+      "get": {
+        "operationId": "list_daily_expenses_v1_readonly_modules_daily_expenses_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyExpenseListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Daily Expenses",
         "tags": [
           "readonly-modules"
         ]
