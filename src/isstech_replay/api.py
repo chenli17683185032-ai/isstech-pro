@@ -13,6 +13,7 @@ from . import __version__
 from .client import IsstechClient
 from .config import Settings
 from .routes import (
+    assistant,
     attachments,
     drafts,
     extractions,
@@ -24,6 +25,7 @@ from .routes import (
     sync as sync_routes,
     work_items,
 )
+from .routes.assistant import AssistantProviderFactory, runtime_assistant_provider
 from .session_store import SessionStore, session_ttl_from_settings
 
 
@@ -34,6 +36,7 @@ def create_app(
     *,
     session_store: SessionStore | None = None,
     client_factory: Callable[[], IsstechClient] | None = None,
+    assistant_provider_factory: AssistantProviderFactory | None = None,
 ) -> FastAPI:
     application = FastAPI(
         title="iSStech Unified Workflow Center API",
@@ -50,6 +53,9 @@ def create_app(
     application.state.client_factory = client_factory or (
         lambda: IsstechClient(settings=Settings.from_env())
     )
+    application.state.assistant_provider_factory = (
+        assistant_provider_factory or runtime_assistant_provider
+    )
 
     application.include_router(sessions.router, prefix="/v1")
     application.include_router(purchase_requisitions.router, prefix="/v1")
@@ -61,6 +67,7 @@ def create_app(
     application.include_router(work_items.router, prefix="/v1")
     application.include_router(sync_routes.router, prefix="/v1")
     application.include_router(readonly_modules.router, prefix="/v1")
+    application.include_router(assistant.router, prefix="/v1")
 
     @application.get("/health", tags=["system"])
     def health() -> dict[str, str]:

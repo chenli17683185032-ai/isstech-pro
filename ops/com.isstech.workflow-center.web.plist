@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.isstech.workflow-center.web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ethan/Documents/isstech/.venv/bin/isstech-api</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/ethan/Documents/isstech</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ISSTECH_DATA_DIR</key>
+        <string>/Users/ethan/Documents/isstech/data</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>Umask</key>
+    <integer>63</integer>
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/dev/null</string>
+</dict>
+</plist>

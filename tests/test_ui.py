@@ -79,9 +79,16 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "/v1/readonly-modules/travel-reimbursements" in js.text
     assert "/v1/readonly-modules/travel-subsidies" in js.text
     assert "/v1/readonly-modules/sync" in js.text
+    assert "催办助手" in js.text
+    assert "当前偏好" in js.text
+    assert "模型失败，已本地排序" in js.text
+    assert "/v1/assistant/brief" in js.text
+    assert "/v1/assistant/briefs" in js.text
+    assert "/v1/assistant/preferences" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
+    assert ".assistant-panel" in css.text
     assert icon.status_code == 200
     assert icon.headers["content-type"].startswith("image/svg+xml")
     assert "http://" not in response.text

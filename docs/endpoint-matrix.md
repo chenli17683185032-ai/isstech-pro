@@ -248,6 +248,27 @@ The four Fee Management links intentionally stop at the proven application list.
 Their `btnAdd` controls are WebForms postbacks with current hidden state; the local
 workspace does not guess a context-free `Add.aspx` URL or replay that POST.
 
+## Local follow-up assistant
+
+These loopback endpoints operate only on the authenticated account's SQLite file.
+They are not `GuardedTransport` rules and never authorize a new iPSA request.
+
+| Action | Method | Endpoint | External side effect | State |
+| --- | --- | --- | --- | --- |
+| Read latest briefing | GET | `/v1/assistant/brief` | None; local SQLite only | implemented and account-scoped |
+| Regenerate briefing | POST | `/v1/assistant/briefs` | Optional bounded model call; no iPSA call | implemented with deterministic fallback |
+| Add priority preference | POST | `/v1/assistant/preferences` | Local preference write + optional bounded model call | implemented, 500-character ceiling |
+| Clear preferences | DELETE | `/v1/assistant/preferences` | Local tombstone + optional bounded model call | implemented |
+
+The optional external request is a user-configured OpenAI-compatible Chat
+Completions endpoint. It receives at most 100 personal unapproved rows with only
+the stable key, category, reference, title, project, status, approver, date, and
+estimated wait. Model output can only select existing keys; unknown and duplicate
+keys are removed before at most five items are persisted. Any configuration,
+timeout, HTTP, byte-limit, JSON, or whitelist failure writes the local stable order.
+Workflow hosts, non-loopback cleartext HTTP, image endpoints, and `gpt-image-2`
+are rejected by construction.
+
 ## Attachments
 
 | Action | Method | Endpoint | Side effect | State | Evidence |

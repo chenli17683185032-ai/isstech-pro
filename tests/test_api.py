@@ -306,7 +306,7 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, text=f"no {host}{path}", request=request)
 
 
-def _authed_client() -> tuple[TestClient, str]:
+def _authed_client(*, assistant_provider_factory=None) -> tuple[TestClient, str]:
     """Build app and inject a pre-authenticated session without live network."""
     store = SessionStore(ttl_seconds=3600)
     settings = Settings(base_url=BUSINESS, passport_url=PASSPORT)
@@ -317,7 +317,10 @@ def _authed_client() -> tuple[TestClient, str]:
     result = login(upstream, "alice", "TEST_PASSWORD")
     assert result.success
     record = store.create(upstream, username="alice")
-    app = create_app(session_store=store)
+    app = create_app(
+        session_store=store,
+        assistant_provider_factory=assistant_provider_factory,
+    )
     return TestClient(app), record.token
 
 
@@ -370,6 +373,9 @@ def test_session_required() -> None:
             ("GET", "/v1/readonly-modules/travel-reimbursements"),
             ("GET", "/v1/readonly-modules/travel-subsidies"),
             ("GET", "/v1/readonly-modules/runs"),
+            ("GET", "/v1/assistant/brief"),
+            ("POST", "/v1/assistant/briefs"),
+            ("DELETE", "/v1/assistant/preferences"),
         ):
             r = client.request(method, path)
             assert r.status_code == 401
@@ -383,6 +389,12 @@ def test_session_required() -> None:
         draft = client.post("/v1/extractions/missing/drafts")
         assert draft.status_code == 401
         assert draft.json()["detail"]["code"] == "AUTH_EXPIRED"
+        preference = client.post(
+            "/v1/assistant/preferences",
+            json={"text": "付款申请优先"},
+        )
+        assert preference.status_code == 401
+        assert preference.json()["detail"]["code"] == "AUTH_EXPIRED"
 
 
 def test_create_session_route_returns_local_token_without_upstream_ticket() -> None:
@@ -1219,6 +1231,69 @@ def test_preview_delete_not_sendable() -> None:
         assert "Delete/10001" in body["url"]
 
 
+def test_assistant_api_is_local_account_scoped_and_recalculates_preferences(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    provider_calls = 0
+
+    def provider_factory():
+        nonlocal provider_calls
+        provider_calls += 1
+        return None
+
+    client, token = _authed_client(assistant_provider_factory=provider_factory)
+    headers = {"Authorization": f"Bearer {token}"}
+    with client:
+        work_sync = client.post("/v1/sync/work-items", headers=headers)
+        readonly_sync = client.post("/v1/readonly-modules/sync", headers=headers)
+        initial = client.get("/v1/assistant/brief", headers=headers)
+
+        preferred = client.post(
+            "/v1/assistant/preferences",
+            headers=headers,
+            json={"text": "日常报销申请更重要"},
+        )
+        cleared = client.delete("/v1/assistant/preferences", headers=headers)
+        refreshed = client.post("/v1/assistant/briefs", headers=headers)
+        too_long = client.post(
+            "/v1/assistant/preferences",
+            headers=headers,
+            json={"text": "x" * 501},
+        )
+
+        other_token = _add_authed_session(client, "bob")
+        other = client.get(
+            "/v1/assistant/brief",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        original_again = client.get("/v1/assistant/brief", headers=headers)
+
+    assert work_sync.status_code == 200
+    assert readonly_sync.status_code == 200
+    assert initial.status_code == 200
+    assert initial.json()["brief"]["source"] == "fallback"
+    assert initial.json()["brief"]["provider_configured"] is False
+    assert initial.json()["brief"]["candidate_count"] > 0
+    assert provider_calls == 3
+
+    assert preferred.status_code == 200
+    assert preferred.json()["preferences"][-1]["text"] == "日常报销申请更重要"
+    assert preferred.json()["brief"]["items"][0]["category"] == "日常报销申请"
+    assert preferred.json()["brief"]["items"][0]["reason"] == "符合你设置的优先级偏好"
+    assert cleared.status_code == 200
+    assert cleared.json()["preferences"] == []
+    assert refreshed.status_code == 200
+    assert too_long.status_code == 422
+
+    assert other.status_code == 200
+    assert other.json()["brief"]["candidate_count"] == 0
+    assert other.json()["preferences"] == []
+    assert original_again.json()["brief"]["candidate_count"] > 0
+
+
 def test_preview_create_and_upload() -> None:
     client, token = _authed_client()
     headers = {"Authorization": f"Bearer {token}"}
@@ -1276,6 +1351,9 @@ def test_openapi_available() -> None:
     assert "/v1/drafts/{draft_id}/validate" in paths
     assert "/v1/drafts/{draft_id}/ready" in paths
     assert "/v1/previews/purchase-requisitions/{requisition_id}/delete" in paths
+    assert "/v1/assistant/brief" in paths
+    assert "/v1/assistant/briefs" in paths
+    assert "/v1/assistant/preferences" in paths
 
 
 def test_committed_openapi_matches_runtime() -> None:

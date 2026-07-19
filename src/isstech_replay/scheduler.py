@@ -20,6 +20,9 @@ KEYCHAIN_USERNAME_SERVICE = f"{LAUNCH_AGENT_LABEL}.username"
 KEYCHAIN_PASSWORD_SERVICE = f"{LAUNCH_AGENT_LABEL}.password"
 DEFAULT_KEYCHAIN_TIMEOUT_SECONDS = 10.0
 DEFAULT_SYNC_TIMEOUT_SECONDS = 15 * 60.0
+DEFAULT_BRIEF_TIMEOUT_SECONDS = 75.0
+DEFAULT_OPEN_TIMEOUT_SECONDS = 10.0
+LOCAL_WORKSPACE_URL = "http://127.0.0.1:8000/"
 _RUN_ID_RE = re.compile(r"\brun_id=([A-Za-z0-9_-]+)\b")
 
 
@@ -35,6 +38,26 @@ class ScheduledSyncConfig:
     log_file: Path
     keychain_timeout_seconds: float = DEFAULT_KEYCHAIN_TIMEOUT_SECONDS
     sync_timeout_seconds: float = DEFAULT_SYNC_TIMEOUT_SECONDS
+    brief_timeout_seconds: float = DEFAULT_BRIEF_TIMEOUT_SECONDS
+    open_timeout_seconds: float = DEFAULT_OPEN_TIMEOUT_SECONDS
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledDayResult:
+    sync_exit_code: int
+    brief_exit_code: int
+    open_exit_code: int
+
+    @property
+    def exit_code(self) -> int:
+        for code in (
+            self.sync_exit_code,
+            self.brief_exit_code,
+            self.open_exit_code,
+        ):
+            if code != 0:
+                return code
+        return 0
 
 
 CredentialReader = Callable[[str, str, float], str]
@@ -242,6 +265,254 @@ def run_scheduled_sync(
         )
         return 1
     append_private_log(log_file, record)
+    return 0
+
+
+def run_scheduled_day(
+    config: ScheduledSyncConfig,
+    *,
+    credential_reader: CredentialReader = read_keychain_value,
+    runner: ProcessRunner = subprocess.run,
+    account: str | None = None,
+    now: datetime | None = None,
+) -> ScheduledDayResult:
+    """Run sync, briefing, and page open without making later stages depend on earlier ones."""
+    timestamp = _utc_iso(now or datetime.now(UTC))
+    actual_account = account or local_account_name()
+    try:
+        sync_exit_code = run_scheduled_sync(
+            config,
+            credential_reader=credential_reader,
+            runner=runner,
+            account=actual_account,
+            now=now,
+        )
+    except Exception as error:
+        _record_failure(
+            config.log_file.expanduser().resolve(),
+            timestamp=timestamp,
+            stage="sync_setup",
+            error=error,
+            exit_code=1,
+        )
+        sync_exit_code = 1
+    try:
+        username = credential_reader(
+            KEYCHAIN_USERNAME_SERVICE,
+            actual_account,
+            config.keychain_timeout_seconds,
+        ).strip()
+        if not username:
+            raise ScheduledSyncError("scheduled username is empty")
+    except Exception as error:
+        _record_failure(
+            config.log_file.expanduser().resolve(),
+            timestamp=timestamp,
+            stage="brief_identity",
+            error=error,
+            exit_code=1,
+        )
+        brief_exit_code = 1
+    else:
+        try:
+            brief_exit_code = _run_scheduled_brief(
+                config,
+                username=username,
+                runner=runner,
+                timestamp=timestamp,
+            )
+        except Exception as error:
+            _record_failure(
+                config.log_file.expanduser().resolve(),
+                timestamp=timestamp,
+                stage="brief",
+                error=error,
+                exit_code=1,
+            )
+            brief_exit_code = 1
+        finally:
+            username = ""
+    try:
+        open_exit_code = _open_local_workspace(
+            config,
+            runner=runner,
+            timestamp=timestamp,
+        )
+    except Exception as error:
+        _record_failure(
+            config.log_file.expanduser().resolve(),
+            timestamp=timestamp,
+            stage="open",
+            error=error,
+            exit_code=1,
+        )
+        open_exit_code = 1
+    return ScheduledDayResult(
+        sync_exit_code=sync_exit_code,
+        brief_exit_code=brief_exit_code,
+        open_exit_code=open_exit_code,
+    )
+
+
+def _run_scheduled_brief(
+    config: ScheduledSyncConfig,
+    *,
+    username: str,
+    runner: ProcessRunner,
+    timestamp: str,
+) -> int:
+    if config.brief_timeout_seconds <= 0:
+        raise ValueError("brief timeout must be positive")
+    repo_root = config.repo_root.expanduser().resolve()
+    python_executable = config.python_executable.expanduser().absolute()
+    data_dir = config.data_dir.expanduser().resolve()
+    log_file = config.log_file.expanduser().resolve()
+    brief_script = repo_root / "tools" / "generate_daily_brief.py"
+    if not brief_script.is_file():
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="brief",
+            error=ScheduledSyncError("daily briefing CLI is missing"),
+            exit_code=1,
+        )
+        return 1
+    environment = os.environ.copy()
+    environment["ISSTECH_USERNAME"] = username
+    command = [
+        str(python_executable),
+        str(brief_script),
+        "--data-dir",
+        str(data_dir),
+    ]
+    try:
+        completed = runner(
+            command,
+            cwd=repo_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=config.brief_timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="brief",
+            error=ScheduledSyncError("daily briefing CLI timed out"),
+            exit_code=124,
+        )
+        return 124
+    except Exception as error:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="brief",
+            error=error,
+            exit_code=1,
+        )
+        return 1
+    finally:
+        environment.pop("ISSTECH_USERNAME", None)
+    if completed.returncode != 0:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="brief",
+            error=ScheduledSyncError(
+                f"daily briefing CLI exited {completed.returncode or 1}"
+            ),
+            exit_code=completed.returncode or 1,
+        )
+        return completed.returncode or 1
+    try:
+        payload = json.loads(completed.stdout)
+        if not isinstance(payload, dict) or payload.get("status") != "succeeded":
+            raise ValueError("daily briefing summary is invalid")
+        record = {
+            "timestamp": timestamp,
+            "stage": "brief",
+            "outcome": "succeeded",
+            "exit_code": 0,
+            "status": "succeeded",
+            "source": str(payload["source"]),
+            "candidate_count": int(payload["candidate_count"]),
+            "item_count": int(payload["item_count"]),
+            "provider_configured": bool(payload["provider_configured"]),
+            "fallback_code": payload.get("fallback_code"),
+        }
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="brief",
+            error=ScheduledSyncError(
+                f"daily briefing CLI returned invalid JSON: {type(error).__name__}"
+            ),
+            exit_code=1,
+        )
+        return 1
+    append_private_log(log_file, record)
+    return 0
+
+
+def _open_local_workspace(
+    config: ScheduledSyncConfig,
+    *,
+    runner: ProcessRunner,
+    timestamp: str,
+) -> int:
+    if config.open_timeout_seconds <= 0:
+        raise ValueError("open timeout must be positive")
+    log_file = config.log_file.expanduser().resolve()
+    command = ["/usr/bin/open", LOCAL_WORKSPACE_URL]
+    try:
+        completed = runner(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=config.open_timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="open",
+            error=ScheduledSyncError("local workspace open timed out"),
+            exit_code=124,
+        )
+        return 124
+    except Exception as error:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="open",
+            error=error,
+            exit_code=1,
+        )
+        return 1
+    if completed.returncode != 0:
+        _record_failure(
+            log_file,
+            timestamp=timestamp,
+            stage="open",
+            error=ScheduledSyncError(
+                f"local workspace open exited {completed.returncode or 1}"
+            ),
+            exit_code=completed.returncode or 1,
+        )
+        return completed.returncode or 1
+    append_private_log(
+        log_file,
+        {
+            "timestamp": timestamp,
+            "stage": "open",
+            "outcome": "succeeded",
+            "exit_code": 0,
+        },
+    )
     return 0
 
 

@@ -13,7 +13,7 @@ a same-origin Web workspace plus direct HTTP through a single guarded transport.
 | Business entry | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` | Purchase requisition UI and AJAX endpoints |
 | Portal | `http://ipsapro.isstech.com/Portal` | Portal / SSO entry |
 | Passport | `https://passport.isstech.com/` | Credential POST, redirects, session cookies |
-| Local workspace | `http://127.0.0.1:8000/` | All unapproved workflows, local review/sync, and IPSA launch catalog |
+| Local workspace | `http://127.0.0.1:8000/` | All unapproved workflows, daily follow-up assistant, local review/sync, and IPSA launch catalog |
 | Local API | `http://127.0.0.1:8000` | Stable REST facade (`/docs` for OpenAPI) |
 
 ## Component diagram
@@ -42,6 +42,13 @@ React workspace --> FastAPI /v1 --> session store --> IsstechClient
      |                                  |
      v                                  v
 sync service  --------------------> SQLite state/audit
+     |                                  |
+     |                                  v
+     |                         daily follow-up assistant
+     |                           /                 \
+     |                    local stable rank   optional bounded chat rerank
+     |                           \                 /
+     |                            -> validated briefing -> React right column
      |
      +---------------------------> five complete SearchIndex streams
      +---------------------------> Payment personal queries + BizCase source
@@ -76,13 +83,16 @@ sync service  --------------------> SQLite state/audit
 | `session_store.py` | Short-lived local Bearer handles (never return `.iPSA`) |
 | `account_scope.py` | Normalized SHA-256 account scope and isolated runtime paths |
 | `sync.py` | Complete read, normalization, run lifecycle, and failure recording |
+| `assistant.py` | Personal unapproved candidates, estimated wait, deterministic rank, preference feedback, persisted briefing |
 | `storage.py` + `schema.sql` | Versioned SQLite snapshots, current state, and events |
 | `materials.py` | Streaming hash, MIME gate, content-addressed originals, and deduplication |
 | `extraction.py` | Bounded format parsers, immutable structured artifacts, extraction run lifecycle |
 | `field_mapping.py` | Workflow field profiles plus required/evidence/confidence gates |
 | `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
+| `ai/briefing.py` | Tool-free Chat Completions rerank with request minimization, output whitelist, and fallback |
 | `workflow_state.py` | Human review, exact-evidence revalidation, optimistic state transitions |
-| `scheduler.py` | Keychain reads, bounded manual-CLI child process, private outcome log |
+| `scheduler.py` | Independent bounded sync/brief/open stages, Keychain reads, private outcome log |
+| `runtime_deployment.py` | Content-addressed Application Support release, locked install smoke, SQLite online seed |
 | `web/` | React/Vite source for overview, launch catalog, materials, drafts, and follow-up views |
 | `web_dist/` | Hashed production assets served by FastAPI and packaged in the wheel |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
@@ -91,9 +101,12 @@ sync service  --------------------> SQLite state/audit
 | `tools/sync_work_items.py` | Eleven-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
-| `tools/scheduled_sync.py` | LaunchAgent entrypoint; invokes the existing manual sync CLI |
-| `tools/install_launch_agent.py` | Atomic plist render/install/rollback/uninstall |
+| `tools/scheduled_sync.py` | Daily LaunchAgent entrypoint; syncs, briefs, and opens the workspace |
+| `tools/generate_daily_brief.py` | Account-scoped local/model briefing child with safe count-only stdout |
+| `tools/install_launch_agent.py` | Atomic daily plist render/install/rollback against the immutable runtime |
+| `tools/install_web_launch_agent.py` | Persistent loopback service install, target PID/health gate, and rollback |
 | `tools/configure_sync_keychain.py` | Interactive Keychain provisioning without credential CLI args |
+| `tools/configure_assistant_keychain.py` | Optional chat endpoint/model/key provisioning without value CLI args |
 
 ## Safety model
 
@@ -128,6 +141,10 @@ sync service  --------------------> SQLite state/audit
 12. The workflow launcher is a fixed browser-only handoff. It appends no local
     Bearer token, Cookie, form value, ViewState, or business identifier; new tabs use
     `noopener noreferrer`. `GuardedTransport` never receives these navigations.
+13. The follow-up assistant has no tools or workflow executor. Normal GET reads its
+    account SQLite only. A configured model receives at most 100 minimal unapproved
+    records, and its item keys must close over that input set before persistence.
+    Any model/config/network/JSON failure writes the deterministic local order.
 
 ## Evidence pipeline
 
@@ -261,9 +278,11 @@ The Vite build is mounted after all `/v1`, `/health`, `/docs`, and OpenAPI route
 so API routing takes precedence. Runtime deployment needs only the Python wheel;
 Node, browser automation, and third-party CDNs are absent from the serving path.
 
-After login, the UI loads five independent local measurements concurrently:
-materials, extraction runs, draft summaries, current account-visible snapshots, and
-sync runs. SQLite schema initialization is serialized by a process thread lock
+After login, the UI loads the existing workspace/read-only datasets plus the latest
+account-scoped assistant briefing concurrently. The overview uses independent left
+and right vertical stacks: all-unapproved groups stay on the left, while draft review,
+the daily assistant, and sync history stay contiguous on the right. SQLite schema
+initialization is serialized by a process thread lock
 and a mode `0600` per-database advisory lock with a 10-second ceiling. This
 prevents first-run requests or a simultaneous scheduler process from racing
 migrations or moving `PRAGMA user_version` backwards.
@@ -285,12 +304,20 @@ Payment go to their proven first step; the legacy BizCase and Fee Management ent
 go to their original application pages because their server-side add controls depend
 on current WebForms state. Closing the dialog restores focus to its trigger.
 
+The assistant `GET` never loads Keychain and never calls a model or iPSA. Its v9
+tables retain preference versions and idempotent daily briefings. Preference POST,
+clear, manual refresh, and the daily CLI may attempt the optional provider; old
+briefing content remains visible until a replacement is validated and committed.
+Wait days derived from an application/submission date are visibly marked as an
+estimate rather than asserted as exact current-node dwell time.
+
 ## Scheduled measurement loop
 
-The weekday LaunchAgent does not embed a scheduler in FastAPI and does not need
-the app window to remain open. It starts `tools/scheduled_sync.py`, which performs
-bounded Keychain reads and launches the existing `tools/sync_work_items.py`
-subprocess with credentials only in that child environment.
+The daily LaunchAgent does not embed a scheduler in FastAPI. At 08:30 on all seven
+days it starts `tools/scheduled_sync.py`, which runs three independent bounded stages:
+the existing sync child, a daily briefing child, and `/usr/bin/open` for the local
+workspace. Credentials exist only in the sync/brief child environments and are
+cleared immediately afterward.
 
 The child still uses the exact P3 complete-read and transactional SQLite path,
 then reuses the same authenticated client and account storage for the Payment,
@@ -303,9 +330,15 @@ only safe counts/outcome data to a mode `0600` JSON-lines log. Child stderr is
 redacted before failure logging. Keychain lookup, sync, `plutil`, and `launchctl`
 commands all have explicit timeouts.
 
+The briefing stage reads the newest complete account SQLite state even when the
+new sync failed. It performs a deterministic stable sort first, then optionally
+lets a chat model reorder only known keys. The final open stage executes after sync
+setup, sync, briefing, provider, or briefing-CLI failures. A separate Web LaunchAgent
+keeps FastAPI alive on loopback and requires `/health` before installation is accepted.
+
 Installation is reversible: an existing plist is copied to a mode `0600`
 `.backup`; the new plist is atomically written and linted before the old service
 is stopped. Any later bootstrap/enable/print failure restores the old file and,
-if it had been loaded, attempts to bootstrap it again. The current workstation
-has the credential-free plist loaded for five weekday 08:30 triggers; runtime
-credentials remain only in the local Keychain.
+if it had been loaded, attempts to bootstrap it again. Both installed plists are
+credential-free and mode `0600`; runtime credentials and optional model configuration
+remain only in the local Keychain.

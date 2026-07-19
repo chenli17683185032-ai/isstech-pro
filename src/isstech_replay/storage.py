@@ -23,6 +23,13 @@ from .models.drafts import (
     ReviewDecision,
     WorkflowDraft,
 )
+from .models.assistant import (
+    AssistantBrief,
+    AssistantBriefItem,
+    AssistantBriefSource,
+    AssistantPreference,
+    WaitingBasis,
+)
 from .models.extraction import (
     ExtractionResult,
     ExtractionStatus,
@@ -44,7 +51,7 @@ from .models.work_items import (
 )
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DATABASE_NAME = "workflow-center.sqlite3"
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -63,22 +70,25 @@ _READONLY_MODULE_TABLES = {
     "readonly_module_current",
     "readonly_scope_assertions",
 }
+_ASSISTANT_TABLES = {"assistant_preferences", "assistant_briefs"}
 _REQUIRED_TABLES = (
     _WORKFLOW_TABLES
     | _MATERIAL_TABLES
     | _EXTRACTION_TABLES
     | _DRAFT_TABLES
     | _READONLY_MODULE_TABLES
+    | _ASSISTANT_TABLES
 )
 _REQUIRED_TABLES_BY_VERSION = {
     1: _WORKFLOW_TABLES,
     2: _WORKFLOW_TABLES | _MATERIAL_TABLES,
     3: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES,
     4: _WORKFLOW_TABLES | _MATERIAL_TABLES | _EXTRACTION_TABLES | _DRAFT_TABLES,
-    5: _REQUIRED_TABLES - {"readonly_scope_assertions"},
-    6: _REQUIRED_TABLES,
-    7: _REQUIRED_TABLES,
-    8: _REQUIRED_TABLES,
+    5: _REQUIRED_TABLES - {"readonly_scope_assertions"} - _ASSISTANT_TABLES,
+    6: _REQUIRED_TABLES - _ASSISTANT_TABLES,
+    7: _REQUIRED_TABLES - _ASSISTANT_TABLES,
+    8: _REQUIRED_TABLES - _ASSISTANT_TABLES,
+    9: _REQUIRED_TABLES,
 }
 _MIGRATIONS = {
     1: "migration_002_materials.sql",
@@ -88,6 +98,7 @@ _MIGRATIONS = {
     5: "migration_006_readonly_scope.sql",
     6: "migration_007_daily_expense.sql",
     7: "migration_008_fee_applications.sql",
+    8: "migration_009_assistant.sql",
 }
 _INITIALIZATION_THREAD_LOCK = threading.Lock()
 _INITIALIZATION_LOCK_TIMEOUT_SECONDS = 10.0
@@ -1083,6 +1094,293 @@ class WorkflowStorage:
             return dict(row) if row is not None else None
         finally:
             connection.close()
+
+    def add_assistant_preference(
+        self,
+        *,
+        text: str,
+        created_at: str,
+    ) -> AssistantPreference:
+        normalized = " ".join(text.split())
+        if not normalized:
+            raise ValueError("assistant preference is required")
+        if len(normalized) > 500:
+            raise ValueError("assistant preference exceeds 500 characters")
+        if not created_at.strip():
+            raise ValueError("assistant preference timestamp is required")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "INSERT INTO assistant_preferences (created_at, text, active) "
+                    "VALUES (?, ?, 1)",
+                    (created_at, normalized),
+                )
+                preference_id = int(cursor.lastrowid)
+                self._prune_assistant_preferences(connection)
+        finally:
+            connection.close()
+        return AssistantPreference(
+            preference_id=preference_id,
+            created_at=created_at,
+            text=normalized,
+        )
+
+    def clear_assistant_preferences(self, *, created_at: str) -> int:
+        if not created_at.strip():
+            raise ValueError("assistant preference timestamp is required")
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                cursor = connection.execute(
+                    "INSERT INTO assistant_preferences (created_at, text, active) "
+                    "VALUES (?, '', 0)",
+                    (created_at,),
+                )
+                preference_id = int(cursor.lastrowid)
+                self._prune_assistant_preferences(connection)
+                return preference_id
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _prune_assistant_preferences(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "DELETE FROM assistant_preferences WHERE preference_id NOT IN "
+            "(SELECT preference_id FROM assistant_preferences "
+            "ORDER BY preference_id DESC LIMIT 50)"
+        )
+
+    def list_assistant_preferences(
+        self,
+        *,
+        limit: int = 50,
+    ) -> tuple[AssistantPreference, ...]:
+        if limit < 1 or limit > 50:
+            raise ValueError("assistant preference limit must be between 1 and 50")
+        self.initialize()
+        connection = self._connect()
+        try:
+            clear_row = connection.execute(
+                "SELECT COALESCE(MAX(preference_id), 0) AS preference_id "
+                "FROM assistant_preferences WHERE active = 0"
+            ).fetchone()
+            clear_id = int(clear_row["preference_id"])
+            rows = connection.execute(
+                "SELECT preference_id, created_at, text FROM assistant_preferences "
+                "WHERE active = 1 AND preference_id > ? "
+                "ORDER BY preference_id ASC LIMIT ?",
+                (clear_id, limit),
+            ).fetchall()
+            return tuple(
+                AssistantPreference(
+                    preference_id=int(row["preference_id"]),
+                    created_at=str(row["created_at"]),
+                    text=str(row["text"]),
+                )
+                for row in rows
+            )
+        finally:
+            connection.close()
+
+    def assistant_preference_version(self) -> int:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(preference_id), 0) AS preference_id "
+                "FROM assistant_preferences"
+            ).fetchone()
+            return int(row["preference_id"])
+        finally:
+            connection.close()
+
+    def save_assistant_brief(
+        self,
+        brief: AssistantBrief,
+        *,
+        retention_cutoff: str,
+    ) -> AssistantBrief:
+        if not _HASH_RE.fullmatch(brief.snapshot_hash):
+            raise ValueError("assistant snapshot hash must be lowercase SHA-256")
+        if len(brief.business_date) != 10 or len(retention_cutoff) != 10:
+            raise ValueError("assistant retention dates must use YYYY-MM-DD")
+        if not brief.summary or len(brief.summary) > 500:
+            raise ValueError("assistant summary is invalid")
+        if len(brief.items) > 5 or brief.candidate_count < len(brief.items):
+            raise ValueError("assistant brief item counts are invalid")
+        payload = {
+            "items": [
+                {
+                    "item_key": item.item_key,
+                    "category": item.category,
+                    "reference": item.reference,
+                    "title": item.title,
+                    "project": item.project,
+                    "status": item.status,
+                    "current_approver": item.current_approver,
+                    "waiting_days": item.waiting_days,
+                    "waiting_basis": item.waiting_basis.value,
+                    "destination": item.destination,
+                    "target": item.target,
+                    "reason": item.reason,
+                }
+                for item in brief.items
+            ]
+        }
+        payload_json = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        self.initialize()
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    "INSERT INTO assistant_briefs "
+                    "(brief_id, business_date, snapshot_hash, preference_version, "
+                    "generated_at, source, provider, model, provider_configured, "
+                    "fallback_code, summary, candidate_count, payload_json, payload_hash) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(business_date, snapshot_hash, preference_version) "
+                    "DO UPDATE SET generated_at = excluded.generated_at, "
+                    "source = excluded.source, provider = excluded.provider, "
+                    "model = excluded.model, "
+                    "provider_configured = excluded.provider_configured, "
+                    "fallback_code = excluded.fallback_code, "
+                    "summary = excluded.summary, candidate_count = excluded.candidate_count, "
+                    "payload_json = excluded.payload_json, payload_hash = excluded.payload_hash",
+                    (
+                        brief.brief_id,
+                        brief.business_date,
+                        brief.snapshot_hash,
+                        brief.preference_version,
+                        brief.generated_at,
+                        brief.source.value,
+                        brief.provider,
+                        brief.model,
+                        int(brief.provider_configured),
+                        brief.fallback_code,
+                        brief.summary,
+                        brief.candidate_count,
+                        payload_json,
+                        payload_hash,
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM assistant_briefs WHERE business_date < ?",
+                    (retention_cutoff,),
+                )
+                row = connection.execute(
+                    "SELECT * FROM assistant_briefs WHERE business_date = ? "
+                    "AND snapshot_hash = ? AND preference_version = ?",
+                    (
+                        brief.business_date,
+                        brief.snapshot_hash,
+                        brief.preference_version,
+                    ),
+                ).fetchone()
+                if row is None:
+                    raise StorageError("assistant brief upsert lost its row")
+                return self._assistant_brief_from_row(row)
+        finally:
+            connection.close()
+
+    def latest_assistant_brief(self) -> AssistantBrief | None:
+        self.initialize()
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT * FROM assistant_briefs "
+                "ORDER BY generated_at DESC, brief_id DESC LIMIT 1"
+            ).fetchone()
+            return self._assistant_brief_from_row(row) if row is not None else None
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _assistant_brief_from_row(row: sqlite3.Row) -> AssistantBrief:
+        payload_json = str(row["payload_json"])
+        actual_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        if actual_hash != row["payload_hash"]:
+            raise StorageError("assistant brief payload hash does not match")
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError as exc:
+            raise StorageError("assistant brief payload is invalid JSON") from exc
+        raw_items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(raw_items, list):
+            raise StorageError("assistant brief payload items are invalid")
+        items: list[AssistantBriefItem] = []
+        text_fields = (
+            "item_key",
+            "category",
+            "reference",
+            "title",
+            "project",
+            "status",
+            "current_approver",
+            "destination",
+            "reason",
+        )
+        for raw in raw_items:
+            if not isinstance(raw, dict) or any(
+                not isinstance(raw.get(field), str) for field in text_fields
+            ):
+                raise StorageError("assistant brief item shape is invalid")
+            waiting_days = raw.get("waiting_days")
+            if waiting_days is not None and (
+                isinstance(waiting_days, bool)
+                or not isinstance(waiting_days, int)
+                or waiting_days < 0
+            ):
+                raise StorageError("assistant brief waiting days are invalid")
+            target = raw.get("target")
+            if target is not None and not isinstance(target, str):
+                raise StorageError("assistant brief target is invalid")
+            try:
+                waiting_basis = WaitingBasis(raw.get("waiting_basis"))
+            except ValueError as exc:
+                raise StorageError("assistant brief waiting basis is invalid") from exc
+            items.append(
+                AssistantBriefItem(
+                    item_key=raw["item_key"],
+                    category=raw["category"],
+                    reference=raw["reference"],
+                    title=raw["title"],
+                    project=raw["project"],
+                    status=raw["status"],
+                    current_approver=raw["current_approver"],
+                    waiting_days=waiting_days,
+                    waiting_basis=waiting_basis,
+                    destination=raw["destination"],
+                    target=target,
+                    reason=raw["reason"],
+                )
+            )
+        fallback_code = row["fallback_code"]
+        if fallback_code is not None and not isinstance(fallback_code, str):
+            raise StorageError("assistant brief fallback code is invalid")
+        return AssistantBrief(
+            brief_id=str(row["brief_id"]),
+            business_date=str(row["business_date"]),
+            snapshot_hash=str(row["snapshot_hash"]),
+            preference_version=int(row["preference_version"]),
+            generated_at=str(row["generated_at"]),
+            source=AssistantBriefSource(str(row["source"])),
+            provider=str(row["provider"]),
+            model=str(row["model"]),
+            provider_configured=bool(row["provider_configured"]),
+            fallback_code=fallback_code,
+            summary=str(row["summary"]),
+            items=tuple(items),
+            candidate_count=int(row["candidate_count"]),
+        )
 
     def get_run(self, run_id: str) -> dict[str, object] | None:
         self.initialize()

@@ -8,6 +8,7 @@ import {
   ListTodo,
 } from "lucide-react";
 import Button from "../components/Button";
+import AssistantPanel from "../components/AssistantPanel";
 import EmptyState from "../components/EmptyState";
 import StatusTag from "../components/StatusTag";
 import { formatDateTime } from "../lib/format";
@@ -158,6 +159,7 @@ export default function OverviewView({
   readonlyData,
   readonlyLoading,
   readonlyError,
+  assistant,
 }) {
   const reviewDrafts = data.drafts.filter((draft) =>
     ["extracted", "needs_review"].includes(draft.state),
@@ -214,67 +216,73 @@ export default function OverviewView({
       </section>
 
       <div className="overview-grid">
-        <section className="content-section overview-grid__wide">
-          <div className="section-heading">
-            <div>
-              <h2>未审批流程</h2>
-              <span>{readonlyError ? "部分本地快照不可用" : `${groups.length} 个类目 · ${unapprovedCount} 条`}</span>
-            </div>
-          </div>
-          {groups.length ? (
-            <UnapprovedWorkflowGroups groups={groups} navigate={navigate} />
-          ) : (
-            <EmptyState icon={ListTodo} title={isLoading ? "正在读取本地快照" : "暂无未审批流程"} />
-          )}
-        </section>
-
-        <section className="content-section">
-          <div className="section-heading">
-            <div><h2>待审草稿</h2><span>{reviewDrafts.length} 项</span></div>
-            <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("drafts")}>进入审阅</Button>
-          </div>
-          {reviewDrafts.length ? (
-            <div className="compact-list">
-              {reviewDrafts.slice(0, 5).map((draft) => (
-                <button key={draft.draft_id} onClick={() => navigate("drafts")} type="button">
-                  <span className="compact-list__main"><strong>{draft.title}</strong><small>{formatDateTime(draft.updated_at)}</small></span>
-                  <span className="compact-list__aside"><StatusTag value={draft.state} /><small>{draft.pending_count} 待处理</small></span>
-                </button>
-              ))}
-            </div>
-          ) : <EmptyState icon={ClipboardCheck} title="暂无待审草稿" />}
-        </section>
-
-        <section className="content-section overview-grid__wide">
-          <div className="section-heading">
-            <div><h2>最近材料</h2><span>{data.materials.length} 份本地材料</span></div>
-            <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("materials")}>管理材料</Button>
-          </div>
-          {data.materials.length ? (
-            <div className="material-rail">
-              {data.materials.slice(0, 4).map((material) => (
-                <button key={material.id} type="button" onClick={() => navigate("materials")}>
-                  <FileText size={18} />
-                  <span><strong>{material.original_name}</strong><small>{formatDateTime(material.created_at)}</small></span>
-                  <StatusTag value={material.status} />
-                </button>
-              ))}
-            </div>
-          ) : <EmptyState icon={Inbox} title="暂无本地材料" />}
-        </section>
-
-        <section className="content-section sync-history">
-          <div className="section-heading"><div><h2>同步记录</h2><span>最近 {data.syncRuns.length} 次</span></div></div>
-          <div className="compact-list compact-list--plain">
-            {data.syncRuns.slice(0, 5).map((run) => (
-              <div key={run.run_id}>
-                <span className="compact-list__main"><strong>{formatDateTime(run.started_at)}</strong><small>{run.observed_count} 条 / {run.actionable_count} 待办</small></span>
-                <StatusTag value={run.status} />
+        <div className="overview-grid__main">
+          <section className="content-section">
+            <div className="section-heading">
+              <div>
+                <h2>未审批流程</h2>
+                <span>{readonlyError ? "部分本地快照不可用" : `${groups.length} 个类目 · ${unapprovedCount} 条`}</span>
               </div>
-            ))}
-            {!data.syncRuns.length ? <span className="muted-row">暂无同步记录</span> : null}
-          </div>
-        </section>
+            </div>
+            {groups.length ? (
+              <UnapprovedWorkflowGroups groups={groups} navigate={navigate} />
+            ) : (
+              <EmptyState icon={ListTodo} title={isLoading ? "正在读取本地快照" : "暂无未审批流程"} />
+            )}
+          </section>
+
+          <section className="content-section">
+            <div className="section-heading">
+              <div><h2>最近材料</h2><span>{data.materials.length} 份本地材料</span></div>
+              <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("materials")}>管理材料</Button>
+            </div>
+            {data.materials.length ? (
+              <div className="material-rail">
+                {data.materials.slice(0, 4).map((material) => (
+                  <button key={material.id} type="button" onClick={() => navigate("materials")}>
+                    <FileText size={18} />
+                    <span><strong>{material.original_name}</strong><small>{formatDateTime(material.created_at)}</small></span>
+                    <StatusTag value={material.status} />
+                  </button>
+                ))}
+              </div>
+            ) : <EmptyState icon={Inbox} title="暂无本地材料" />}
+          </section>
+        </div>
+
+        <div className="overview-grid__aside">
+          <section className="content-section">
+            <div className="section-heading">
+              <div><h2>待审草稿</h2><span>{reviewDrafts.length} 项</span></div>
+              <Button variant="ghost" icon={ArrowRight} onClick={() => navigate("drafts")}>进入审阅</Button>
+            </div>
+            {reviewDrafts.length ? (
+              <div className="compact-list">
+                {reviewDrafts.slice(0, 5).map((draft) => (
+                  <button key={draft.draft_id} onClick={() => navigate("drafts")} type="button">
+                    <span className="compact-list__main"><strong>{draft.title}</strong><small>{formatDateTime(draft.updated_at)}</small></span>
+                    <span className="compact-list__aside"><StatusTag value={draft.state} /><small>{draft.pending_count} 待处理</small></span>
+                  </button>
+                ))}
+              </div>
+            ) : <EmptyState icon={ClipboardCheck} title="暂无待审草稿" />}
+          </section>
+
+          <AssistantPanel assistant={assistant} navigate={navigate} />
+
+          <section className="content-section sync-history">
+            <div className="section-heading"><div><h2>同步记录</h2><span>最近 {data.syncRuns.length} 次</span></div></div>
+            <div className="compact-list compact-list--plain">
+              {data.syncRuns.slice(0, 5).map((run) => (
+                <div key={run.run_id}>
+                  <span className="compact-list__main"><strong>{formatDateTime(run.started_at)}</strong><small>{run.observed_count} 条 / {run.actionable_count} 待办</small></span>
+                  <StatusTag value={run.status} />
+                </div>
+              ))}
+              {!data.syncRuns.length ? <span className="muted-row">暂无同步记录</span> : null}
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { apiRequest } from "./api";
 import AppShell from "./components/AppShell";
 import LoginScreen from "./components/LoginScreen";
 import Toast from "./components/Toast";
+import useAssistantData from "./hooks/useAssistantData";
 import useReadonlyModulesData from "./hooks/useReadonlyModulesData";
 import useWorkspaceData from "./hooks/useWorkspaceData";
 import DraftsView from "./views/DraftsView";
@@ -51,6 +52,7 @@ export default function App() {
   }, []);
   const workspace = useWorkspaceData(token, clearSession);
   const readonlyModules = useReadonlyModulesData(token, clearSession);
+  const assistant = useAssistantData(token, clearSession);
   const navigate = useCallback((view, target = null) => {
     setReadonlyTarget(view === "readonly-modules" ? target : null);
     setActiveView(view);
@@ -182,6 +184,7 @@ export default function App() {
       readonlyData={readonlyModules.data}
       readonlyLoading={readonlyModules.loading}
       readonlyError={readonlyModules.error}
+      assistant={assistant}
     />
   );
 

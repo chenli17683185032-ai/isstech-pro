@@ -13,7 +13,7 @@ from isstech_replay.scheduler import (
     DEFAULT_KEYCHAIN_TIMEOUT_SECONDS,
     DEFAULT_SYNC_TIMEOUT_SECONDS,
     ScheduledSyncConfig,
-    run_scheduled_sync,
+    run_scheduled_day,
 )
 
 
@@ -53,7 +53,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else data_dir / "logs" / "scheduled-sync.log"
     )
     try:
-        exit_code = run_scheduled_sync(
+        result = run_scheduled_day(
             ScheduledSyncConfig(
                 repo_root=args.repo_root,
                 python_executable=Path(sys.executable),
@@ -69,14 +69,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if exit_code == 0:
-        print(f"SCHEDULED_SYNC_OK log={log_file}")
+    if result.exit_code == 0:
+        print(f"SCHEDULED_DAY_OK log={log_file}")
     else:
         print(
-            f"SCHEDULED_SYNC_FAILED exit_code={exit_code}; log={log_file}",
+            "SCHEDULED_DAY_FAILED "
+            f"sync={result.sync_exit_code} brief={result.brief_exit_code} "
+            f"open={result.open_exit_code}; log={log_file}",
             file=sys.stderr,
         )
-    return exit_code
+    return result.exit_code
 
 
 if __name__ == "__main__":

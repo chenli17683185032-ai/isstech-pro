@@ -16,6 +16,7 @@ from isstech_replay.scheduler import (
     ScheduledSyncConfig,
     ScheduledSyncError,
     read_keychain_value,
+    run_scheduled_day,
     run_scheduled_sync,
 )
 from tools import configure_sync_keychain as keychain_cli
@@ -35,6 +36,7 @@ def _config(tmp_path: Path) -> ScheduledSyncConfig:
     repo = tmp_path / "repo"
     (repo / "tools").mkdir(parents=True)
     (repo / "tools" / "sync_work_items.py").write_text("# test\n", encoding="utf-8")
+    (repo / "tools" / "generate_daily_brief.py").write_text("# test\n", encoding="utf-8")
     python = repo / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
@@ -169,6 +171,184 @@ def test_scheduled_sync_preserves_virtualenv_interpreter_symlink(tmp_path: Path)
     assert command[0] != str(interpreter_link.resolve())
 
 
+def test_scheduled_day_runs_sync_brief_and_open_with_safe_stage_logs(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    commands: list[list[str]] = []
+
+    def runner(command, **_kwargs):
+        commands.append(list(command))
+        if command[0] == "/usr/bin/open":
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command[1].endswith("generate_daily_brief.py"):
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "status": "succeeded",
+                        "source": "fallback",
+                        "candidate_count": 4,
+                        "item_count": 4,
+                        "provider_configured": False,
+                        "fallback_code": "provider_not_configured",
+                    }
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "run_id": "run-day",
+                    "status": "succeeded",
+                    "observed_count": 12,
+                    "actionable_count": 4,
+                    "events": [],
+                }
+            ),
+            stderr="",
+        )
+
+    result = run_scheduled_day(
+        config,
+        credential_reader=_credentials,
+        runner=runner,
+        account="local-test-account",
+        now=NOW,
+    )
+
+    assert result.exit_code == 0
+    assert result.sync_exit_code == 0
+    assert result.brief_exit_code == 0
+    assert result.open_exit_code == 0
+    assert commands[-1] == ["/usr/bin/open", "http://127.0.0.1:8000/"]
+    records = _log_records(config.log_file)
+    assert len(records) == 3
+    assert records[1]["stage"] == "brief"
+    assert records[1]["candidate_count"] == 4
+    assert records[2]["stage"] == "open"
+    serialized = config.log_file.read_text(encoding="utf-8")
+    assert USERNAME not in serialized
+    assert PASSWORD not in serialized
+
+
+def test_scheduled_day_still_briefs_and_opens_after_sync_failure(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    stages: list[str] = []
+
+    def runner(command, **_kwargs):
+        if command[0] == "/usr/bin/open":
+            stages.append("open")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command[1].endswith("generate_daily_brief.py"):
+            stages.append("brief")
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "status": "succeeded",
+                        "source": "fallback",
+                        "candidate_count": 3,
+                        "item_count": 3,
+                        "provider_configured": True,
+                        "fallback_code": "provider_timeout",
+                    }
+                ),
+                stderr="",
+            )
+        stages.append("sync")
+        return subprocess.CompletedProcess(
+            command,
+            7,
+            stdout="",
+            stderr="SYNC_FAILED run_id=failed-day ConnectError",
+        )
+
+    result = run_scheduled_day(
+        config,
+        credential_reader=_credentials,
+        runner=runner,
+        account="local-test-account",
+        now=NOW,
+    )
+
+    assert stages == ["sync", "brief", "open"]
+    assert result.sync_exit_code == 7
+    assert result.brief_exit_code == 0
+    assert result.open_exit_code == 0
+    assert result.exit_code == 7
+
+
+def test_scheduled_day_still_opens_after_brief_timeout(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    opened = False
+
+    def runner(command, **_kwargs):
+        nonlocal opened
+        if command[0] == "/usr/bin/open":
+            opened = True
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command[1].endswith("generate_daily_brief.py"):
+            raise subprocess.TimeoutExpired(command, timeout=config.brief_timeout_seconds)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "run_id": "run-before-timeout",
+                    "status": "succeeded",
+                    "observed_count": 1,
+                    "actionable_count": 1,
+                    "events": [],
+                }
+            ),
+            stderr="",
+        )
+
+    result = run_scheduled_day(
+        config,
+        credential_reader=_credentials,
+        runner=runner,
+        account="local-test-account",
+        now=NOW,
+    )
+
+    assert result.sync_exit_code == 0
+    assert result.brief_exit_code == 124
+    assert result.open_exit_code == 0
+    assert opened is True
+
+
+def test_scheduled_day_still_opens_when_sync_executable_is_missing(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.python_executable.unlink()
+    opened = False
+
+    def runner(command, **_kwargs):
+        nonlocal opened
+        if command[0] == "/usr/bin/open":
+            opened = True
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        raise FileNotFoundError(command[0])
+
+    result = run_scheduled_day(
+        config,
+        credential_reader=_credentials,
+        runner=runner,
+        account="local-test-account",
+        now=NOW,
+    )
+
+    assert result.sync_exit_code == 1
+    assert result.brief_exit_code == 1
+    assert result.open_exit_code == 0
+    assert opened is True
+
+
 def test_keychain_failure_is_nonzero_logged_and_does_not_start_sync(tmp_path: Path) -> None:
     config = _config(tmp_path)
     called = False
@@ -275,11 +455,15 @@ def test_keychain_reader_uses_bounded_security_stdout_only() -> None:
     assert kwargs["capture_output"] is True
 
 
-def test_plist_render_has_weekdays_private_umask_and_no_credentials(tmp_path: Path) -> None:
+def test_plist_render_has_daily_intervals_private_umask_and_no_credentials(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
+    data_dir = tmp_path / "Application Support" / "data"
     rendered = render_plist(
         Path(__file__).parents[1] / "ops" / "com.isstech.workflow-center.sync.plist",
-        repo_root=repo,
+        runtime_root=repo,
+        data_dir=data_dir,
         hour=9,
         minute=15,
     )
@@ -289,11 +473,13 @@ def test_plist_render_has_weekdays_private_umask_and_no_credentials(tmp_path: Pa
     assert payload["ProgramArguments"][0] == str(repo / ".venv" / "bin" / "python")
     assert payload["ProgramArguments"][1] == str(repo / "tools" / "scheduled_sync.py")
     assert payload["WorkingDirectory"] == str(repo)
+    assert payload["ProgramArguments"][5] == str(data_dir)
+    assert payload["ProgramArguments"][7] == str(data_dir / "logs" / "scheduled-sync.log")
     assert payload["Umask"] == 0o77
     assert payload["StandardOutPath"] == "/dev/null"
     assert payload["StandardErrorPath"] == "/dev/null"
     assert payload["StartCalendarInterval"] == [
-        {"Weekday": weekday, "Hour": 9, "Minute": 15} for weekday in range(1, 6)
+        {"Weekday": weekday, "Hour": 9, "Minute": 15} for weekday in range(1, 8)
     ]
     lowered = rendered.lower()
     for forbidden in (b"password", b"username", b"cookie", b"ticket", b".ipsa"):
@@ -311,7 +497,7 @@ def test_install_without_bootstrap_is_atomic_private_and_reversible(tmp_path: Pa
     destination = tmp_path / "LaunchAgents" / "agent.plist"
     content = render_plist(
         Path(__file__).parents[1] / "ops" / "com.isstech.workflow-center.sync.plist",
-        repo_root=repo,
+        runtime_root=repo,
         hour=8,
         minute=30,
     )
@@ -319,7 +505,7 @@ def test_install_without_bootstrap_is_atomic_private_and_reversible(tmp_path: Pa
     install_agent(
         content,
         destination=destination,
-        repo_root=repo,
+        runtime_root=repo,
         bootstrap=False,
         timeout_seconds=5,
     )
@@ -343,7 +529,7 @@ def test_failed_bootstrap_restores_previous_file_and_service(tmp_path: Path) -> 
     destination.write_bytes(previous)
     content = render_plist(
         Path(__file__).parents[1] / "ops" / "com.isstech.workflow-center.sync.plist",
-        repo_root=repo,
+        runtime_root=repo,
         hour=8,
         minute=30,
     )
@@ -353,12 +539,14 @@ def test_failed_bootstrap_restores_previous_file_and_service(tmp_path: Path) -> 
         nonlocal bootstrap_calls
         action = command[1]
         if action == "print":
-            return subprocess.CompletedProcess(command, 0, stdout="loaded", stderr="")
+            code = 0 if bootstrap_calls == 0 else 113
+            return subprocess.CompletedProcess(command, code, stdout="", stderr="")
         if action == "bootstrap":
             bootstrap_calls += 1
+            code = 0 if destination.read_bytes() == previous else 5
             return subprocess.CompletedProcess(
                 command,
-                5 if bootstrap_calls == 1 else 0,
+                code,
                 stdout="",
                 stderr="failed",
             )
@@ -371,9 +559,9 @@ def test_failed_bootstrap_restores_previous_file_and_service(tmp_path: Path) -> 
         install_agent(
             content,
             destination=destination,
-            repo_root=repo,
+            runtime_root=repo,
             bootstrap=True,
-            timeout_seconds=5,
+            timeout_seconds=0.01,
             runner=runner,
             require_keychain=lambda _account, _timeout: None,
         )
@@ -399,7 +587,7 @@ def test_failed_plist_lint_restores_file_without_stopping_old_service(
     destination.write_bytes(previous)
     content = render_plist(
         Path(__file__).parents[1] / "ops" / "com.isstech.workflow-center.sync.plist",
-        repo_root=repo,
+        runtime_root=repo,
         hour=8,
         minute=30,
     )
@@ -418,7 +606,7 @@ def test_failed_plist_lint_restores_file_without_stopping_old_service(
         install_agent(
             content,
             destination=destination,
-            repo_root=repo,
+            runtime_root=repo,
             bootstrap=True,
             timeout_seconds=5,
             runner=runner,
@@ -427,6 +615,48 @@ def test_failed_plist_lint_restores_file_without_stopping_old_service(
 
     assert destination.read_bytes() == previous
     assert actions == ["print", "-lint"]
+
+
+def test_install_retries_transient_bootstrap_failure(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    python = repo / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    wrapper = repo / "tools" / "scheduled_sync.py"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text("", encoding="utf-8")
+    destination = tmp_path / "LaunchAgents" / "agent.plist"
+    content = render_plist(
+        Path(__file__).parents[1] / "ops" / "com.isstech.workflow-center.sync.plist",
+        runtime_root=repo,
+        hour=8,
+        minute=30,
+    )
+    bootstrap_calls = 0
+
+    def runner(command, **_kwargs):
+        nonlocal bootstrap_calls
+        action = command[1]
+        if action == "bootstrap":
+            bootstrap_calls += 1
+            code = 5 if bootstrap_calls == 1 else 0
+            return subprocess.CompletedProcess(command, code, stdout="", stderr="")
+        if action == "print":
+            code = 0 if bootstrap_calls >= 2 else 113
+            return subprocess.CompletedProcess(command, code, stdout="", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    install_agent(
+        content,
+        destination=destination,
+        runtime_root=repo,
+        bootstrap=True,
+        timeout_seconds=1,
+        runner=runner,
+        require_keychain=lambda _account, _timeout: None,
+    )
+
+    assert bootstrap_calls == 2
 
 
 def test_keychain_configuration_uses_security_prompt_not_value_argument(

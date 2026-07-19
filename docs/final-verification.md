@@ -20,20 +20,24 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-The current P9.13 automated gate has 401 passing tests, clean Ruff, deterministic
-OpenAPI, secret/evidence verification, a 1,596-module React production build, a
-79-file wheel, valid committed/rendered plists, schema v7-to-v8 migration, and
-`git diff --check`. Credentialed acceptance kept Payment at 10 personal records,
-BizCase at 55 source records and one locally asserted personal record, retained 54
-identity-bound travel applications and one daily expense, and added two travel
-reimbursements plus 28 travel subsidies. The final dual-module replay was unchanged
-at `2/2/0` and `28/28/0`; every attempt made zero BizCase requests and zero business
-writes. The local production API reports four non-empty Fee Management categories
-with 85 records and six homepage groups with 21 unapproved records. The production
-bundle also contains seven exact IPSA browser handoffs, `noopener noreferrer`, and
-no local submission API. Two in-app Browser attempts on `2026-07-19` could not attach
-a local page, so new-launcher screenshot QA remains an explicitly recorded residual
-check rather than being reported as passed.
+The current P9.14 automated gate has 432 passing tests, clean Ruff, deterministic
+OpenAPI, secret/evidence verification, a 1,598-module React production build, an
+85-file wheel, two valid committed/rendered plists, schema v8-to-v9 migration, and
+`git diff --check`. The production API retains the P9.13 four non-empty Fee Management
+categories/85 records and six homepage groups/21 unapproved records, then adds an
+account-scoped assistant briefing and versioned preferences without changing any
+upstream policy. A real local-only run upgraded the account database to v9 with
+integrity `ok` and generated five fallback priorities from 21 candidates without a
+model or iPSA request. The bundle still contains seven exact IPSA browser handoffs,
+`noopener noreferrer`, and no local submission API.
+
+Browser QA used synthetic local data only. At 1440x900 the right column order was
+draft review, assistant, sync history; the assistant occupied y=318..744 with no
+horizontal overflow. At 390x844 it was 366px wide in a 390px page, priority feedback
+updated the reason and current-preference state, and page scrollWidth equaled
+clientWidth. Desktop and mobile console warning/error counts were both zero. The
+ignored screenshots are `outputs/p914-assistant-desktop-qa.png` and
+`outputs/p914-assistant-mobile-qa.png`.
 
 ## Operator evidence check
 
@@ -202,6 +206,7 @@ mock login -> material in local store -> local_rules extraction -> draft
 -> mock Portal identity + five read-only SearchIndex streams
 -> complete account-visible source records in adapter-scoped SQLite checkpoints
 -> personal-project/submission scope derived by the local API
+-> daily local/model-optional priority briefing with user preference feedback
 -> Payment/BizCase/Fee Management rows open account-scoped local snapshot details
 -> top-bar launch catalog hands seven choices to IPSA in isolated browser tabs
 -> refresh recovery -> stale-version 409 refresh without overwrite
@@ -233,9 +238,9 @@ load or local detail path starts an upstream list pagination cycle. The rebuilt
 all seven destinations, visible launch copy, isolation attributes, and FastAPI's new
 hashed asset responses. The launcher uses a native modal dialog, fixed-size grid
 tracks, a `100dvh` ceiling, keyboard links, Escape close, and focus restoration.
-Desktop/mobile screenshot and console confirmation remain pending because the in-app
-Browser failed to attach a localhost page in two bounded attempts; no IPSA link was
-clicked during QA.
+The P9.13 launcher-only screenshot residual was closed during P9.14 using a local
+same-origin QA service and synthetic data. Desktop 1440x900 and mobile 390x844 both
+rendered without page overflow or console warning/error; no IPSA link was clicked.
 
 The built root, hashed JS, and hashed CSS must return 200 from FastAPI. Common
 icon buttons retain accessible names on mobile, the material button label remains
@@ -248,11 +253,17 @@ Chrome's native picker could select the QA file, but extension-driven upload
 requires "Allow access to file URLs" and that browser permission was not enabled.
 This is a browser-automation gate; no live iPSA upload endpoint was used.
 
-## Scheduled sync facility (offline)
+## Daily sync, briefing, and Web service (offline)
 
 ```bash
-uv run pytest -q tests/test_scheduled_sync.py
-plutil -lint ops/com.isstech.workflow-center.sync.plist
+uv run pytest -q \
+  tests/test_assistant.py \
+  tests/test_runtime_deployment.py \
+  tests/test_scheduled_sync.py \
+  tests/test_web_launch_agent.py
+plutil -lint \
+  ops/com.isstech.workflow-center.sync.plist \
+  ops/com.isstech.workflow-center.web.plist
 tmp_plist="$(mktemp)"
 uv run python tools/install_launch_agent.py --dry-run > "$tmp_plist"
 plutil -lint "$tmp_plist"
@@ -260,28 +271,48 @@ if plutil -p "$tmp_plist" | rg -i 'password|cookie|ticket|\.ipsa|api.key'; then
   exit 1
 fi
 rm -f "$tmp_plist"
+tmp_web_plist="$(mktemp)"
+uv run python tools/install_web_launch_agent.py --dry-run > "$tmp_web_plist"
+plutil -lint "$tmp_web_plist"
+rm -f "$tmp_web_plist"
 ```
 
 Pass criteria: focused tests prove the existing manual CLI path is invoked;
-Keychain and sync timeouts exit non-zero; private logs omit credentials/work-item
-content; failed lint/bootstrap restores the previous plist/service; both plists
-are valid and contain no credential-like values.
+sync/setup/briefing/model failures cannot suppress the final page-open stage;
+private logs omit credentials and work-item content; model output closes over the
+input key set; failed lint/bootstrap/health restores the previous plist/service;
+both plists are valid and contain no credential-like values. Runtime deployment
+copies only allowlisted source/tool files, installs from `uv.lock`, excludes SQLite
+WAL/SHM/journal sidecars, and validates every seeded database before activation.
 
 After the account holder configures Keychain, the live activation gate is:
 
 ```bash
 uv run python tools/configure_sync_keychain.py --verify-only
+uv run python tools/install_web_launch_agent.py
 uv run python tools/install_launch_agent.py
+launchctl print gui/$(id -u)/com.isstech.workflow-center.web
 launchctl print gui/$(id -u)/com.isstech.workflow-center.sync
 stat -f '%Lp %N' \
-  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.sync.plist"
+  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.web.plist" \
+  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.sync.plist" \
+  "$HOME/Library/Application Support/com.isstech.workflow-center" \
+  "$HOME/Library/Application Support/com.isstech.workflow-center/data"
+plutil -extract WorkingDirectory raw -o - \
+  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.web.plist"
+plutil -extract EnvironmentVariables.ISSTECH_DATA_DIR raw -o - \
+  "$HOME/Library/LaunchAgents/com.isstech.workflow-center.web.plist"
 ```
 
-Expected: agent is loaded with five weekday intervals, installed plist mode is
-`600`, no credential appears in the plist, and a later scheduled run writes eleven
-successful stream results under `data/accounts/<sha256-account-scope>/` plus one
-safe `scheduled-sync.log` line while the FastAPI app is closed. The raw username
-must not appear in the scoped path or log. Do not activate before Keychain is configured.
+Expected: the Web service is healthy and self-recovering; the daily job is loaded
+with seven 08:30 intervals; installed plists are mode `600` and credential-free.
+A target `state = running` and positive PID must be present; a 200 response from a
+different process on port 8000 is not sufficient. Both plist paths must resolve below
+the mode `700` Application Support root, never the protected repository in `Documents`.
+A scheduled run writes eleven stream results when upstream is available, then one
+assistant briefing and safe per-stage log records before opening the workspace.
+The raw username must not appear in a scoped path or log. A chat provider is optional;
+without it the stored source is `fallback`.
 
 ## Zero write egress check
 
@@ -361,13 +392,13 @@ bash tools/first-commit.sh
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
-| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI, hashed SPA, all-unapproved overview, and seven-item IPSA handoff are served | New launcher screenshot QA could not attach; local submit API remains absent |
-| SQLite snapshot/diff | Yes; five procurement plus six read-only checkpoints, schema v8 | — |
+| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI, hashed SPA, all-unapproved overview, right-column assistant, and seven-item IPSA handoff are served | Local submit API remains absent |
+| SQLite snapshot/diff | Yes; five procurement plus six read-only checkpoints, assistant preferences/briefings, schema v9 | — |
 | Manual sync CLI | Yes; eleven-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
 | Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | Automated upstream submission remains blocked |
-| Weekday scheduled sync | Eleven-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
+| Daily sync and assistant | Seven-day 08:30 sync/brief/open wrapper, fallback model boundary, and persistent Web LaunchAgent verified | Observe the next natural launchd trigger |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated gates plus credentialed read-only smoke | Write-side P7 excluded |
 

@@ -22,11 +22,11 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
 | Payment + BizCase + Fee Management read-only queries | Yes; six independent checkpoints, personal scope, cached lists, manual/UI/scheduled sync |
 | SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
-| Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
+| Daily sync + follow-up briefing | Yes; seven-day schedule, Keychain, deterministic fallback, bounded model rerank, automatic page open |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
-| Local Web workspace | Yes; all unapproved personal workflows, business queries, and seven-item IPSA launch catalog |
+| Local Web workspace | Yes; all unapproved workflows, right-column daily assistant, business queries, and seven-item IPSA launch catalog |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -95,6 +95,10 @@ pager. All six read-only modules keep independent checkpoints and do not enter
 personal-scope contract. The workspace presents Payment, BizCase, and Fee Management
 as peers. Fee Management dynamically shows only non-empty personal categories and
 the overview groups every non-approved local workflow by business category.
+The overview's right column also reads the latest account-scoped assistant briefing
+from SQLite. It shows at most five priorities with explicit date-estimate labels,
+accepts a short local priority preference, and never calls iPSA or a model during
+ordinary page loading.
 
 ### Durable manual sync
 
@@ -136,12 +140,21 @@ it is not a record-discard gate. Each stream owns an independent checkpoint, so 
 declared-total mismatch, repeated/short page, schema drift, stale measurement, or
 local transaction error preserves that stream's previous complete current state.
 
-### Weekday scheduled sync
+The first LaunchAgent installation copies this repository data into the private
+`~/Library/Application Support/com.isstech.workflow-center/data/` runtime root using
+SQLite's online backup API. After activation, the Web service and daily job share that
+runtime copy. Repository `data/` remains the pre-deployment source/backup; it is not
+silently overwritten. Code runs from a content-addressed immutable release under the
+same Application Support root because macOS blocks background LaunchAgents from
+reading Python environments inside protected `Documents` folders.
 
-The committed default is Monday-Friday at 08:30 local time. Activation requires
-local Keychain configuration and the reversible installer; neither tool accepts
-a password command-line argument. The current workstation activation state is
-recorded in `docs/unified-workflow-center-plan.md`.
+### Daily sync and follow-up briefing
+
+The committed default is every day at 08:30 local time. The job runs the
+eleven-stream sync, generates a briefing from the newest complete local snapshots,
+and opens `http://127.0.0.1:8000/`. Sync, briefing, and page open are independent
+bounded stages: a sync failure still briefs from the prior snapshot, and any earlier
+failure still reaches the final open stage.
 
 ```bash
 cd /Users/ethan/Documents/isstech
@@ -155,32 +168,61 @@ cd /Users/ethan/Documents/isstech
 # inspect a valid rendered plist without writing/loading it
 .venv/bin/python tools/install_launch_agent.py --dry-run | plutil -lint -
 
-# atomically install and bootstrap the default weekday 08:30 agent
+# install the persistent loopback Web service and daily 08:30 job
+.venv/bin/python tools/install_web_launch_agent.py
 .venv/bin/python tools/install_launch_agent.py
 
-# inspect loaded schedule and private outcome log
+# inspect both loaded services and the private outcome log
+launchctl print gui/$(id -u)/com.isstech.workflow-center.web
 launchctl print gui/$(id -u)/com.isstech.workflow-center.sync
-tail -n 20 data/logs/scheduled-sync.log
+tail -n 20 "$HOME/Library/Application Support/com.isstech.workflow-center/data/logs/scheduled-sync.log"
 ```
 
 Use `--hour H --minute M` on the installer to choose another local time. The
 installed plist is mode `0600` under `~/Library/LaunchAgents/`; it contains no
 username, password, Cookie, ticket, or API key. Scheduled execution calls the same
 eleven-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
-login, a 10-second Keychain timeout, and a 15-minute sync timeout.
+login, a 10-second Keychain timeout, and a 15-minute sync timeout. The briefing child
+has a 75-second ceiling and emits only source/count status before the wrapper opens
+the local page with a 10-second command timeout.
+
+Both installers derive the same release hash, install a non-editable environment from
+`uv.lock`, and run an import smoke before changing launchd state. Installed plists
+reference only the immutable release and Application Support data root. Re-running an
+installer reuses an already validated release; a failed plist/bootstrap/PID/health
+gate restores the prior loaded plist and its prior immutable release.
 
 The wrapper captures detailed CLI output in memory and appends only timestamp,
 run ID, status, counts, exit code, and a redacted error to
-`data/logs/scheduled-sync.log` (mode `0600`). Full run summaries, SQLite state,
-and CSV output remain under the configured account's private
-`data/accounts/<sha256-account-scope>/` path.
+`~/Library/Application Support/com.isstech.workflow-center/data/logs/scheduled-sync.log`
+(mode `0600`). Full run summaries, SQLite state, and CSV output remain under the
+runtime root's private `accounts/<sha256-account-scope>/` path.
+
+The model rerank is optional. Without configuration the same daily run writes a
+deterministic `fallback` briefing. To enable a chat-capable OpenAI-compatible
+Chat Completions endpoint, store its full endpoint, model, and API key through
+three secure Keychain prompts:
 
 ```bash
-# stop future runs and remove the installed plist; local data and backup remain
-.venv/bin/python tools/install_launch_agent.py --uninstall
+.venv/bin/python tools/configure_assistant_keychain.py
+.venv/bin/python tools/configure_assistant_keychain.py --verify-only
+```
 
-# optionally remove only the two scheduled-sync Keychain items
+Only the current unapproved item key, category, reference, title, project, status,
+approver, date, and estimated wait are sent. Cookies, credentials, raw payloads,
+attachments, applicants, and approval comments are excluded. Non-loopback HTTP,
+iPSA/Passport hosts, image endpoints, and `gpt-image-2` are rejected. Provider
+timeouts, HTTP failures, invalid JSON, unknown keys, and duplicate keys all return
+to the deterministic local order.
+
+```bash
+# stop future runs and remove the installed plist; runtime data/releases remain
+.venv/bin/python tools/install_launch_agent.py --uninstall
+.venv/bin/python tools/install_web_launch_agent.py --uninstall
+
+# optionally remove only the related Keychain items
 .venv/bin/python tools/configure_sync_keychain.py --delete
+.venv/bin/python tools/configure_assistant_keychain.py --delete
 ```
 
 ### Local material ingestion
@@ -271,6 +313,16 @@ curl -s 'http://127.0.0.1:8000/v1/work-items' \
 curl -s -X POST 'http://127.0.0.1:8000/v1/sync/work-items?max_pages=20' \
   -H "Authorization: Bearer $TOKEN"
 
+# latest local assistant briefing; this GET never calls iPSA or a model
+curl -s http://127.0.0.1:8000/v1/assistant/brief \
+  -H "Authorization: Bearer $TOKEN"
+
+# store one priority preference and immediately regenerate the local briefing
+curl -s -X POST http://127.0.0.1:8000/v1/assistant/preferences \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"付款申请优先"}'
+
 # local multipart upload; uses the local Bearer session, no upstream write
 curl -s -X POST http://127.0.0.1:8000/v1/materials \
   -H "Authorization: Bearer $TOKEN" \
@@ -322,9 +374,10 @@ Error codes: `AUTH_EXPIRED`, `UPSTREAM_ERROR`, `PARSE_ERROR`, `WRITE_BLOCKED`,
 ```text
 src/isstech_replay/
   api.py policy.py transport.py client.py auth.py
-  request_builders.py session_store.py storage.py sync.py materials.py extraction.py
+  request_builders.py session_store.py storage.py sync.py assistant.py materials.py extraction.py
+  runtime_deployment.py # immutable Application Support runtime and SQLite seed
   field_mapping.py workflow_state.py schema.sql migration_002_materials.sql
-  migration_003_extraction.sql migration_004_review.sql
+  migration_003_extraction.sql migration_004_review.sql migration_009_assistant.sql
   ai/ models/ parsers/ routes/ web_dist/
 web/                   # React/Vite source; build-time only
 tests/                 # unit + API tests (redacted fixtures only)
@@ -333,9 +386,12 @@ captures/redacted/     # commit-safe fixtures
 docs/                  # architecture, matrix, vulns, verification, openapi path list
 tools/first-commit.sh  # baseline commit helper if .git is locked in a sandbox
 tools/sync_work_items.py # manual/daily sync entry; credentials from env only
-tools/scheduled_sync.py # Keychain-backed bounded LaunchAgent entrypoint
+tools/scheduled_sync.py # bounded daily sync/brief/open LaunchAgent entrypoint
+tools/generate_daily_brief.py # account-scoped fallback/model briefing CLI
 tools/install_launch_agent.py # render/install/rollback/uninstall LaunchAgent
+tools/install_web_launch_agent.py # persistent local Web service LaunchAgent
 tools/configure_sync_keychain.py # secure interactive credential provisioning
+tools/configure_assistant_keychain.py # secure optional chat provider provisioning
 tools/ingest_materials.py # offline file/directory material ingestion
 tools/extract_material.py # offline parse + evidence-backed field extraction
 data/                  # ignored SQLite, run summaries, and CSV exports

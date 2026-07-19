@@ -1,6 +1,230 @@
 {
   "components": {
     "schemas": {
+      "AssistantBriefItemOut": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "current_approver": {
+            "default": "",
+            "title": "Current Approver",
+            "type": "string"
+          },
+          "destination": {
+            "title": "Destination",
+            "type": "string"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "project": {
+            "default": "",
+            "title": "Project",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reference": {
+            "title": "Reference",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "waiting_basis": {
+            "$ref": "#/components/schemas/WaitingBasis"
+          },
+          "waiting_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting Days"
+          }
+        },
+        "required": [
+          "item_key",
+          "category",
+          "reference",
+          "title",
+          "status",
+          "waiting_basis",
+          "destination",
+          "reason"
+        ],
+        "title": "AssistantBriefItemOut",
+        "type": "object"
+      },
+      "AssistantBriefOut": {
+        "properties": {
+          "brief_id": {
+            "title": "Brief Id",
+            "type": "string"
+          },
+          "business_date": {
+            "title": "Business Date",
+            "type": "string"
+          },
+          "candidate_count": {
+            "title": "Candidate Count",
+            "type": "integer"
+          },
+          "fallback_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Code"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantBriefItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "preference_version": {
+            "title": "Preference Version",
+            "type": "integer"
+          },
+          "provider": {
+            "default": "",
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_configured": {
+            "title": "Provider Configured",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AssistantBriefSource"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brief_id",
+          "business_date",
+          "preference_version",
+          "generated_at",
+          "source",
+          "provider_configured",
+          "summary",
+          "candidate_count"
+        ],
+        "title": "AssistantBriefOut",
+        "type": "object"
+      },
+      "AssistantBriefSource": {
+        "enum": [
+          "model",
+          "fallback"
+        ],
+        "title": "AssistantBriefSource",
+        "type": "string"
+      },
+      "AssistantPreferenceIn": {
+        "properties": {
+          "text": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AssistantPreferenceIn",
+        "type": "object"
+      },
+      "AssistantPreferenceOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "preference_id": {
+            "title": "Preference Id",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preference_id",
+          "created_at",
+          "text"
+        ],
+        "title": "AssistantPreferenceOut",
+        "type": "object"
+      },
+      "AssistantStateOut": {
+        "properties": {
+          "brief": {
+            "$ref": "#/components/schemas/AssistantBriefOut"
+          },
+          "preferences": {
+            "items": {
+              "$ref": "#/components/schemas/AssistantPreferenceOut"
+            },
+            "title": "Preferences",
+            "type": "array"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "brief",
+          "stale"
+        ],
+        "title": "AssistantStateOut",
+        "type": "object"
+      },
       "AttachmentOut": {
         "properties": {
           "doc_id": {
@@ -2842,6 +3066,14 @@
         "title": "VersionedActionIn",
         "type": "object"
       },
+      "WaitingBasis": {
+        "enum": [
+          "submission_date_estimate",
+          "unknown"
+        ],
+        "title": "WaitingBasis",
+        "type": "string"
+      },
       "WorkItemApprovalStepOut": {
         "properties": {
           "action": {
@@ -3172,6 +3404,210 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/assistant/brief": {
+      "get": {
+        "operationId": "get_assistant_brief_v1_assistant_brief_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Assistant Brief",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/briefs": {
+      "post": {
+        "operationId": "create_assistant_brief_v1_assistant_briefs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Assistant Brief",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/preferences": {
+      "delete": {
+        "operationId": "clear_assistant_preferences_v1_assistant_preferences_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Assistant Preferences",
+        "tags": [
+          "assistant"
+        ]
+      },
+      "post": {
+        "operationId": "add_assistant_preference_v1_assistant_preferences_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantPreferenceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Assistant Preference",
+        "tags": [
+          "assistant"
         ]
       }
     },
