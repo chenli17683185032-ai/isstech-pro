@@ -16,6 +16,8 @@ from isstech_replay.account_scope import account_database_path
 from isstech_replay.ai.briefing import (
     BriefingProviderError,
     HttpChatBriefingProvider,
+    ModelBriefing,
+    ModelPriority,
 )
 from isstech_replay.assistant import (
     collect_assistant_candidates,
@@ -270,9 +272,18 @@ def test_fallback_brief_applies_preference_and_is_idempotent(tmp_path: Path) -> 
 
 def test_chat_provider_sends_minimal_fields_and_drops_unknown_or_duplicate_keys(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     storage = _seed_storage(tmp_path / "workflow.sqlite3")
     candidates = collect_assistant_candidates(storage, today=date(2026, 7, 19))
+    real_client = httpx.Client
+    client_options: dict[str, object] = {}
+
+    def client(*args, **kwargs):
+        client_options.update(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", client)
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "https://llm.example/v1/chat/completions"
@@ -321,6 +332,7 @@ def test_chat_provider_sends_minimal_fields_and_drops_unknown_or_duplicate_keys(
         "daily_expense:fee-pending",
         "purchase_requisition:pending",
     ]
+    assert client_options["trust_env"] is False
 
 
 def test_invalid_model_response_falls_back_without_losing_items(tmp_path: Path) -> None:
@@ -346,6 +358,52 @@ def test_invalid_model_response_falls_back_without_losing_items(tmp_path: Path) 
     assert brief.fallback_code == "provider_invalid_response"
     assert len(brief.items) == 2
     assert storage.latest_assistant_brief() == brief
+
+
+def test_full_model_priority_list_stays_capped_at_five(tmp_path: Path) -> None:
+    storage = _seed_storage(tmp_path / "workflow.sqlite3")
+    procurement = tuple(
+        _workflow_snapshot(
+            f"pending-{index}",
+            status="审批中",
+            submitted_at=f"2026-06-{index + 1:02d}",
+            title=f"PROCUREMENT-{index}",
+        )
+        for index in range(5)
+    )
+    storage.start_run(
+        run_id="five-pending-run",
+        adapter=WorkflowKind.PURCHASE_REQUISITION,
+        started_at=OBSERVED_AT,
+        max_pages=20,
+    )
+    storage.complete_run(
+        run_id="five-pending-run",
+        observed_at=OBSERVED_AT,
+        finished_at=OBSERVED_AT,
+        source_total_count=len(procurement),
+        snapshots=procurement,
+        actionable_count=len(procurement),
+    )
+
+    class FullProvider:
+        name = "test"
+        model = "chat-model"
+
+        def prioritize(self, candidates, _preferences) -> ModelBriefing:
+            return ModelBriefing(
+                summary="模型返回完整五项排序。",
+                priorities=tuple(
+                    ModelPriority(item_key=candidate.item_key, reason="模型优先")
+                    for candidate in candidates[:5]
+                ),
+            )
+
+    brief = generate_assistant_brief(storage, now=NOW, provider=FullProvider())
+
+    assert brief.source == AssistantBriefSource.MODEL
+    assert brief.fallback_code is None
+    assert len(brief.items) == 5
 
 
 @pytest.mark.parametrize(

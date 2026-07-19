@@ -152,7 +152,11 @@ class HttpChatBriefingProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        with httpx.Client(timeout=self.timeout_seconds, transport=self.transport) as client:
+        with httpx.Client(
+            timeout=self.timeout_seconds,
+            transport=self.transport,
+            trust_env=False,
+        ) as client:
             with client.stream(
                 "POST",
                 self.endpoint,

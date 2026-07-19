@@ -269,12 +269,12 @@ def _merge_model_priorities(
         if len(selected) == MAX_ASSISTANT_ITEMS:
             break
     for candidate in ranked:
+        if len(selected) >= MAX_ASSISTANT_ITEMS:
+            break
         if candidate in selected:
             continue
         selected.append(candidate)
         reasons[candidate.item_key] = _fallback_reason(candidate, preferences)
-        if len(selected) == MAX_ASSISTANT_ITEMS:
-            break
     return tuple(selected), reasons
 
 
