@@ -20,16 +20,20 @@ Pass criteria: all tests pass, Ruff is clean, committed OpenAPI exactly matches
 the runtime schema, both verification tools exit zero, every raw path is
 ignored, and the diff has no whitespace errors.
 
-The current P9.12 automated gate has 384 passing tests, clean Ruff, deterministic
-OpenAPI, secret/evidence verification, a 1,595-module React production build, a
-76-file wheel, three valid plist renderings, schema v6-to-v7 migration, and
-`git diff --check`. Credentialed acceptance left Payment at 10 personal records,
-BizCase at 55 source records and one locally asserted personal record, returned
-54 identity-bound travel applications, and committed one identity-bound daily
-expense. The two DailyExpense-only synchronizations were `1/1/1` then `1/1/0`;
-they made zero BizCase requests and zero business writes. In-app Browser QA passed
-at `1280x720` and `390x844`; all detail entry methods stayed local and the console
-had no warning/error.
+The current P9.13 automated gate has 401 passing tests, clean Ruff, deterministic
+OpenAPI, secret/evidence verification, a 1,596-module React production build, a
+79-file wheel, valid committed/rendered plists, schema v7-to-v8 migration, and
+`git diff --check`. Credentialed acceptance kept Payment at 10 personal records,
+BizCase at 55 source records and one locally asserted personal record, retained 54
+identity-bound travel applications and one daily expense, and added two travel
+reimbursements plus 28 travel subsidies. The final dual-module replay was unchanged
+at `2/2/0` and `28/28/0`; every attempt made zero BizCase requests and zero business
+writes. The local production API reports four non-empty Fee Management categories
+with 85 records and six homepage groups with 21 unapproved records. The production
+bundle also contains seven exact IPSA browser handoffs, `noopener noreferrer`, and
+no local submission API. Two in-app Browser attempts on `2026-07-19` could not attach
+a local page, so new-launcher screenshot QA remains an explicitly recorded residual
+check rather than being reported as passed.
 
 ## Operator evidence check
 
@@ -114,7 +118,7 @@ unset ISSTECH_PASSWORD ISSTECH_USERNAME
 ```
 
 Pass criteria: dry-run leaves no new DB/run file; all five procurement streams
-and all four Payment/BizCase/travel-application/daily-expense streams are
+and all six Payment/BizCase/Fee Management streams are
 `succeeded`; every stream has complete declared/observed parity; all files report
 mode `600`; a second unchanged sync adds history but zero procurement events and
 zero readonly changes.
@@ -199,6 +203,7 @@ mock login -> material in local store -> local_rules extraction -> draft
 -> complete account-visible source records in adapter-scoped SQLite checkpoints
 -> personal-project/submission scope derived by the local API
 -> Payment/BizCase/Fee Management rows open account-scoped local snapshot details
+-> top-bar launch catalog hands seven choices to IPSA in isolated browser tabs
 -> refresh recovery -> stale-version 409 refresh without overwrite
 ```
 
@@ -217,6 +222,20 @@ counts 1 and 54. Clicking the daily-expense row or eye control, or pressing Ente
 or Space, opened the local snapshot drawer; closing restored focus to the row.
 CDP observed no request for any of these detail interactions. Both desktop and
 mobile had zero page-level horizontal overflow and no console warning/error.
+
+P9.13 production API verification returns 10/1/54/1/2/28 personal records from the
+six local read-only APIs. Fee Management derives four visible non-empty child tabs
+and an 85-record total. The overview combines those already-loaded local results
+with procurement current, excludes only the proven approved statuses and blank
+statuses, and produces 21 unapproved rows in six business groups. No normal page
+load or local detail path starts an upstream list pagination cycle. The rebuilt
+1,596-module bundle is JS `271.75 kB` and CSS `37.84 kB`; `tests/test_ui.py` verifies
+all seven destinations, visible launch copy, isolation attributes, and FastAPI's new
+hashed asset responses. The launcher uses a native modal dialog, fixed-size grid
+tracks, a `100dvh` ceiling, keyboard links, Escape close, and focus restoration.
+Desktop/mobile screenshot and console confirmation remain pending because the in-app
+Browser failed to attach a localhost page in two bounded attempts; no IPSA link was
+clicked during QA.
 
 The built root, hashed JS, and hashed CSS must return 200 from FastAPI. Common
 icon buttons retain accessible names on mobile, the material button label remains
@@ -259,7 +278,7 @@ stat -f '%Lp %N' \
 ```
 
 Expected: agent is loaded with five weekday intervals, installed plist mode is
-`600`, no credential appears in the plist, and a later scheduled run writes nine
+`600`, no credential appears in the plist, and a later scheduled run writes eleven
 successful stream results under `data/accounts/<sha256-account-scope>/` plus one
 safe `scheduled-sync.log` line while the FastAPI app is closed. The raw username
 must not appear in the scoped path or log. Do not activate before Keychain is configured.
@@ -338,21 +357,21 @@ bash tools/first-commit.sh
 | Browser login protocol | Yes, redacted CDP is reproducible | Historical browser capture already carried `.iPSA` |
 | Pure HTTP login code | Yes, mocked and credentialed live reads | Credentials remain runtime-only |
 | Five SearchIndex streams and PR Detail | Yes, with live 353/353 schema/count parity | Non-PR upstream Detail remains disabled |
-| Payment, BizCase, and Fee Management lists | Yes; four independent checkpoints, personal scope, and local snapshot details | Upstream edit-capable details remain disabled |
+| Payment, BizCase, and Fee Management lists | Yes; six independent checkpoints, personal scope, dynamic non-empty fee categories, and local snapshot details | Upstream edit-capable details remain disabled |
 | Approval/adjustment/revocation views | Initial GET captured; exact read paths enabled | Non-empty role fixtures remain unavailable |
 | Attachment path | Real Detail path parsed from live served HTML | Optional bounded live download smoke |
 | Write previews | Inferred and non-sendable | Intercepted bodies |
-| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI and hashed SPA are served | P7 write execution remains blocked |
-| SQLite snapshot/diff | Yes; five procurement plus four read-only checkpoints, schema v7 | — |
-| Manual sync CLI | Yes; nine-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
+| FastAPI `/v1` + root workspace | Yes; runtime OpenAPI, hashed SPA, all-unapproved overview, and seven-item IPSA handoff are served | New launcher screenshot QA could not attach; local submit API remains absent |
+| SQLite snapshot/diff | Yes; five procurement plus six read-only checkpoints, schema v8 | — |
+| Manual sync CLI | Yes; eleven-stream single-login dry-run/JSON/CSV/non-zero failures and live run | — |
 | Material ingestion | Yes; file/directory/API, SHA dedup, MIME review | Real project sample acceptance |
 | Document parsing and AI extraction | Yes; PDF/Office/text, strict evidence gates, API/CLI | OCR for image-only real samples |
-| Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | P7 remains write-blocked |
-| Weekday scheduled sync | Nine-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
+| Human review, draft state, and local UI | Yes; version lock, corrected evidence, audit, ready, responsive workspace | Automated upstream submission remains blocked |
+| Weekday scheduled sync | Eleven-stream wrapper verified and weekday 08:30 LaunchAgent loaded | Observe the next natural launchd trigger |
 | Vulnerability report | Draft from evidence | Second role, open redirect proof |
 | Clean acceptance | Automated gates plus credentialed read-only smoke | Write-side P7 excluded |
 
-Do **not** describe the project as fully production-finished against live iPSA.
-P7 upstream execution remains explicitly blocked by the current competition
-rules, and the four added workflows intentionally expose cached list fields rather
-than unproven upstream Detail routes.
+Do **not** describe the project as an automated live-iPSA submitter. The local client
+still blocks P7 upstream execution. The new launch catalog only transfers the user to
+the original IPSA application UI, and the four added workflows intentionally expose
+cached list fields rather than unproven upstream Detail routes.

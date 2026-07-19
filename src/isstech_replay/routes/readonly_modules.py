@@ -86,6 +86,21 @@ class DailyExpenseRecordOut(BaseModel):
     source_url: str = ""
 
 
+class FeeApplicationRecordOut(BaseModel):
+    id: str
+    ordinal: int
+    application_no: str
+    project_name: str = ""
+    applicant: str = ""
+    application_date: str = ""
+    status: str = ""
+    amount: str = ""
+    current_approver: str = ""
+    scope_reasons: list[WorkItemScopeReason] = Field(default_factory=list)
+    fields: dict[str, str] = Field(default_factory=dict)
+    source_url: str = ""
+
+
 class PaymentListOut(BaseModel):
     module: str = ReadonlyModuleKind.PAYMENT.value
     module_label: str = ReadonlyModuleKind.PAYMENT.label
@@ -140,6 +155,34 @@ class DailyExpenseListOut(BaseModel):
     submitted_by_me_count: int = 0
     managed_by_me_count: int = 0
     items: list[DailyExpenseRecordOut] = Field(default_factory=list)
+
+
+class TravelReimbursementListOut(BaseModel):
+    module: str = ReadonlyModuleKind.TRAVEL_REIMBURSEMENT.value
+    module_label: str = ReadonlyModuleKind.TRAVEL_REIMBURSEMENT.label
+    source: str = "sqlite_current"
+    ownership_scope: str = "personal_submissions_projects_and_management"
+    synced_at: str | None = None
+    source_total_count: int = 0
+    total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
+    items: list[FeeApplicationRecordOut] = Field(default_factory=list)
+
+
+class TravelSubsidyListOut(BaseModel):
+    module: str = ReadonlyModuleKind.TRAVEL_SUBSIDY.value
+    module_label: str = ReadonlyModuleKind.TRAVEL_SUBSIDY.label
+    source: str = "sqlite_current"
+    ownership_scope: str = "personal_submissions_projects_and_management"
+    synced_at: str | None = None
+    source_total_count: int = 0
+    total_count: int = 0
+    my_project_count: int = 0
+    submitted_by_me_count: int = 0
+    managed_by_me_count: int = 0
+    items: list[FeeApplicationRecordOut] = Field(default_factory=list)
 
 
 class ReadonlySyncStreamOut(BaseModel):
@@ -407,6 +450,74 @@ def list_daily_expenses(
             f"daily expense cache read failed: {type(exc).__name__}"
         ) from exc
     return DailyExpenseListOut(
+        synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
+        source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
+        total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
+        items=items,
+    )
+
+
+def _fee_application_list(
+    session: SessionRecord,
+    module: ReadonlyModuleKind,
+) -> tuple[list[FeeApplicationRecordOut], dict[WorkItemScopeReason, int], dict[str, object] | None]:
+    cached, latest = _current_payloads(_storage(session), module)
+    payloads, counts = _personal_payloads(cached)
+    items = sorted(
+        (FeeApplicationRecordOut.model_validate(payload) for payload in payloads),
+        key=lambda item: (item.application_date, item.application_no),
+        reverse=True,
+    )
+    return items, counts, latest
+
+
+@router.get(
+    "/readonly-modules/travel-reimbursements",
+    response_model=TravelReimbursementListOut,
+)
+def list_travel_reimbursements(
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> TravelReimbursementListOut:
+    try:
+        items, counts, latest = _fee_application_list(
+            session,
+            ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+        )
+    except Exception as exc:
+        raise local_storage_error(
+            f"travel reimbursement cache read failed: {type(exc).__name__}"
+        ) from exc
+    return TravelReimbursementListOut(
+        synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
+        source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
+        total_count=len(items),
+        my_project_count=counts[WorkItemScopeReason.MY_PROJECT],
+        submitted_by_me_count=counts[WorkItemScopeReason.SUBMITTED_BY_ME],
+        managed_by_me_count=counts[WorkItemScopeReason.MANAGED_BY_ME],
+        items=items,
+    )
+
+
+@router.get(
+    "/readonly-modules/travel-subsidies",
+    response_model=TravelSubsidyListOut,
+)
+def list_travel_subsidies(
+    session: Annotated[SessionRecord, Depends(get_session)],
+) -> TravelSubsidyListOut:
+    try:
+        items, counts, latest = _fee_application_list(
+            session,
+            ReadonlyModuleKind.TRAVEL_SUBSIDY,
+        )
+    except Exception as exc:
+        raise local_storage_error(
+            f"travel subsidy cache read failed: {type(exc).__name__}"
+        ) from exc
+    return TravelSubsidyListOut(
         synced_at=str(latest["observed_at"]) if latest and latest["observed_at"] else None,
         source_total_count=int(latest["source_total_count"] or 0) if latest else 0,
         total_count=len(items),

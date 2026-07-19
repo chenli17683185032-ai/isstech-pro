@@ -68,6 +68,13 @@ TRAVEL_APPLICATION_URL = f"{TRAVEL_APPLICATION_PATH}?helpmenucode=92"
 TRAVEL_APPLICATION_PAGER_TARGET = "ctl00$ContentPlaceHolder1$gp"
 DAILY_EXPENSE_PATH = "/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx"
 DAILY_EXPENSE_URL = f"{DAILY_EXPENSE_PATH}?helpmenucode=90"
+TRAVEL_REIMBURSEMENT_PATH = (
+    "/WebPSAOA/Fee/FeeApply/EvectionSubsidy/List.aspx"
+)
+TRAVEL_REIMBURSEMENT_URL = f"{TRAVEL_REIMBURSEMENT_PATH}?helpmenucode=93"
+TRAVEL_SUBSIDY_PATH = "/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/List.aspx"
+TRAVEL_SUBSIDY_URL = f"{TRAVEL_SUBSIDY_PATH}?helpmenucode=112"
+TRAVEL_SUBSIDY_PAGER_TARGET = "ctl00$ContentPlaceHolder1$GridPager1"
 _BIZCASE_POSTBACK_FIELDS = frozenset(
     {
         "__EVENTTARGET",
@@ -116,6 +123,29 @@ _TRAVEL_APPLICATION_FIXED_FIELDS = frozenset(
     }
 )
 _TRAVEL_APPLICATION_ROW_FIELD_RE = re.compile(
+    r"^ctl00\$ContentPlaceHolder1\$MyGridView\$(ctl\d{2})\$"
+    r"(workflowownerid|applyno)$"
+)
+_TRAVEL_SUBSIDY_MAX_BODY_BYTES = 128 * 1024
+_TRAVEL_SUBSIDY_FIXED_FIELDS = frozenset(
+    {
+        "__EVENTTARGET",
+        "__EVENTARGUMENT",
+        "__VIEWSTATE",
+        "__VIEWSTATEGENERATOR",
+        "__VIEWSTATEENCRYPTED",
+        "__EVENTVALIDATION",
+        "ctl00$ContentPlaceHolder1$txtApplyNo",
+        "ctl00$ContentPlaceHolder1$DDListFeeFormStatus1",
+        "ctl00$ContentPlaceHolder1$ApplyStartDate",
+        "ctl00$ContentPlaceHolder1$ApplyEndDate",
+        "ctl00$ContentPlaceHolder1$ddlOrderBy",
+        "ctl00$ContentPlaceHolder1$chkOrderBy",
+        "ctl00$ContentPlaceHolder1$GridPager1_input",
+        "ctl00$ContentPlaceHolder1$hiddutyLevel",
+    }
+)
+_TRAVEL_SUBSIDY_ROW_FIELD_RE = re.compile(
     r"^ctl00\$ContentPlaceHolder1\$MyGridView\$(ctl\d{2})\$"
     r"(workflowownerid|applyno)$"
 )
@@ -230,6 +260,22 @@ def _exact_daily_expense_url(url: str) -> bool:
     return pairs == [("helpmenucode", "90")]
 
 
+def _exact_fee_application_url(url: str, *, path: str, help_menu_code: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.path != path:
+        return False
+    try:
+        pairs = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=2,
+        )
+    except ValueError:
+        return False
+    return pairs == [("helpmenucode", help_menu_code)]
+
+
 def _bizcase_get_view(url: str) -> str | None:
     parsed = urlparse(url)
     if parsed.path != BIZCASE_QUERY_PATH:
@@ -282,6 +328,16 @@ def _blocked_travel_application(reason: str) -> PolicyDecision:
         SideEffect.UNKNOWN,
         "travel_application.postback",
         "travel_application.postback.blocked",
+        reason,
+    )
+
+
+def _blocked_travel_subsidy(reason: str) -> PolicyDecision:
+    return _decision(
+        RequestClass.BUILD_ONLY,
+        SideEffect.UNKNOWN,
+        "travel_subsidy.postback",
+        "travel_subsidy.postback.blocked",
         reason,
     )
 
@@ -532,6 +588,129 @@ def _classify_travel_application_pagination(
     )
 
 
+def _classify_travel_subsidy_pagination(
+    *,
+    headers: Mapping[str, str] | None,
+    body: bytes | None,
+) -> PolicyDecision:
+    if body is None:
+        return _blocked_travel_subsidy(
+            "Travel subsidy POST requires an in-memory form body"
+        )
+    if not body or len(body) > _TRAVEL_SUBSIDY_MAX_BODY_BYTES:
+        return _blocked_travel_subsidy(
+            "Travel subsidy form body is empty or exceeds the size limit"
+        )
+    content_type_header = next(
+        (
+            value
+            for name, value in (headers or {}).items()
+            if name.lower() == "content-type"
+        ),
+        "",
+    )
+    content_type = content_type_header.split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return _blocked_travel_subsidy(
+            "Travel subsidy POST must be form URL encoded"
+        )
+    try:
+        pairs = parse_qsl(
+            body.decode("utf-8"),
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=64,
+        )
+    except (UnicodeDecodeError, ValueError):
+        return _blocked_travel_subsidy("Travel subsidy form body is malformed")
+    counts = Counter(name for name, _ in pairs)
+    if any(count != 1 for count in counts.values()):
+        return _blocked_travel_subsidy(
+            "Travel subsidy form contains duplicate fields"
+        )
+    names = frozenset(counts)
+    if not _TRAVEL_SUBSIDY_FIXED_FIELDS <= names:
+        return _blocked_travel_subsidy(
+            "Travel subsidy pagination fields are incomplete"
+        )
+    dynamic_names = names - _TRAVEL_SUBSIDY_FIXED_FIELDS
+    row_fields: dict[str, set[str]] = {}
+    for name in dynamic_names:
+        match = _TRAVEL_SUBSIDY_ROW_FIELD_RE.fullmatch(name)
+        if match is None:
+            return _blocked_travel_subsidy(
+                "Travel subsidy form contains an unapproved control"
+            )
+        row_fields.setdefault(match.group(1), set()).add(match.group(2))
+    if not row_fields or len(row_fields) > 10 or any(
+        fields != {"workflowownerid", "applyno"} for fields in row_fields.values()
+    ):
+        return _blocked_travel_subsidy(
+            "Travel subsidy row state fields are incomplete"
+        )
+
+    values = dict(pairs)
+    if values["__EVENTTARGET"] != TRAVEL_SUBSIDY_PAGER_TARGET:
+        return _blocked_travel_subsidy(
+            "Travel subsidy event target is not the proven pager"
+        )
+    page = values["ctl00$ContentPlaceHolder1$GridPager1_input"]
+    if not re.fullmatch(r"[1-9]\d{0,2}", page) or values["__EVENTARGUMENT"] not in {
+        "",
+        page,
+    }:
+        return _blocked_travel_subsidy(
+            "Travel subsidy page value is not a bounded positive integer"
+        )
+    if not values["__VIEWSTATE"] or not values["__EVENTVALIDATION"] or not re.fullmatch(
+        r"[A-Fa-f0-9]{8}", values["__VIEWSTATEGENERATOR"]
+    ):
+        return _blocked_travel_subsidy(
+            "Travel subsidy opaque state is missing or malformed"
+        )
+    for name in (
+        "ctl00$ContentPlaceHolder1$txtApplyNo",
+        "ctl00$ContentPlaceHolder1$DDListFeeFormStatus1",
+        "ctl00$ContentPlaceHolder1$ApplyStartDate",
+        "ctl00$ContentPlaceHolder1$ApplyEndDate",
+        "ctl00$ContentPlaceHolder1$hiddutyLevel",
+    ):
+        if values[name]:
+            return _blocked_travel_subsidy(
+                "Travel subsidy pager contains an unapproved filter"
+            )
+    if values["ctl00$ContentPlaceHolder1$ddlOrderBy"] != "AI_ApplyNo" or values[
+        "ctl00$ContentPlaceHolder1$chkOrderBy"
+    ] != "on":
+        return _blocked_travel_subsidy(
+            "Travel subsidy ordering differs from the proven list"
+        )
+    for name in dynamic_names:
+        match = _TRAVEL_SUBSIDY_ROW_FIELD_RE.fullmatch(name)
+        assert match is not None
+        value = values[name]
+        if match.group(2) == "applyno" and not re.fullmatch(
+            r"ESA[0-9A-Z-]+", value
+        ):
+            return _blocked_travel_subsidy(
+                "Travel subsidy row identity is malformed"
+            )
+        if match.group(2) == "workflowownerid" and not re.fullmatch(
+            r"(?=.{0,64}\Z)(?:[0-9]+(?:,[0-9]+)*|,[0-9]+(?:,[0-9]+)*,|)",
+            value,
+        ):
+            return _blocked_travel_subsidy(
+                "Travel subsidy workflow owner state is malformed"
+            )
+    return _decision(
+        RequestClass.ALLOW_LIVE,
+        SideEffect.NONE,
+        "travel_subsidy.paginate",
+        "travel_subsidy.pagination_post",
+        "Body-validated travel subsidy pager postback",
+    )
+
+
 def _unsafe_path_reason(path: str) -> str | None:
     """Reject path forms that an upstream server may normalize differently."""
     candidate = path
@@ -714,6 +893,76 @@ def _module_url_decision(method: str, url: str) -> PolicyDecision | None:
             "daily_expense.edit",
             "daily_expense.edit_page",
             "Daily expense Add.aspx is an edit-capable form",
+        )
+    if path == TRAVEL_REIMBURSEMENT_PATH:
+        exact = _exact_fee_application_url(
+            url,
+            path=TRAVEL_REIMBURSEMENT_PATH,
+            help_menu_code="93",
+        )
+        if method == "GET" and exact:
+            return _decision(
+                RequestClass.ALLOW_LIVE,
+                SideEffect.NONE,
+                "travel_reimbursement.list",
+                "travel_reimbursement.list_get",
+                "Served exact travel reimbursement application list",
+            )
+        if exact:
+            return _decision(
+                RequestClass.BUILD_ONLY,
+                SideEffect.UNKNOWN,
+                "travel_reimbursement.postback",
+                "travel_reimbursement.postback.blocked",
+                "Travel reimbursement has no proven read-only pager POST",
+            )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "travel_reimbursement.unapproved",
+            "travel_reimbursement.query_mismatch",
+            "Travel reimbursement path or query does not match the exact list entry",
+        )
+    if path == "/WebPSAOA/Fee/FeeApply/EvectionSubsidy/Add.aspx":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "travel_reimbursement.edit",
+            "travel_reimbursement.edit_page",
+            "Travel reimbursement Add.aspx is an edit-capable form",
+        )
+    if path == TRAVEL_SUBSIDY_PATH:
+        exact = _exact_fee_application_url(
+            url,
+            path=TRAVEL_SUBSIDY_PATH,
+            help_menu_code="112",
+        )
+        if method == "GET" and exact:
+            return _decision(
+                RequestClass.ALLOW_LIVE,
+                SideEffect.NONE,
+                "travel_subsidy.list",
+                "travel_subsidy.list_get",
+                "Served exact travel subsidy application list",
+            )
+        if method == "POST" and exact:
+            return _blocked_travel_subsidy(
+                "Travel subsidy POST is blocked unless its body proves pagination"
+            )
+        return _decision(
+            RequestClass.DENY,
+            SideEffect.UNKNOWN,
+            "travel_subsidy.unapproved",
+            "travel_subsidy.query_mismatch",
+            "Travel subsidy path or query does not match the exact list entry",
+        )
+    if path == "/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/Add.aspx":
+        return _decision(
+            RequestClass.BUILD_ONLY,
+            SideEffect.UNKNOWN,
+            "travel_subsidy.edit",
+            "travel_subsidy.edit_page",
+            "Travel subsidy Add.aspx is an edit-capable form",
         )
     return None
 
@@ -1107,6 +1356,19 @@ class EndpointPolicy:
             and _exact_travel_application_url(url)
         ):
             return _classify_travel_application_pagination(
+                headers=headers,
+                body=body,
+            )
+        if (
+            method.upper() == "POST"
+            and decision.rule_id == "travel_subsidy.postback.blocked"
+            and _exact_fee_application_url(
+                url,
+                path=TRAVEL_SUBSIDY_PATH,
+                help_menu_code="112",
+            )
+        ):
+            return _classify_travel_subsidy_pagination(
                 headers=headers,
                 body=body,
             )

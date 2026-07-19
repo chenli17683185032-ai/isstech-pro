@@ -10,6 +10,7 @@ from uuid import uuid4
 from .client import IsstechClient
 from .models.bizcase import BizCaseListResult, BizCaseRecord
 from .models.daily_expense import DailyExpenseListResult, DailyExpenseRecord
+from .models.fee_application import FeeApplicationListResult, FeeApplicationRecord
 from .models.payment import PaymentListResult, PaymentRecord
 from .models.readonly_modules import (
     ReadonlyModuleKind,
@@ -37,6 +38,8 @@ READONLY_MODULES = (
     ReadonlyModuleKind.BIZCASE,
     ReadonlyModuleKind.TRAVEL_APPLICATION,
     ReadonlyModuleKind.DAILY_EXPENSE,
+    ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+    ReadonlyModuleKind.TRAVEL_SUBSIDY,
 )
 
 
@@ -167,6 +170,30 @@ def _daily_expense_payload(
     }
 
 
+def _fee_application_payload(
+    record: FeeApplicationRecord,
+    *,
+    module: ReadonlyModuleKind,
+    source_url: str,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "module": module.value,
+        "id": record.id,
+        "ordinal": record.ordinal,
+        "application_no": record.application_no,
+        "project_name": record.project_name,
+        "applicant": record.applicant,
+        "application_date": record.application_date,
+        "status": record.status,
+        "amount": record.amount,
+        "current_approver": record.current_approver,
+        "scope_reasons": [WorkItemScopeReason.SUBMITTED_BY_ME.value],
+        "fields": record.field_dict(),
+        "source_url": source_url,
+    }
+
+
 def readonly_snapshots(
     module: ReadonlyModuleKind,
     result: (
@@ -174,6 +201,7 @@ def readonly_snapshots(
         | BizCaseListResult
         | TravelApplicationListResult
         | DailyExpenseListResult
+        | FeeApplicationListResult
     ),
     *,
     observed_at: str,
@@ -257,7 +285,7 @@ def readonly_snapshots(
                     ),
                 )
             )
-    else:
+    elif module is ReadonlyModuleKind.DAILY_EXPENSE:
         if not isinstance(result, DailyExpenseListResult):
             raise TypeError("Daily expense sync requires DailyExpenseListResult")
         if not display_name.strip():
@@ -270,6 +298,27 @@ def readonly_snapshots(
                     record.id,
                     _daily_expense_payload(
                         record,
+                        source_url=result.source_url,
+                    ),
+                )
+            )
+    else:
+        if module not in {
+            ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+            ReadonlyModuleKind.TRAVEL_SUBSIDY,
+        } or not isinstance(result, FeeApplicationListResult):
+            raise TypeError("Fee application sync requires FeeApplicationListResult")
+        if not display_name.strip():
+            raise ValueError("Fee application personal scope requires a display name")
+        for record in result.items:
+            if not display_name_matches(record.applicant, display_name):
+                raise RuntimeError("Fee application result contains an unscoped record")
+            payloads.append(
+                (
+                    record.id,
+                    _fee_application_payload(
+                        record,
+                        module=module,
                         source_url=result.source_url,
                     ),
                 )
@@ -328,12 +377,15 @@ def sync_readonly_module(
             | BizCaseListResult
             | TravelApplicationListResult
             | DailyExpenseListResult
+            | FeeApplicationListResult
         )
         identity = ""
         if module in {
             ReadonlyModuleKind.PAYMENT,
             ReadonlyModuleKind.TRAVEL_APPLICATION,
             ReadonlyModuleKind.DAILY_EXPENSE,
+            ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+            ReadonlyModuleKind.TRAVEL_SUBSIDY,
         }:
             identity = (display_name or client.get_portal_display_name()).strip()
         if module is ReadonlyModuleKind.PAYMENT:
@@ -351,8 +403,18 @@ def sync_readonly_module(
                 display_name=identity,
                 max_pages=max_pages,
             )
-        else:
+        elif module is ReadonlyModuleKind.DAILY_EXPENSE:
             result = client.list_personal_daily_expenses(
+                display_name=identity,
+                max_pages=max_pages,
+            )
+        elif module is ReadonlyModuleKind.TRAVEL_REIMBURSEMENT:
+            result = client.list_personal_travel_reimbursements(
+                display_name=identity,
+                max_pages=max_pages,
+            )
+        else:
+            result = client.list_personal_travel_subsidies(
                 display_name=identity,
                 max_pages=max_pages,
             )

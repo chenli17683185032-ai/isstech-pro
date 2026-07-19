@@ -9,6 +9,7 @@ import {
   Workflow,
 } from "lucide-react";
 import Button from "./Button";
+import WorkflowLauncher from "./WorkflowLauncher";
 
 const navItems = [
   { id: "overview", label: "总览", icon: LayoutDashboard },
@@ -65,9 +66,10 @@ export default function AppShell({
             </span>
           </div>
           <div className="topbar__actions">
+            <WorkflowLauncher />
             <Button
               icon={RefreshCw}
-              variant="primary"
+              variant="secondary"
               onClick={onSync}
               disabled={syncing}
               className={syncing ? "is-spinning" : ""}

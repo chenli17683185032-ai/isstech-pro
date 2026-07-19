@@ -9,6 +9,9 @@
   `ProcurementOrder`, `CostConfirmation`, and `CheckAcceptance`
 - Read-only personal-scope details at observed `SearchDetail/{id}` or
   `Detail/{id}` paths under those four modules
+- Exact read-only Payment and BizCase list protocols plus the four identity-bound
+  Fee Management application lists (`DailyExpense`, `EvectionLoan`,
+  `EvectionSubsidy`, and `EvectionSubsidy2`)
 - Downstream purchase flows discovered from those views (e.g. `ProjectSelection`,
   `Edit/{id}`, detail, dictionary, attachment list/download)
 - Authentication redirects and callbacks on `https://passport.isstech.com`
@@ -17,6 +20,8 @@
 - Local material originals, derived structured documents, extraction runs, and SQLite state
 - Local macOS Keychain items and LaunchAgent for the read-only sync CLI
 - Browser/CDP analysis limited to the authorized iPSA CTF target
+- Fixed browser-only handoffs from the local workspace to seven proven IPSA
+  application/start pages; no local token, form value, or business data is appended
 
 ## Out of scope
 
@@ -26,15 +31,19 @@
 - Committing passwords, cookie values, `.iPSA`, employee names, project numbers,
   or attachment content
 - Sending create / edit / delete / submit / approve / adjust / revoke / upload
-  requests to the live target
+  requests from the local client, sync process, tests, or browser automation
 
 ## Non-mutation rule
 
-The target must not receive requests that create, edit, delete, submit,
-approve, adjust, revoke, import, or upload business data. A request is
+Automated verification and the local runtime must not send requests that create,
+edit, delete, submit, approve, adjust, revoke, import, or upload business data. A request is
 considered safe for live verification only when its observed behavior is
 read-only. Unknown endpoints default to blocked until their purpose is
 established.
+
+The launch catalog is navigation, not an automated write path. After handoff, the
+account holder may use the original IPSA form for an explicitly authorized business
+action; the local service does not observe, proxy, retry, or confirm that submission.
 
 Important special case: `GET /WebTP/PurchaseRequisition/Delete/{id}` is a
 **mutating** operation (jQuery `$.ajax` without an explicit method defaults to
@@ -93,7 +102,8 @@ The repository currently has:
 - Evidence-backed local/HTTP-JSON field extraction with confidence and review gates
 - Versioned human review drafts with immutable AI proposals and append-only local audit
 - A same-origin local Web workspace for materials, evidence review, ready state,
-  SQLite account-visible lists, per-stream checkpoints, and policy-gated read-only sync
+  all unapproved personal workflows, a seven-item IPSA launch catalog, per-stream
+  checkpoints, and policy-gated read-only sync
 - Redacted evidence inventory, endpoint matrix, and vulnerability notes
 
 It does **not** yet have intercepted-and-aborted write bodies or second-role IDOR

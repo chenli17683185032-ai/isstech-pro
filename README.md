@@ -20,13 +20,13 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 | Approval / adjustment / revocation | Initial GET captured; exact read-only paths enabled |
 | Write request **previews** (never sent) | Inferred builders; intercepted bodies pending |
 | FastAPI `/v1` sessions, lists, attachments, previews, work items | Yes; five-stream incomplete pagination fails closed per stream |
-| Payment + BizCase + Fee Management read-only queries | Yes; four independent checkpoints, personal scope, cached lists, manual/UI/scheduled sync |
+| Payment + BizCase + Fee Management read-only queries | Yes; six independent checkpoints, personal scope, cached lists, manual/UI/scheduled sync |
 | SQLite snapshots + change events + manual sync CLI | Yes; account-visible, per-stream transactional checkpoints |
 | Weekday scheduled sync facility | Yes; Keychain, bounded wrapper, reversible LaunchAgent installer |
 | Local material ingestion | Yes; streaming SHA-256, atomic originals, MIME review gate, deduplication |
 | Document parsing + field extraction | Yes; PDF/Office/text, exact source evidence, confidence/review gates |
 | Human review + local draft state | Yes; version locks, immutable AI proposal, append-only audit, ready gate |
-| Local Web workspace | Yes; login, overview, materials, evidence review, ready, follow-up, and business-query views |
+| Local Web workspace | Yes; all unapproved personal workflows, business queries, and seven-item IPSA launch catalog |
 | Automated tests | Run `uv run pytest -q`; exact count is recorded in final verification |
 
 ## Safety boundary
@@ -34,7 +34,8 @@ backed by a **read-only-first** HTTP facade for the authorized CTF target:
 - Browser / CDP / Playwright / mitmproxy are **analysis-only**, not runtime deps.
 - Live verification is read-only: page loads, filters, details, attachment downloads.
 - Create / edit / delete / submit / approve / adjust / revoke / upload are **not**
-  sent to the target. Use intercept+abort for capture; use `/v1/previews/*` locally.
+  sent by the local service or automated verification. The launch catalog only hands
+  the browser to IPSA; form actions remain user-controlled in the original system.
 - Passwords, cookie values, `.iPSA`, employee names, project numbers, and attachment
   bodies must not enter git, test logs, or committed OpenAPI examples.
 - Raw captures: `captures/raw/**` (mode `0600`, gitignored). Redacted: `captures/redacted/`.
@@ -80,15 +81,20 @@ npm run build
 ```
 
 The material picker uploads only to the local `/v1/materials` endpoint. The UI
-contains no iPSA create, save, submit, approve, delete, or upload action. Existing
-work-item and scheduled synchronization use only the five explicitly policy-gated
+contains no local API that creates, saves, submits, approves, deletes, or uploads
+iPSA business data. Its top-bar launcher contains seven fixed `ipsapro.isstech.com`
+browser handoffs for Purchase Requisition, Payment, BizCase, and four Fee Management
+flows. Purchase and Payment open their proven first step; BizCase and Fee Management
+open the original application page so its stateful controls create the actual form.
+Existing work-item and scheduled synchronization use only the five explicitly policy-gated
 procurement `SearchIndex` read paths, the exact body-gated Payment personal query,
-the exact BizCase pager, the identity-bound travel pager, and the exact GET-only
-daily-expense list. Payment, BizCase, travel, and daily expense keep independent
-checkpoints and do not enter `/v1/work-items/current`; their list APIs separately
-fail closed to the same personal-scope contract. The workspace presents Payment,
-BizCase, and Fee Management as peers, with travel and daily expense below Fee
-Management.
+the exact BizCase pager, the identity-bound travel pager, the exact GET-only
+daily-expense and travel-reimbursement lists, and the body-validated travel-subsidy
+pager. All six read-only modules keep independent checkpoints and do not enter
+`/v1/work-items/current`; their list APIs separately fail closed to the same
+personal-scope contract. The workspace presents Payment, BizCase, and Fee Management
+as peers. Fee Management dynamically shows only non-empty personal categories and
+the overview groups every non-approved local workflow by business category.
 
 ### Durable manual sync
 
@@ -124,7 +130,7 @@ but is not shown as any logged-in account's current work-item state. The sync re
 the complete account-visible PurchaseRequisition, ProcurementContract,
 ProcurementOrder, CostConfirmation, and CheckAcceptance SearchIndex streams, then
 uses the same authenticated client for Payment personal queries and the BizCase
-source checkpoint, followed by the identity-bound travel and daily-expense lists.
+source checkpoint, followed by the four identity-bound Fee Management lists.
 Portal identity adds relation labels when it matches a trustworthy applicant field;
 it is not a record-discard gate. Each stream owns an independent checkpoint, so a
 declared-total mismatch, repeated/short page, schema drift, stale measurement, or
@@ -160,7 +166,7 @@ tail -n 20 data/logs/scheduled-sync.log
 Use `--hour H --minute M` on the installer to choose another local time. The
 installed plist is mode `0600` under `~/Library/LaunchAgents/`; it contains no
 username, password, Cookie, ticket, or API key. Scheduled execution calls the same
-nine-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
+eleven-stream `tools/sync_work_items.py --json --csv` path as manual sync, with one
 login, a 10-second Keychain timeout, and a 15-minute sync timeout.
 
 The wrapper captures detailed CLI output in memory and appends only timestamp,

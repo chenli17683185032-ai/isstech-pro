@@ -14,6 +14,10 @@ from isstech_replay.models.daily_expense import (
     DailyExpenseListResult,
     DailyExpenseRecord,
 )
+from isstech_replay.models.fee_application import (
+    FeeApplicationListResult,
+    FeeApplicationRecord,
+)
 from isstech_replay.models.payment import PaymentListResult, PaymentRecord
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
 from isstech_replay.models.travel_application import (
@@ -139,6 +143,35 @@ def _daily_expense_result(
     )
 
 
+def _fee_application_result(
+    *,
+    count: int = 2,
+    prefix: str,
+    applicant: str = "USER-A",
+) -> FeeApplicationListResult:
+    application_prefix = "EEA" if prefix == "R" else "ESA"
+    records = tuple(
+        FeeApplicationRecord(
+            id=f"{application_prefix}-REDACTED-{index:03d}",
+            ordinal=index,
+            application_no=f"{application_prefix}-REDACTED-{index:03d}",
+            project_name=f"PROJECT REDACTED {index}",
+            applicant=applicant,
+            application_date=f"2026-07-{index:02d}",
+            status="已提交",
+            amount="￥0.00",
+            fields=(("申请人", applicant),),
+        )
+        for index in range(1, count + 1)
+    )
+    return FeeApplicationListResult(
+        items=records,
+        total_count=count,
+        page_count=1,
+        source_url="http://ipsapro.isstech.com/WebPSAOA/Fee/REDACTED",
+    )
+
+
 class FakeReadonlyClient:
     def __init__(
         self,
@@ -148,10 +181,14 @@ class FakeReadonlyClient:
         bizcase_application_visible_count: int = 1,
         travel_count: int = 2,
         daily_expense_count: int = 2,
+        travel_reimbursement_count: int = 2,
+        travel_subsidy_count: int = 2,
         fail_payment: bool = False,
         fail_bizcase: bool = False,
         fail_travel: bool = False,
         fail_daily_expense: bool = False,
+        fail_travel_reimbursement: bool = False,
+        fail_travel_subsidy: bool = False,
         fail_identity: bool = False,
     ) -> None:
         self.payment_status = payment_status
@@ -161,10 +198,14 @@ class FakeReadonlyClient:
         )
         self.travel_count = travel_count
         self.daily_expense_count = daily_expense_count
+        self.travel_reimbursement_count = travel_reimbursement_count
+        self.travel_subsidy_count = travel_subsidy_count
         self.fail_payment = fail_payment
         self.fail_bizcase = fail_bizcase
         self.fail_travel = fail_travel
         self.fail_daily_expense = fail_daily_expense
+        self.fail_travel_reimbursement = fail_travel_reimbursement
+        self.fail_travel_subsidy = fail_travel_subsidy
         self.fail_identity = fail_identity
 
     def get_portal_display_name(self) -> str:
@@ -226,6 +267,38 @@ class FakeReadonlyClient:
             applicant=display_name,
         )
 
+    def list_personal_travel_reimbursements(
+        self,
+        *,
+        display_name: str,
+        max_pages: int,
+    ) -> FeeApplicationListResult:
+        assert display_name == "USER-A"
+        assert max_pages == 20
+        if self.fail_travel_reimbursement:
+            raise RuntimeError("travel reimbursement unavailable")
+        return _fee_application_result(
+            count=self.travel_reimbursement_count,
+            prefix="R",
+            applicant=display_name,
+        )
+
+    def list_personal_travel_subsidies(
+        self,
+        *,
+        display_name: str,
+        max_pages: int,
+    ) -> FeeApplicationListResult:
+        assert display_name == "USER-A"
+        assert max_pages == 20
+        if self.fail_travel_subsidy:
+            raise RuntimeError("travel subsidy unavailable")
+        return _fee_application_result(
+            count=self.travel_subsidy_count,
+            prefix="S",
+            applicant=display_name,
+        )
+
 
 def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) -> None:
     storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
@@ -251,11 +324,13 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
         ReadonlyModuleKind.BIZCASE,
         ReadonlyModuleKind.TRAVEL_APPLICATION,
         ReadonlyModuleKind.DAILY_EXPENSE,
+        ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+        ReadonlyModuleKind.TRAVEL_SUBSIDY,
     ]
-    assert first.observed_count == 7
-    assert first.changed_count == 7
+    assert first.observed_count == 11
+    assert first.changed_count == 11
     assert second.status == "succeeded"
-    assert second.observed_count == 7
+    assert second.observed_count == 11
     assert second.changed_count == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
@@ -265,9 +340,15 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
     assert len(
         storage.current_readonly_snapshots(ReadonlyModuleKind.DAILY_EXPENSE)
     ) == 2
-    assert storage.table_count("readonly_module_runs") == 8
-    assert storage.table_count("readonly_module_snapshots") == 14
-    assert storage.table_count("readonly_module_current") == 7
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_REIMBURSEMENT)
+    ) == 2
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_SUBSIDY)
+    ) == 2
+    assert storage.table_count("readonly_module_runs") == 12
+    assert storage.table_count("readonly_module_snapshots") == 22
+    assert storage.table_count("readonly_module_current") == 11
     payment_payload = json.loads(
         storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)[0].payload_json
     )
@@ -353,6 +434,8 @@ def test_identity_failure_does_not_block_bizcase_checkpoint(tmp_path: Path) -> N
         "succeeded",
         "failed",
         "failed",
+        "failed",
+        "failed",
     ]
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 0
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
@@ -389,6 +472,8 @@ def test_readonly_stream_failure_preserves_its_last_successful_snapshot(
         "succeeded",
         "succeeded",
         "succeeded",
+        "succeeded",
+        "succeeded",
     ]
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 1
@@ -396,6 +481,48 @@ def test_readonly_stream_failure_preserves_its_last_successful_snapshot(
     assert failed_run is not None
     assert failed_run["status"] == "failed"
     assert failed_run["error_type"] == "RuntimeError"
+
+
+def test_fee_stream_failure_preserves_only_its_previous_checkpoint(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    modules = (
+        ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
+        ReadonlyModuleKind.TRAVEL_SUBSIDY,
+    )
+    sync_readonly_modules(
+        FakeReadonlyClient(),  # type: ignore[arg-type]
+        storage=storage,
+        modules=modules,
+        observed_at=T1,
+        started_at=T1,
+        run_id="fee-baseline",
+    )
+
+    result = sync_readonly_modules(
+        FakeReadonlyClient(
+            travel_reimbursement_count=1,
+            fail_travel_subsidy=True,
+        ),  # type: ignore[arg-type]
+        storage=storage,
+        modules=modules,
+        observed_at=T3,
+        started_at=T3,
+        run_id="fee-partial",
+    )
+
+    assert result.status == "partial"
+    assert [stream.status for stream in result.streams] == ["succeeded", "failed"]
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_REIMBURSEMENT)
+    ) == 1
+    assert len(
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_SUBSIDY)
+    ) == 2
+    failed_run = storage.get_readonly_run("fee-partial-travel_subsidy")
+    assert failed_run is not None
+    assert failed_run["status"] == "failed"
 
 
 def test_readonly_changed_count_includes_updates_and_removals(tmp_path: Path) -> None:

@@ -27,6 +27,10 @@ FIXTURES_PAYMENT = Path(__file__).parent / "fixtures" / "payment"
 FIXTURES_BIZCASE = Path(__file__).parent / "fixtures" / "bizcase"
 FIXTURES_TRAVEL = Path(__file__).parent / "fixtures" / "travel_application"
 FIXTURES_DAILY_EXPENSE = Path(__file__).parent / "fixtures" / "daily_expense"
+FIXTURES_TRAVEL_REIMBURSEMENT = (
+    Path(__file__).parent / "fixtures" / "travel_reimbursement"
+)
+FIXTURES_TRAVEL_SUBSIDY = Path(__file__).parent / "fixtures" / "travel_subsidy"
 BUSINESS = "http://ipsapro.isstech.com"
 PASSPORT = "https://passport.isstech.com"
 
@@ -121,6 +125,18 @@ def _travel_application_html(page: int) -> str:
 
 def _daily_expense_html() -> str:
     return (FIXTURES_DAILY_EXPENSE / "page1.html").read_text(
+        encoding="utf-8"
+    ).replace("USER-A", "USER_B")
+
+
+def _travel_reimbursement_html() -> str:
+    return (FIXTURES_TRAVEL_REIMBURSEMENT / "page1.html").read_text(
+        encoding="utf-8"
+    ).replace("USER-A", "USER_B")
+
+
+def _travel_subsidy_html(page: int) -> str:
+    return (FIXTURES_TRAVEL_SUBSIDY / f"page{page}.html").read_text(
         encoding="utf-8"
     ).replace("USER-A", "USER_B")
 
@@ -236,6 +252,23 @@ def _upstream_handler(request: httpx.Request) -> httpx.Response:
         and path == "/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx"
     ):
         return httpx.Response(200, text=_daily_expense_html(), request=request)
+    if (
+        host == "ipsapro.isstech.com"
+        and path == "/WebPSAOA/Fee/FeeApply/EvectionSubsidy/List.aspx"
+    ):
+        return httpx.Response(200, text=_travel_reimbursement_html(), request=request)
+    if (
+        host == "ipsapro.isstech.com"
+        and path == "/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/List.aspx"
+    ):
+        page = 1
+        if request.method == "POST":
+            page = int(
+                httpx.QueryParams(request.content.decode())[
+                    "ctl00$ContentPlaceHolder1$GridPager1_input"
+                ]
+            )
+        return httpx.Response(200, text=_travel_subsidy_html(page), request=request)
     if host == "ipsapro.isstech.com" and path.startswith(
         "/WebTP/PurchaseRequisition/Download/"
     ):
@@ -332,6 +365,10 @@ def test_session_required() -> None:
             ("POST", "/v1/readonly-modules/sync"),
             ("GET", "/v1/readonly-modules/payment"),
             ("GET", "/v1/readonly-modules/bizcases"),
+            ("GET", "/v1/readonly-modules/travel-applications"),
+            ("GET", "/v1/readonly-modules/daily-expenses"),
+            ("GET", "/v1/readonly-modules/travel-reimbursements"),
+            ("GET", "/v1/readonly-modules/travel-subsidies"),
             ("GET", "/v1/readonly-modules/runs"),
         ):
             r = client.request(method, path)
@@ -594,6 +631,16 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
             "list_personal_daily_expenses",
             unexpected_upstream_call,
         )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_personal_travel_reimbursements",
+            unexpected_upstream_call,
+        )
+        monkeypatch.setattr(
+            IsstechClient,
+            "list_personal_travel_subsidies",
+            unexpected_upstream_call,
+        )
         payment = client.get("/v1/readonly-modules/payment", headers=headers)
         bizcases = client.get("/v1/readonly-modules/bizcases", headers=headers)
         travel = client.get(
@@ -604,20 +651,33 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
             "/v1/readonly-modules/daily-expenses",
             headers=headers,
         )
+        travel_reimbursements = client.get(
+            "/v1/readonly-modules/travel-reimbursements",
+            headers=headers,
+        )
+        travel_subsidies = client.get(
+            "/v1/readonly-modules/travel-subsidies",
+            headers=headers,
+        )
         runs = client.get("/v1/readonly-modules/runs", headers=headers)
         after = client.get("/v1/work-items/current", headers=headers)
 
     assert work_items_sync.status_code == 200
     assert before.status_code == 200
     assert first.status_code == 200
-    assert first.json()["status"] == "succeeded"
-    assert first.json()["observed_count"] == 59
-    assert first.json()["changed_count"] == 59
+    assert first.json()["status"] == "succeeded", [
+        (stream["module"], stream["status"], stream["error_message"])
+        for stream in first.json()["streams"]
+    ]
+    assert first.json()["observed_count"] == 89
+    assert first.json()["changed_count"] == 89
     assert [stream["module"] for stream in first.json()["streams"]] == [
         "payment",
         "bizcase",
         "travel_application",
         "daily_expense",
+        "travel_reimbursement",
+        "travel_subsidy",
     ]
     assert second.status_code == 200
     assert second.json()["changed_count"] == 0
@@ -657,16 +717,30 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert daily_expenses.json()["items"][0]["application_no"] == (
         "DEA-REDACTED-001"
     )
+    assert travel_reimbursements.status_code == 200
+    assert travel_reimbursements.json()["source_total_count"] == 2
+    assert travel_reimbursements.json()["total_count"] == 2
+    assert travel_reimbursements.json()["submitted_by_me_count"] == 2
+    assert travel_reimbursements.json()["items"][0]["scope_reasons"] == [
+        "submitted_by_me"
+    ]
+    assert travel_subsidies.status_code == 200
+    assert travel_subsidies.json()["source_total_count"] == 28
+    assert travel_subsidies.json()["total_count"] == 28
+    assert travel_subsidies.json()["submitted_by_me_count"] == 28
+    assert travel_subsidies.json()["items"][0]["scope_reasons"] == [
+        "submitted_by_me"
+    ]
     assert runs.status_code == 200
-    assert len(runs.json()) == 8
+    assert len(runs.json()) == 12
     assert after.status_code == 200
     assert after.json()["total_count"] == before.json()["total_count"] == 3
 
     storage = WorkflowStorage(
         account_database_path("alice", base_database_path=database)
     )
-    assert storage.table_count("readonly_module_runs") == 8
-    assert storage.table_count("readonly_module_current") == 59
+    assert storage.table_count("readonly_module_runs") == 12
+    assert storage.table_count("readonly_module_current") == 89
 
 
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(

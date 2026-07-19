@@ -724,3 +724,65 @@ def test_version_six_readonly_data_and_assertions_migrate_to_daily_expense(
     assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     connection.close()
+
+
+def test_version_seven_readonly_data_migrates_to_fee_applications(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "version-seven.sqlite3"
+    package_root = Path(__file__).parents[1] / "src" / "isstech_replay"
+    connection = sqlite3.connect(database)
+    for script in (
+        "schema.sql",
+        "migration_002_materials.sql",
+        "migration_003_extraction.sql",
+        "migration_004_review.sql",
+        "migration_005_readonly_modules.sql",
+        "migration_006_readonly_scope.sql",
+        "migration_007_daily_expense.sql",
+    ):
+        connection.executescript((package_root / script).read_text(encoding="utf-8"))
+    payload_json = '{"id":"DEA-REDACTED-1"}'
+    payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    connection.execute(
+        "INSERT INTO readonly_module_runs "
+        "(run_id, module, status, started_at, observed_at, finished_at, max_pages, "
+        "source_total_count, observed_count, snapshot_count, history_rows_inserted, "
+        "changed_count) VALUES "
+        "('existing-v7', 'daily_expense', 'succeeded', ?, ?, ?, 20, 1, 1, 1, 1, 1)",
+        (T1, T1, T1),
+    )
+    connection.execute(
+        "INSERT INTO readonly_module_snapshots "
+        "(run_id, module, external_id, observed_at, payload_json, payload_hash) "
+        "VALUES ('existing-v7', 'daily_expense', 'DEA-REDACTED-1', ?, ?, ?)",
+        (T1, payload_json, payload_hash),
+    )
+    connection.execute(
+        "INSERT INTO readonly_module_current "
+        "(module, external_id, first_seen_at, last_seen_at, last_run_id, "
+        "payload_json, payload_hash) VALUES "
+        "('daily_expense', 'DEA-REDACTED-1', ?, ?, 'existing-v7', ?, ?)",
+        (T1, T1, payload_json, payload_hash),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+    connection.close()
+
+    storage = WorkflowStorage(database)
+
+    assert storage.schema_version() == SCHEMA_VERSION
+    current = storage.current_readonly_snapshots(ReadonlyModuleKind.DAILY_EXPENSE)
+    assert len(current) == 1
+    assert current[0].payload_json == payload_json
+    assert current[0].payload_hash == payload_hash
+    assert (
+        storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_REIMBURSEMENT)
+        == ()
+    )
+    assert storage.current_readonly_snapshots(ReadonlyModuleKind.TRAVEL_SUBSIDY) == ()
+
+    connection = sqlite3.connect(database)
+    assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    connection.close()

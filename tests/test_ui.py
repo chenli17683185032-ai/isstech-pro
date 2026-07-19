@@ -31,6 +31,8 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert js.status_code == 200
     assert "javascript" in js.headers["content-type"]
     assert "待处理" in js.text
+    assert "未审批流程" in js.text
+    assert "查看类目" in js.text
     assert "已完成" in js.text
     assert "范围：我申请、我的项目与我管理的" in js.text
     assert "全部相关" in js.text
@@ -50,6 +52,20 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "费用管理" in js.text
     assert "出差申请" in js.text
     assert "日常报销申请" in js.text
+    assert "差旅报销申请" in js.text
+    assert "差旅补助申请" in js.text
+    assert "发起流程" in js.text
+    assert "采购立项申请" in js.text
+    assert "在 IPSA 中发起" in js.text
+    assert "/WebTP/PurchaseRequisition/ProjectSelection" in js.text
+    assert "/WebPMS/selector/selecttype" in js.text
+    assert "bizcaseapply.list" in js.text
+    assert "helpmenucode=92" in js.text
+    assert "helpmenucode=90" in js.text
+    assert "helpmenucode=93" in js.text
+    assert "helpmenucode=112" in js.text
+    assert "noopener noreferrer" in js.text
+    assert "no-referrer" in js.text
     assert "同级业务系统" in js.text
     assert "费用管理子项" in js.text
     assert "查看本地详情" in js.text
@@ -60,6 +76,8 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "/v1/readonly-modules/bizcases" in js.text
     assert "/v1/readonly-modules/travel-applications" in js.text
     assert "/v1/readonly-modules/daily-expenses" in js.text
+    assert "/v1/readonly-modules/travel-reimbursements" in js.text
+    assert "/v1/readonly-modules/travel-subsidies" in js.text
     assert "/v1/readonly-modules/sync" in js.text
     assert "打开只读详情" not in js.text
     assert css.status_code == 200

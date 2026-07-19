@@ -41,6 +41,7 @@ export default function App() {
   const [activeView, setActiveView] = useState("overview");
   const [syncing, setSyncing] = useState(false);
   const [readonlySyncing, setReadonlySyncing] = useState(false);
+  const [readonlyTarget, setReadonlyTarget] = useState(null);
   const [toast, setToast] = useState(null);
   const clearSession = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
@@ -50,6 +51,10 @@ export default function App() {
   }, []);
   const workspace = useWorkspaceData(token, clearSession);
   const readonlyModules = useReadonlyModulesData(token, clearSession);
+  const navigate = useCallback((view, target = null) => {
+    setReadonlyTarget(view === "readonly-modules" ? target : null);
+    setActiveView(view);
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -147,9 +152,9 @@ export default function App() {
       error: workspace.error,
       refresh: workspace.refresh,
       notify: setToast,
-      navigate: setActiveView,
+      navigate,
     }),
-    [token, workspace.data, workspace.loading, workspace.error, workspace.refresh],
+    [token, workspace.data, workspace.loading, workspace.error, workspace.refresh, navigate],
   );
 
   if (!token || checkingSession || !session) {
@@ -168,9 +173,17 @@ export default function App() {
       onReload={readonlyModules.refresh}
       onSync={handleReadonlySync}
       syncing={readonlySyncing}
+      initialModule={readonlyTarget}
     />
   );
-  else content = <OverviewView {...shared} onSync={handleSync} syncing={syncing} />;
+  else content = (
+    <OverviewView
+      {...shared}
+      readonlyData={readonlyModules.data}
+      readonlyLoading={readonlyModules.loading}
+      readonlyError={readonlyModules.error}
+    />
+  );
 
   const activeSyncing = activeView === "readonly-modules" ? readonlySyncing : syncing;
   const activeSync = activeView === "readonly-modules" ? handleReadonlySync : handleSync;
@@ -179,7 +192,7 @@ export default function App() {
     <>
       <AppShell
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={navigate}
         title={viewTitles[activeView]}
         username={session.username}
         syncing={activeSyncing}

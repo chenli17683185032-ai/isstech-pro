@@ -13,7 +13,7 @@ a same-origin Web workspace plus direct HTTP through a single guarded transport.
 | Business entry | `http://ipsapro.isstech.com/WebTP/PurchaseRequisition` | Purchase requisition UI and AJAX endpoints |
 | Portal | `http://ipsapro.isstech.com/Portal` | Portal / SSO entry |
 | Passport | `https://passport.isstech.com/` | Credential POST, redirects, session cookies |
-| Local workspace | `http://127.0.0.1:8000/` | Materials, evidence review, ready state, sync, follow-up list |
+| Local workspace | `http://127.0.0.1:8000/` | All unapproved workflows, local review/sync, and IPSA launch catalog |
 | Local API | `http://127.0.0.1:8000` | Stable REST facade (`/docs` for OpenAPI) |
 
 ## Component diagram
@@ -27,6 +27,9 @@ captures/raw  --redact-->  captures/redacted (fixtures)
                                 v
 React workspace --> FastAPI /v1 --> session store --> IsstechClient
      |                                   |
+     +--> fixed browser handoff --> IPSA original application/form UI
+     |        (no local token/data; user-controlled submit)
+     |
      +--> material service --> immutable originals
      |          |
      |          v
@@ -80,12 +83,12 @@ sync service  --------------------> SQLite state/audit
 | `ai/base.py`, `ai/provider.py` | Extraction-only provider protocol, local rules, bounded HTTP JSON |
 | `workflow_state.py` | Human review, exact-evidence revalidation, optimistic state transitions |
 | `scheduler.py` | Keychain reads, bounded manual-CLI child process, private outcome log |
-| `web/` | React/Vite source for overview, materials, drafts, and follow-up views |
+| `web/` | React/Vite source for overview, launch catalog, materials, drafts, and follow-up views |
 | `web_dist/` | Hashed production assets served by FastAPI and packaged in the wheel |
 | `models/` | Auth, purchase, attachment, preview, and normalized work-item models |
 | `parsers/` | Login / Portal identity / purchase / attachment HTML parsers |
 | `routes/` | sessions, materials, extractions, drafts, purchase reads, previews, work items |
-| `tools/sync_work_items.py` | Nine-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
+| `tools/sync_work_items.py` | Eleven-stream manual/LaunchAgent sync, combined JSON summary, CSV export |
 | `tools/ingest_materials.py` | Offline file/directory inbox ingestion |
 | `tools/extract_material.py` | Offline parsing and evidence-backed proposal extraction |
 | `tools/scheduled_sync.py` | LaunchAgent entrypoint; invokes the existing manual sync CLI |
@@ -115,12 +118,16 @@ sync service  --------------------> SQLite state/audit
 9. Portal `#AccountGreetings #Greeting p` supplies an optional display identity.
    Exact normalized applicant matches add relation labels; identity mismatch or a
    missing applicant column never discards an otherwise visible row.
-10. Payment, BizCase, travel applications, and daily expenses have independent
+10. Payment, BizCase, travel applications, daily expenses, travel reimbursements,
+    and travel subsidies have independent
     checkpoints. Their API admits only exact personal relations; BizCase
     application-view visibility is not ownership, and account-holder object
     assertions remain only in the mode `0600` account database.
-11. The Web workspace has no upstream execution control. Local material upload,
-   field review, ready transitions, and SQLite sync are the only mutations it can request.
+11. The Web workspace has no upstream execution API. Local material upload, field
+    review, ready transitions, and SQLite sync are the only mutations it can request.
+12. The workflow launcher is a fixed browser-only handoff. It appends no local
+    Bearer token, Cookie, form value, ViewState, or business identifier; new tabs use
+    `noopener noreferrer`. `GuardedTransport` never receives these navigations.
 
 ## Evidence pipeline
 
@@ -136,7 +143,8 @@ Exact GET paths for application, approval, adjustment, revocation, search, and
 the five workflow Detail views are runtime-observed and live-enabled. Search
 filter and pagination POST shapes are captured; the other list forms are
 restricted to their exact served read-only paths. Write-preparation pages and all
-mutating actions remain blocked.
+mutating actions remain blocked in the local HTTP client. The separate browser launch
+catalog does not weaken or bypass that policy.
 Each of PurchaseRequisition, ProcurementContract, ProcurementOrder,
 CostConfirmation, and CheckAcceptance fails closed when its declared total cannot
 be satisfied, a page repeats, totals drift, schema changes, or the configured page
@@ -156,9 +164,12 @@ nine-column schema, page shape, unique identities, and applicant identity must a
 hold before a checkpoint commits. Daily expenses use only the exact
 `DailyExpense/List.aspx?helpmenucode=90` GET; the fixed nine-column schema, empty
 filters, disabled single-page pager, unique identities, and applicant identity
-must all hold. Any active pager fails closed instead of guessing a POST. All four
-details are local SQLite snapshots; upstream Payment Edit, BizCase mixed edit
-forms, and both Fee Management `Add.aspx?oper=edit` paths remain blocked.
+must all hold. Any active pager fails closed instead of guessing a POST. Travel
+reimbursement is likewise exact-GET-only. Travel subsidy alone permits its exact
+`GridPager1` numeric postback after validating empty filters, fixed ordering, opaque
+state, numeric row state, page shape, stable identity, and applicant identity. All
+six details are local SQLite snapshots; upstream Payment Edit, BizCase mixed edit
+forms, and every Fee Management `Add.aspx?oper=edit` path remain blocked.
 
 ## Snapshot transaction
 
@@ -257,7 +268,7 @@ and a mode `0600` per-database advisory lock with a 10-second ceiling. This
 prevents first-run requests or a simultaneous scheduler process from racing
 migrations or moving `PRAGMA user_version` backwards.
 
-The browser holds the local Bearer token only in `sessionStorage`. All draft
+The browser holds the local Bearer token only in same-origin `localStorage`. All draft
 mutations include `expected_version`; a 409 response shows a conflict notice and
 reloads the authoritative draft before another action. A successful sync keeps
 its observation time even when it produces zero actionable items, so an empty
@@ -268,6 +279,12 @@ preserve useful column width on mobile scroll inside their own container; the
 page itself remains fixed to the viewport width. String-labelled common buttons
 retain an accessible name when compact CSS hides their visible label.
 
+The top bar keeps one primary `发起流程` action on every authenticated view. A native
+modal dialog groups seven evidence-backed IPSA destinations. Purchase Requisition and
+Payment go to their proven first step; the legacy BizCase and Fee Management entries
+go to their original application pages because their server-side add controls depend
+on current WebForms state. Closing the dialog restores focus to its trigger.
+
 ## Scheduled measurement loop
 
 The weekday LaunchAgent does not embed a scheduler in FastAPI and does not need
@@ -277,7 +294,8 @@ subprocess with credentials only in that child environment.
 
 The child still uses the exact P3 complete-read and transactional SQLite path,
 then reuses the same authenticated client and account storage for the Payment,
-BizCase, travel-application, and daily-expense checkpoints. Each of the nine
+BizCase, travel-application, daily-expense, travel-reimbursement, and travel-subsidy
+checkpoints. Each of the eleven
 streams preserves its own current snapshot on failure; the combined CLI status is
 non-success when any group is partial or failed.
 Launchd stdout/stderr go to `/dev/null`; the wrapper parses child JSON and writes

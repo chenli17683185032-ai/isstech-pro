@@ -196,6 +196,58 @@ live pager target. The adapter therefore sends exactly one GET and fails closed
 if active pagination appears later; it never guesses a query or pager POST. The
 workspace opens only the committed local snapshot.
 
+## Travel reimbursement application list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial travel reimbursement list | GET | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy/List.aspx?helpmenucode=93` | None | observed and pure-HTTP replayed, HTTP 200 | 2026-07-17 read-only menu/list probe; counts/schema only |
+| Query or page postback | POST | same exact list URL | Unknown; current pager is disabled | blocked | served form only; not requested |
+| Open application | GET | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy/Add.aspx?oper=edit...` | Write preparation | served-shape; blocked | list row link only; not requested |
+| Add or delete | form controls | same module form | **Mutating / write preparation** | blocked-write | list form only |
+
+The identity-bound list contains two rows on one disabled `gp` page and uses the
+fixed nine-column fee schema. Empty filters, descending application ordering,
+globally contiguous ordinals, unique `EEA` identities, exact edit-reference shape,
+and applicant identity are required. The adapter sends one exact GET and never
+requests the edit-capable detail.
+
+## Travel subsidy application list
+
+| Action | Method | Endpoint | Side effect | State | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Initial travel subsidy list | GET | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/List.aspx?helpmenucode=112` | None | observed and pure-HTTP replayed, HTTP 200 | 2026-07-17 read-only menu/list probe; counts/schema only |
+| Page postback | POST | same exact URL, `ctl00$ContentPlaceHolder1$GridPager1` target | Read-only pagination | observed and pure-HTTP replayed, HTTP 200 | pages 2 and 3; counts/schema only |
+| Open application | GET | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/Add.aspx?oper=edit...` | Write preparation | served-shape; blocked | list row link only; not requested |
+| Query, add, or delete | form controls | same module form | **Mutating / unknown** | blocked-write | list form only |
+
+The identity-bound list contains 28 unique `ESA` rows over pages sized 10/10/8.
+Each next page consumes the immediately previous ViewState/EventValidation. Policy
+admits only the exact pager target, bounded numeric page input, empty filters and
+hidden duty filter, fixed ordering, bounded numeric workflow-owner state, and the
+served row identities. Any additional control, short intermediate page, page-count
+drift, duplicate identity, or applicant mismatch preserves the prior checkpoint.
+The workspace detail remains SQLite-only.
+
+## Workspace browser handoffs
+
+These are fixed anchors in the local React workspace, not `IsstechClient` or
+`GuardedTransport` requests. They open a new browser tab with `noopener noreferrer`
+and carry no local Bearer token, Cookie, ViewState, business field, or record ID.
+
+| Launch item | Browser destination | Handoff state |
+| --- | --- | --- |
+| Purchase Requisition | `/WebTP/PurchaseRequisition/ProjectSelection` | Served Index JavaScript's first step |
+| Payment | `/WebPMS/selector/selecttype` | Served Payment JavaScript's type selector |
+| BizCase | Exact application `Main.aspx` route with `url=...bizcaseapply.list` | Original page chooses FP/TM |
+| Travel application | `/WebPSAOA/Fee/FeeApply/EvectionLoan/List.aspx?helpmenucode=92` | Original stateful Add control |
+| Daily expense | `/WebPSAOA/Fee/FeeApply/DailyExpense/List.aspx?helpmenucode=90` | Original stateful Add control |
+| Travel reimbursement | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy/List.aspx?helpmenucode=93` | Original stateful Add control |
+| Travel subsidy | `/WebPSAOA/Fee/FeeApply/EvectionSubsidy2/List.aspx?helpmenucode=112` | Original stateful Add control |
+
+The four Fee Management links intentionally stop at the proven application list.
+Their `btnAdd` controls are WebForms postbacks with current hidden state; the local
+workspace does not guess a context-free `Add.aspx` URL or replay that POST.
+
 ## Attachments
 
 | Action | Method | Endpoint | Side effect | State | Evidence |
@@ -233,3 +285,5 @@ future shape discovery must use request-stage pause plus abort and remain in
    credentials and authenticated response bodies remain intentionally uncommitted.
 6. WebForms endpoints that multiplex actions on one URL require body-aware
    policy checks. Unknown event targets and submit controls default to deny.
+7. Browser handoff links are not policy exceptions. Adding a link never authorizes
+   the local HTTP client to request the same write-preparation or mutation path.

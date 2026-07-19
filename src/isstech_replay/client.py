@@ -18,6 +18,15 @@ from .config import Settings
 from .models.attachment import AttachmentContent, AttachmentMeta
 from .models.bizcase import BizCaseListResult, BizCasePage, BizCaseRecord
 from .models.daily_expense import DailyExpenseListResult
+from .models.fee_application import (
+    FEE_APPLICATION_PAGE_SIZE,
+    TRAVEL_REIMBURSEMENT_SPEC,
+    TRAVEL_SUBSIDY_SPEC,
+    FeeApplicationListResult,
+    FeeApplicationPage,
+    FeeApplicationRecord,
+    FeeApplicationSpec,
+)
 from .models.payment import (
     PaymentListResult,
     PaymentRecord,
@@ -42,6 +51,7 @@ from .models.purchase import (
 from .parsers.attachment import parse_attachment_list
 from .parsers.bizcase import parse_bizcase_application_page, parse_bizcase_page
 from .parsers.daily_expense import parse_daily_expense_page
+from .parsers.fee_application import parse_fee_application_page
 from .parsers.login import is_login_page
 from .parsers.payment import parse_payment_query_list
 from .parsers.portal import display_name_matches, parse_portal_display_name
@@ -818,6 +828,129 @@ class IsstechClient:
             total_count=len(page.items),
             page_count=page.page_count,
             source_url=page.source_url,
+        )
+
+    def _read_fee_application_page(
+        self,
+        *,
+        spec: FeeApplicationSpec,
+        previous: FeeApplicationPage | None = None,
+        page: int = 1,
+    ) -> FeeApplicationPage:
+        url = self._url(spec.list_url)
+        if previous is None:
+            response = self.get(url)
+        else:
+            response = self.post(
+                url,
+                data=previous.pagination_form(page),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        response.raise_for_status()
+        self._ensure_not_login(response)
+        return parse_fee_application_page(
+            response.text,
+            spec=spec,
+            source_url=str(response.url),
+        )
+
+    def _list_personal_fee_applications(
+        self,
+        *,
+        spec: FeeApplicationSpec,
+        display_name: str,
+        max_pages: int,
+    ) -> FeeApplicationListResult:
+        display_name = display_name.strip()
+        if not display_name:
+            raise ValueError(f"{spec.key} display_name is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be at least 1")
+        current = self._read_fee_application_page(spec=spec)
+        if current.current_page != 1:
+            raise PaginationIncompleteError(
+                f"{spec.label} initial response is not page 1"
+            )
+        if current.page_count > max_pages:
+            raise PaginationIncompleteError(
+                f"{spec.label} page count {current.page_count} "
+                f"exceeds max_pages={max_pages}"
+            )
+        if not spec.pagination_enabled and current.page_count != 1:
+            raise PaginationIncompleteError(f"{spec.label} exceeds the proven single page")
+
+        items: list[FeeApplicationRecord] = []
+        seen: set[str] = set()
+        expected_page_count = current.page_count
+        for page_number in range(1, expected_page_count + 1):
+            if page_number > 1:
+                current = self._read_fee_application_page(
+                    spec=spec,
+                    previous=current,
+                    page=page_number,
+                )
+            if current.current_page != page_number:
+                raise PaginationIncompleteError(
+                    f"{spec.label} requested page {page_number} "
+                    f"but received {current.current_page}"
+                )
+            if current.page_count != expected_page_count:
+                raise PaginationIncompleteError(
+                    f"{spec.label} page count changed during pagination: "
+                    f"{expected_page_count} -> {current.page_count}"
+                )
+            if page_number < expected_page_count and len(current.items) != (
+                FEE_APPLICATION_PAGE_SIZE
+            ):
+                raise PaginationIncompleteError(
+                    f"{spec.label} page {page_number} was short before the last page"
+                )
+            if page_number == expected_page_count and expected_page_count > 1:
+                if not current.items or len(current.items) > FEE_APPLICATION_PAGE_SIZE:
+                    raise PaginationIncompleteError(
+                        f"{spec.label} last-page size is invalid"
+                    )
+            for item in current.items:
+                if not display_name_matches(item.applicant, display_name):
+                    raise PaginationIncompleteError(
+                        f"{spec.label} applicant does not match the current identity"
+                    )
+                if item.id in seen:
+                    raise PaginationIncompleteError(
+                        f"{spec.label} page {page_number} repeated an identity"
+                    )
+                seen.add(item.id)
+                items.append(item)
+
+        return FeeApplicationListResult(
+            items=tuple(items),
+            total_count=len(items),
+            page_count=expected_page_count,
+            source_url=current.source_url,
+        )
+
+    def list_personal_travel_reimbursements(
+        self,
+        *,
+        display_name: str,
+        max_pages: int = 20,
+    ) -> FeeApplicationListResult:
+        return self._list_personal_fee_applications(
+            spec=TRAVEL_REIMBURSEMENT_SPEC,
+            display_name=display_name,
+            max_pages=max_pages,
+        )
+
+    def list_personal_travel_subsidies(
+        self,
+        *,
+        display_name: str,
+        max_pages: int = 20,
+    ) -> FeeApplicationListResult:
+        return self._list_personal_fee_applications(
+            spec=TRAVEL_SUBSIDY_SPEC,
+            display_name=display_name,
+            max_pages=max_pages,
         )
 
     def get_purchase_requisition(self, requisition_id: str) -> PurchaseRequisitionDetail:

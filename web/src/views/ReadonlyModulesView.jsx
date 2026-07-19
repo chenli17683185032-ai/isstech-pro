@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  BadgeDollarSign,
   BriefcaseBusiness,
   CreditCard,
   Database,
@@ -22,6 +23,8 @@ const MODULES = [
   { key: "bizcases", module: "bizcase", label: "BizCase查询", icon: BriefcaseBusiness, placeholder: "搜索 BizCase、客户、项目" },
   { key: "travelApplications", module: "travel_application", label: "出差申请", icon: PlaneTakeoff, placeholder: "搜索单据、项目、申请人" },
   { key: "dailyExpenses", module: "daily_expense", label: "日常报销申请", icon: ReceiptText, placeholder: "搜索申请、项目、申请人" },
+  { key: "travelReimbursements", module: "travel_reimbursement", label: "差旅报销申请", icon: ReceiptText, placeholder: "搜索申请、项目、申请人" },
+  { key: "travelSubsidies", module: "travel_subsidy", label: "差旅补助申请", icon: BadgeDollarSign, placeholder: "搜索申请、项目、申请人" },
 ];
 
 const SYSTEMS = [
@@ -30,7 +33,12 @@ const SYSTEMS = [
   { key: "feeManagement", label: "费用管理", icon: ReceiptText },
 ];
 
-const FEE_MODULE_KEYS = ["dailyExpenses", "travelApplications"];
+const FEE_MODULE_KEYS = [
+  "dailyExpenses",
+  "travelApplications",
+  "travelReimbursements",
+  "travelSubsidies",
+];
 
 const SCOPE_LABELS = {
   my_project: "我的项目",
@@ -256,12 +264,17 @@ export default function ReadonlyModulesView({
   onReload,
   onSync,
   syncing,
+  initialModule,
 }) {
   const [activeSystem, setActiveSystem] = useState("payment");
   const [activeFeeModule, setActiveFeeModule] = useState("dailyExpenses");
   const [query, setQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
-  const activeModule = activeSystem === "feeManagement" ? activeFeeModule : activeSystem;
+  const availableFeeModules = FEE_MODULE_KEYS.filter((key) => data[key].total_count > 0);
+  const resolvedFeeModule = availableFeeModules.includes(activeFeeModule)
+    ? activeFeeModule
+    : (availableFeeModules[0] || activeFeeModule);
+  const activeModule = activeSystem === "feeManagement" ? resolvedFeeModule : activeSystem;
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const definition = MODULES.find((module) => module.key === activeModule) || MODULES[0];
   const current = data[definition.key];
@@ -271,11 +284,30 @@ export default function ReadonlyModulesView({
     [current.items, deferredQuery],
   );
 
+  useEffect(() => {
+    if (resolvedFeeModule !== activeFeeModule) {
+      setActiveFeeModule(resolvedFeeModule);
+      setSelectedItem(null);
+    }
+  }, [activeFeeModule, resolvedFeeModule]);
+
+  useEffect(() => {
+    if (FEE_MODULE_KEYS.includes(initialModule)) {
+      setActiveSystem("feeManagement");
+      setActiveFeeModule(initialModule);
+      setSelectedItem(null);
+    } else if (["payment", "bizcases"].includes(initialModule)) {
+      setActiveSystem(initialModule);
+      setSelectedItem(null);
+    }
+  }, [initialModule]);
+
   const emptyTitle = deferredQuery
     ? `没有匹配的${definition.label}记录`
     : `暂无个人相关的${definition.label}记录`;
-  const feeManagementCount = (
-    data.travelApplications.total_count + data.dailyExpenses.total_count
+  const feeManagementCount = FEE_MODULE_KEYS.reduce(
+    (total, key) => total + data[key].total_count,
+    0,
   );
 
   return (
@@ -339,7 +371,7 @@ export default function ReadonlyModulesView({
             </div>
             {activeSystem === "feeManagement" ? (
               <div className="segmented segmented--submodules" aria-label="费用管理子项">
-                {FEE_MODULE_KEYS.map((key) => {
+                {availableFeeModules.map((key) => {
                   const module = MODULES.find((candidate) => candidate.key === key);
                   const Icon = module.icon;
                   return (
