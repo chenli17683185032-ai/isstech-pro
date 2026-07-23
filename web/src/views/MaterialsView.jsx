@@ -66,16 +66,16 @@ export default function MaterialsView({ token, data, loading, refresh, notify, n
           body: { provider: "local_rules", confidence_threshold: 0.85 },
         });
       }
-      const existingDraft = draftByExtraction.get(extraction.extraction_id);
-      if (!existingDraft) {
-        await apiRequest(`/v1/extractions/${extraction.extraction_id}/drafts`, {
+      let draft = draftByExtraction.get(extraction.extraction_id);
+      if (!draft) {
+        draft = await apiRequest(`/v1/extractions/${extraction.extraction_id}/drafts`, {
           token,
           method: "POST",
         });
       }
       await refresh();
       notify({ tone: "success", message: "材料已进入审阅队列" });
-      navigate("drafts");
+      navigate("drafts", { draft: draft.draft_id });
     } catch (error) {
       notify({ tone: "error", message: error.message || "抽取失败" });
       await refresh();
@@ -135,7 +135,7 @@ export default function MaterialsView({ token, data, loading, refresh, notify, n
                           onClick={() => startWorkflow(material)}
                           title={!supported ? "当前格式需要 OCR 或人工处理" : undefined}
                         >
-                          {busy ? "处理中" : draft ? "打开草稿" : extraction?.status === "failed" ? "重新抽取" : "开始抽取"}
+                          {busy ? "处理中" : draft ? "打开草稿" : extraction?.status === "failed" ? "重新识别" : "识别并生成草稿"}
                         </Button>
                       </td>
                     </tr>

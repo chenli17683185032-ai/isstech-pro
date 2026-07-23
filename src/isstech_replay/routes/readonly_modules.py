@@ -12,7 +12,7 @@ from isstech_replay.account_scope import account_database_path
 from isstech_replay.errors import local_storage_error, upstream_error
 from isstech_replay.models.readonly_modules import ReadonlyModuleKind
 from isstech_replay.models.work_items import WorkItemScopeReason
-from isstech_replay.readonly_sync import sync_readonly_modules
+from isstech_replay.readonly_sync import READONLY_MODULES, sync_readonly_modules
 from isstech_replay.routes.deps import get_session
 from isstech_replay.session_store import SessionRecord
 from isstech_replay.storage import WorkflowStorage
@@ -296,6 +296,7 @@ def sync_modules(
     session: Annotated[SessionRecord, Depends(get_session)],
     max_pages: int = Query(default=20, ge=1, le=100),
     dry_run: bool = Query(default=False),
+    module: ReadonlyModuleKind | None = Query(default=None),
 ) -> ReadonlySyncOut:
     scope_storage = _storage(session)
     storage = None if dry_run else scope_storage
@@ -305,6 +306,7 @@ def sync_modules(
             storage=storage,
             max_pages=max_pages,
             dry_run=dry_run,
+            modules=(module,) if module is not None else READONLY_MODULES,
             scope_storage=scope_storage,
         )
     except PermissionError as exc:

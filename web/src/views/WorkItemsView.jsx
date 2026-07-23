@@ -1,4 +1,4 @@
-import { Clipboard, Eye, Layers3, ListTodo, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Clipboard, Eye, Layers3, ListTodo, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../api";
 import Button from "../components/Button";
@@ -54,17 +54,35 @@ async function writeClipboardText(text) {
   }
 }
 
-export default function WorkItemsView({ token, data, notify, onSync, syncing }) {
+export default function WorkItemsView({
+  token,
+  data,
+  loading,
+  error,
+  refresh,
+  notify,
+  onSync,
+  syncing,
+  navigationParams,
+  navigate,
+  goBack,
+}) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("all");
   const [scopeMode, setScopeMode] = useState("all");
   const [workflow, setWorkflow] = useState("all");
-  const [selectedItem, setSelectedItem] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailRequestVersion, setDetailRequestVersion] = useState(0);
   const deferredQuery = useDeferredValue(query);
+  const selectedItem = useMemo(() => {
+    if (!navigationParams.item) return null;
+    return data.workItems.items.find((item) => (
+      item.external_id === navigationParams.item
+      && (!navigationParams.workflow || item.workflow === navigationParams.workflow)
+    )) || null;
+  }, [data.workItems.items, navigationParams.item, navigationParams.workflow]);
   const workflowOptions = useMemo(
     () => WORKFLOW_OPTIONS.map((option) => ({
       ...option,
@@ -95,7 +113,9 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
     });
   }, [data.workItems.items, deferredQuery, mode, scopeMode, workflow]);
 
-  const closeDetail = useCallback(() => setSelectedItem(null), []);
+  const closeDetail = useCallback(() => {
+    goBack({ view: "records", params: { area: "procurement" } });
+  }, [goBack]);
 
   useEffect(() => {
     if (!selectedItem) return undefined;
@@ -119,7 +139,11 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
   }, [selectedItem, token, detailRequestVersion]);
 
   function openDetail(item) {
-    setSelectedItem(item);
+    navigate("records", {
+      area: "procurement",
+      workflow: item.workflow,
+      item: item.external_id,
+    });
   }
 
   async function copyList() {
@@ -144,6 +168,20 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
 
   return (
     <div className="view-stack">
+      {error ? (
+        <div className="inline-alert" role="alert">
+          <AlertTriangle size={17} aria-hidden="true" />
+          <span>采购单据读取失败：{error.message}</span>
+          <Button icon={RefreshCw} onClick={refresh}>重新读取</Button>
+        </div>
+      ) : null}
+      {!loading && navigationParams.item && !selectedItem ? (
+        <div className="inline-alert" role="alert">
+          <AlertTriangle size={17} aria-hidden="true" />
+          <span>未找到这张采购单据，数据可能已经更新。</span>
+          <Button onClick={closeDetail}>返回单据列表</Button>
+        </div>
+      ) : null}
       <section className="work-item-summary">
         <div><span>个人相关</span><strong>{data.workItems.total_count}</strong></div>
         <div><span>我的项目</span><strong>{data.workItems.my_project_count ?? 0}</strong></div>
@@ -195,10 +233,23 @@ export default function WorkItemsView({ token, data, notify, onSync, syncing }) 
           </div>
           <div className="table-toolbar__actions">
             <Button icon={Clipboard} onClick={copyList} disabled={!items.length}>复制清单</Button>
-            <Button icon={RefreshCw} variant="primary" onClick={onSync} disabled={syncing}>{syncing ? "同步中" : "立即同步"}</Button>
+            <Button
+              icon={RefreshCw}
+              variant="primary"
+              onClick={() => onSync(workflow === "all" ? null : workflow)}
+              disabled={syncing}
+            >
+              {syncing ? "同步中" : "立即同步"}
+            </Button>
           </div>
         </div>
-        {items.length ? (
+        {loading && !data.workItems.items.length ? (
+          <div className="readonly-loading" aria-label="正在读取采购单据" aria-busy="true">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index}><span /><span /><span /><span /></div>
+            ))}
+          </div>
+        ) : items.length ? (
           <div className="table-wrap">
             <table className="data-table followup-table">
               <thead><tr><th>流程</th><th>编号</th><th>单据</th><th>归属</th><th>当前节点</th><th>审批人</th><th>状态</th><th /></tr></thead>

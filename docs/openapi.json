@@ -2004,6 +2004,18 @@
         "title": "PurchaseListOut",
         "type": "object"
       },
+      "ReadonlyModuleKind": {
+        "enum": [
+          "payment",
+          "bizcase",
+          "travel_application",
+          "daily_expense",
+          "travel_reimbursement",
+          "travel_subsidy"
+        ],
+        "title": "ReadonlyModuleKind",
+        "type": "string"
+      },
       "ReadonlyRunOut": {
         "properties": {
           "changed_count": {
@@ -5595,6 +5607,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "module",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadonlyModuleKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -6014,6 +6042,22 @@
               "default": false,
               "title": "Dry Run",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workflow",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/WorkflowKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workflow"
             }
           },
           {

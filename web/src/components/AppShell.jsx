@@ -1,9 +1,9 @@
 import {
+  ArrowLeft,
   ClipboardCheck,
-  Database,
   Files,
   LayoutDashboard,
-  ListTodo,
+  LibraryBig,
   LogOut,
   RefreshCw,
   Workflow,
@@ -12,20 +12,24 @@ import Button from "./Button";
 import WorkflowLauncher from "./WorkflowLauncher";
 
 const navItems = [
-  { id: "overview", label: "总览", icon: LayoutDashboard },
-  { id: "materials", label: "材料", icon: Files },
-  { id: "drafts", label: "审阅草稿", icon: ClipboardCheck },
-  { id: "work-items", label: "催办清单", icon: ListTodo },
-  { id: "readonly-modules", label: "业务查询", icon: Database },
+  { id: "overview", label: "工作台", icon: LayoutDashboard },
+  { id: "records", label: "单据中心", icon: LibraryBig },
+  { id: "materials", label: "材料处理", icon: Files },
+  { id: "drafts", label: "草稿审阅", icon: ClipboardCheck },
 ];
 
 export default function AppShell({
   activeView,
   onViewChange,
+  onBack,
+  backLabel = "返回",
   title,
+  subtitle,
   username,
+  navBadges = {},
   syncing,
   onSync,
+  syncLabel = "更新数据",
   onLogout,
   children,
 }) {
@@ -49,6 +53,7 @@ export default function AppShell({
             >
               <Icon size={18} aria-hidden="true" />
               <span>{label}</span>
+              {navBadges[id] ? <strong className="primary-nav__badge">{navBadges[id]}</strong> : null}
             </button>
           ))}
         </nav>
@@ -59,11 +64,25 @@ export default function AppShell({
       </aside>
       <div className="app-stage">
         <header className="topbar">
-          <div>
-            <h1>{title}</h1>
-            <span className="topbar__date">
-              {new Intl.DateTimeFormat("zh-CN", { dateStyle: "long" }).format(new Date())}
-            </span>
+          <div className="topbar__heading">
+            {onBack ? (
+              <Button
+                className="topbar__back"
+                icon={ArrowLeft}
+                variant="ghost"
+                onClick={onBack}
+                aria-label={backLabel}
+                title={backLabel}
+              >
+                返回
+              </Button>
+            ) : null}
+            <div>
+              <h1>{title}</h1>
+              <span className="topbar__date">
+                {subtitle || new Intl.DateTimeFormat("zh-CN", { dateStyle: "long" }).format(new Date())}
+              </span>
+            </div>
           </div>
           <div className="topbar__actions">
             <WorkflowLauncher />
@@ -74,7 +93,7 @@ export default function AppShell({
               disabled={syncing}
               className={syncing ? "is-spinning" : ""}
             >
-              {syncing ? "同步中" : "同步"}
+              {syncing ? "正在更新" : syncLabel}
             </Button>
             <Button
               icon={LogOut}
@@ -98,6 +117,7 @@ export default function AppShell({
           >
             <Icon size={19} aria-hidden="true" />
             <span>{label}</span>
+            {navBadges[id] ? <strong className="mobile-nav__badge">{navBadges[id]}</strong> : null}
           </button>
         ))}
       </nav>

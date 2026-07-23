@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeft,
   BadgeDollarSign,
   BriefcaseBusiness,
   CreditCard,
@@ -17,6 +18,7 @@ import Button from "../components/Button";
 import EmptyState from "../components/EmptyState";
 import StatusTag from "../components/StatusTag";
 import { formatDateTime } from "../lib/format";
+import { FEE_MODULE_KEYS } from "../syncScope";
 
 const MODULES = [
   { key: "payment", module: "payment", label: "付款申请", icon: CreditCard, placeholder: "搜索编号、项目、公司" },
@@ -31,13 +33,6 @@ const SYSTEMS = [
   { key: "payment", label: "付款申请", icon: CreditCard },
   { key: "bizcases", label: "BizCase查询", icon: BriefcaseBusiness },
   { key: "feeManagement", label: "费用管理", icon: ReceiptText },
-];
-
-const FEE_MODULE_KEYS = [
-  "dailyExpenses",
-  "travelApplications",
-  "travelReimbursements",
-  "travelSubsidies",
 ];
 
 const SCOPE_LABELS = {
@@ -216,6 +211,9 @@ function ReadonlyDetailDrawer({ item, definition, syncedAt, onClose }) {
       <aside className="work-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="readonly-detail-title">
         <header className="work-detail-header">
           <div>
+            <Button autoFocus className="work-detail-back" icon={ArrowLeft} variant="ghost" onClick={onClose}>
+              返回列表
+            </Button>
             <span>{definition.label} · 本地快照</span>
             <h2 id="readonly-detail-title">{detailIdentity(item, definition.module)}</h2>
             <small>{detailSubtitle(item, definition.module)}</small>
@@ -226,7 +224,7 @@ function ReadonlyDetailDrawer({ item, definition, syncedAt, onClose }) {
           </div>
           <div className="work-detail-header__actions">
             <StatusTag value={recordStatusTone(item.status)} label={item.status || "状态未知"} />
-            <Button autoFocus icon={X} variant="ghost" size="icon" onClick={onClose} title="关闭详情" aria-label="关闭详情" />
+            <Button icon={X} variant="ghost" size="icon" onClick={onClose} title="关闭详情" aria-label="关闭详情" />
           </div>
         </header>
         <div className="work-detail-body">
@@ -264,9 +262,13 @@ export default function ReadonlyModulesView({
   onReload,
   onSync,
   syncing,
-  initialModule,
+  activeArea,
+  navigationParams,
+  navigate,
+  goBack,
+  hideSystemNavigation = false,
 }) {
-  const [activeSystem, setActiveSystem] = useState("payment");
+  const [activeSystem, setActiveSystem] = useState(activeArea || "payment");
   const [activeFeeModule, setActiveFeeModule] = useState("dailyExpenses");
   const [query, setQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
@@ -284,6 +286,21 @@ export default function ReadonlyModulesView({
     [current.items, deferredQuery],
   );
 
+  function openItem(item) {
+    navigate("records", {
+      area: activeSystem,
+      module: definition.key,
+      item: item.id,
+    });
+  }
+
+  function closeDetail() {
+    goBack({
+      view: "records",
+      params: { area: activeSystem, module: definition.key },
+    });
+  }
+
   useEffect(() => {
     if (resolvedFeeModule !== activeFeeModule) {
       setActiveFeeModule(resolvedFeeModule);
@@ -292,15 +309,23 @@ export default function ReadonlyModulesView({
   }, [activeFeeModule, resolvedFeeModule]);
 
   useEffect(() => {
-    if (FEE_MODULE_KEYS.includes(initialModule)) {
+    const requestedModule = navigationParams.module;
+    if (activeArea === "feeManagement") {
       setActiveSystem("feeManagement");
-      setActiveFeeModule(initialModule);
-      setSelectedItem(null);
-    } else if (["payment", "bizcases"].includes(initialModule)) {
-      setActiveSystem(initialModule);
-      setSelectedItem(null);
+      if (FEE_MODULE_KEYS.includes(requestedModule)) setActiveFeeModule(requestedModule);
+    } else if (["payment", "bizcases"].includes(activeArea)) {
+      setActiveSystem(activeArea);
     }
-  }, [initialModule]);
+    setSelectedItem(null);
+  }, [activeArea, navigationParams.module]);
+
+  useEffect(() => {
+    if (!navigationParams.item) {
+      setSelectedItem(null);
+      return;
+    }
+    setSelectedItem(current.items.find((item) => item.id === navigationParams.item) || null);
+  }, [current.items, navigationParams.item]);
 
   const emptyTitle = deferredQuery
     ? `没有匹配的${definition.label}记录`
@@ -317,6 +342,13 @@ export default function ReadonlyModulesView({
           <AlertTriangle size={17} aria-hidden="true" />
           <span>{error.message}</span>
           <Button icon={RefreshCw} onClick={onReload}>重试</Button>
+        </div>
+      ) : null}
+      {!loading && navigationParams.item && !selectedItem ? (
+        <div className="inline-alert readonly-alert" role="alert">
+          <AlertTriangle size={17} aria-hidden="true" />
+          <span>未找到这张业务单据，数据可能已经更新。</span>
+          <Button onClick={closeDetail}>返回单据列表</Button>
         </div>
       ) : null}
 
@@ -348,7 +380,7 @@ export default function ReadonlyModulesView({
 
         <div className="table-toolbar readonly-toolbar">
           <div className="readonly-module-controls">
-            <div className="segmented segmented--modules" aria-label="同级业务系统">
+            {!hideSystemNavigation ? <div className="segmented segmented--modules" aria-label="同级业务系统">
               {SYSTEMS.map(({ key, label, icon: Icon }) => {
                 const count = key === "feeManagement" ? feeManagementCount : data[key].total_count;
                 return (
@@ -368,7 +400,7 @@ export default function ReadonlyModulesView({
                   </button>
                 );
               })}
-            </div>
+            </div> : null}
             {activeSystem === "feeManagement" ? (
               <div className="segmented segmented--submodules" aria-label="费用管理子项">
                 {availableFeeModules.map((key) => {
@@ -381,6 +413,7 @@ export default function ReadonlyModulesView({
                       onClick={() => {
                         setActiveFeeModule(key);
                         setSelectedItem(null);
+                        navigate("records", { area: "feeManagement", module: key });
                       }}
                       type="button"
                       aria-pressed={activeFeeModule === key}
@@ -408,16 +441,21 @@ export default function ReadonlyModulesView({
         {loading ? <LoadingRows /> : (
           items.length ? (
             activeModule === "payment"
-              ? <PaymentTable items={items} onOpen={setSelectedItem} />
+              ? <PaymentTable items={items} onOpen={openItem} />
               : activeModule === "bizcases"
-                ? <BizCaseTable items={items} onOpen={setSelectedItem} />
-                : <FeeApplicationTable items={items} label={definition.label} onOpen={setSelectedItem} />
+                ? <BizCaseTable items={items} onOpen={openItem} />
+                : <FeeApplicationTable items={items} label={definition.label} onOpen={openItem} />
           ) : (
             <EmptyState
               icon={activeModule === "payment" ? CreditCard : Database}
               title={emptyTitle}
               action={!deferredQuery ? (
-                <Button icon={RefreshCw} variant="primary" onClick={onSync} disabled={syncing}>
+                <Button
+                  icon={RefreshCw}
+                  variant="primary"
+                  onClick={() => onSync(definition.module)}
+                  disabled={syncing}
+                >
                   {syncing ? "同步中" : "同步模块"}
                 </Button>
               ) : null}
@@ -430,7 +468,7 @@ export default function ReadonlyModulesView({
           item={selectedItem}
           definition={definition}
           syncedAt={current.synced_at}
-          onClose={() => setSelectedItem(null)}
+          onClose={closeDetail}
         />
       ) : null}
     </div>

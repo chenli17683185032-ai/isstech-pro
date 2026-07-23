@@ -207,8 +207,10 @@ class FakeReadonlyClient:
         self.fail_travel_reimbursement = fail_travel_reimbursement
         self.fail_travel_subsidy = fail_travel_subsidy
         self.fail_identity = fail_identity
+        self.identity_calls = 0
 
     def get_portal_display_name(self) -> str:
+        self.identity_calls += 1
         if self.fail_identity:
             raise RuntimeError("identity unavailable")
         return "USER-A"
@@ -302,15 +304,17 @@ class FakeReadonlyClient:
 
 def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) -> None:
     storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    first_client = FakeReadonlyClient()
+    second_client = FakeReadonlyClient()
     first = sync_readonly_modules(
-        FakeReadonlyClient(),  # type: ignore[arg-type]
+        first_client,  # type: ignore[arg-type]
         storage=storage,
         observed_at=T1,
         started_at=T1,
         run_id="batch-1",
     )
     second = sync_readonly_modules(
-        FakeReadonlyClient(),  # type: ignore[arg-type]
+        second_client,  # type: ignore[arg-type]
         storage=storage,
         observed_at=T2,
         started_at=T2,
@@ -332,6 +336,8 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
     assert second.status == "succeeded"
     assert second.observed_count == 11
     assert second.changed_count == 0
+    assert first_client.identity_calls == 1
+    assert second_client.identity_calls == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.PAYMENT)) == 1
     assert len(storage.current_readonly_snapshots(ReadonlyModuleKind.BIZCASE)) == 2
     assert len(
@@ -382,6 +388,31 @@ def test_readonly_sync_is_idempotent_and_keeps_modules_separate(tmp_path: Path) 
         payload["scope_reasons"] == ["submitted_by_me"]
         for payload in daily_expense_payloads
     )
+
+
+def test_readonly_sync_can_measure_one_module_without_touching_the_others(
+    tmp_path: Path,
+) -> None:
+    storage = WorkflowStorage(tmp_path / "workflow.sqlite3")
+    client = FakeReadonlyClient()
+
+    result = sync_readonly_modules(
+        client,  # type: ignore[arg-type]
+        storage=storage,
+        modules=(ReadonlyModuleKind.DAILY_EXPENSE,),
+        observed_at=T1,
+        started_at=T1,
+        run_id="daily-only",
+    )
+
+    assert result.status == "succeeded"
+    assert [stream.module for stream in result.streams] == [
+        ReadonlyModuleKind.DAILY_EXPENSE
+    ]
+    assert result.observed_count == 2
+    assert client.identity_calls == 1
+    assert storage.table_count("readonly_module_runs") == 1
+    assert storage.table_count("readonly_module_current") == 2
 
 
 def test_bizcase_snapshots_mark_only_exact_personal_projects() -> None:

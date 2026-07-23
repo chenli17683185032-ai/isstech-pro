@@ -101,7 +101,7 @@ function DraftFieldEditor({ field, draft, token, onUpdated, notify }) {
           {editable ? (
             <div className="review-actions">
               <Button icon={Check} variant="primary" disabled={busy || !value.trim()} onClick={() => review("confirmed")}>确认</Button>
-              <Button icon={X} variant="danger-ghost" disabled={busy} onClick={() => review("rejected")}>拒绝</Button>
+              <Button icon={X} variant="danger-ghost" disabled={busy} onClick={() => review("rejected")}>不采用此值</Button>
             </div>
           ) : null}
         </div>
@@ -110,41 +110,68 @@ function DraftFieldEditor({ field, draft, token, onUpdated, notify }) {
   );
 }
 
-export default function DraftsView({ token, data, loading, refresh, notify }) {
-  const [selectedId, setSelectedId] = useState(null);
+export default function DraftsView({
+  token,
+  data,
+  loading,
+  error,
+  refresh,
+  notify,
+  navigate,
+  navigationParams,
+}) {
+  const [selectedId, setSelectedId] = useState(navigationParams.draft || null);
   const [draft, setDraft] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
+  const [detailRequestVersion, setDetailRequestVersion] = useState(0);
   const [actionBusy, setActionBusy] = useState(false);
   const summaries = data.drafts;
 
   useEffect(() => {
-    if (!selectedId && summaries.length) setSelectedId(summaries[0].draft_id);
-    if (selectedId && !summaries.some((item) => item.draft_id === selectedId)) {
-      setSelectedId(summaries[0]?.draft_id || null);
+    const requestedId = navigationParams.draft;
+    if (requestedId && summaries.some((item) => item.draft_id === requestedId)) {
+      setSelectedId(requestedId);
+      return;
     }
-  }, [selectedId, summaries]);
-
-  async function loadDraft(id = selectedId) {
-    if (!id) return;
-    setDetailLoading(true);
-    try {
-      setDraft(await apiRequest(`/v1/drafts/${id}`, { token }));
-    } catch (error) {
-      notify({ tone: "error", message: error.message });
-    } finally {
-      setDetailLoading(false);
+    if (summaries.length) {
+      const fallbackId = summaries[0].draft_id;
+      setSelectedId(fallbackId);
+      if (requestedId !== fallbackId) navigate("drafts", { draft: fallbackId }, { replace: true });
+    } else {
+      setSelectedId(null);
     }
-  }
+  }, [navigate, navigationParams.draft, summaries]);
 
   useEffect(() => {
-    if (selectedId) loadDraft(selectedId);
-    else setDraft(null);
-    // selectedId is the deliberate fetch boundary.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, token]);
+    if (!selectedId) {
+      setDraft(null);
+      setDetailError(null);
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setDraft(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    apiRequest(`/v1/drafts/${selectedId}`, { token, signal: controller.signal })
+      .then((result) => {
+        if (active && result.draft_id === selectedId) setDraft(result);
+      })
+      .catch((requestError) => {
+        if (active && requestError.code !== "REQUEST_ABORTED") setDetailError(requestError);
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [detailRequestVersion, selectedId, token]);
 
   async function handleUpdated(updated, forceRefresh = false) {
-    if (forceRefresh) await loadDraft();
+    if (forceRefresh) setDetailRequestVersion((current) => current + 1);
     else if (updated) setDraft(updated);
     await refresh();
   }
@@ -163,7 +190,7 @@ export default function DraftsView({ token, data, loading, refresh, notify }) {
       notify({ tone: updated.state === "needs_review" ? "error" : "success", message: action === "validate" ? (updated.state === "validated" ? "校验通过" : "校验发现待处理项") : "草稿已就绪" });
     } catch (error) {
       notify({ tone: "error", message: error.code === "CONFLICT" ? "草稿已更新，正在刷新" : error.message });
-      if (error.code === "CONFLICT") await loadDraft();
+      if (error.code === "CONFLICT") setDetailRequestVersion((current) => current + 1);
     } finally {
       setActionBusy(false);
     }
@@ -177,21 +204,37 @@ export default function DraftsView({ token, data, loading, refresh, notify }) {
     draft_ready: "标记就绪",
   }), []);
 
-  if (!summaries.length && !loading) return <EmptyState icon={ClipboardCheck} title="暂无审阅草稿" />;
+  if (error && !summaries.length) {
+    return (
+      <div className="inline-alert" role="alert">
+        <AlertTriangle size={17} aria-hidden="true" />
+        <span>草稿读取失败：{error.message}</span>
+        <Button icon={RefreshCw} onClick={refresh}>重新读取</Button>
+      </div>
+    );
+  }
+  if (!summaries.length && !loading) return <EmptyState icon={ClipboardCheck} title="暂无草稿" />;
 
   return (
     <div className="draft-workspace">
       <aside className="draft-list" aria-label="草稿列表">
         <div className="draft-list__heading"><strong>草稿队列</strong><span>{summaries.length}</span></div>
         {summaries.map((item) => (
-          <button key={item.draft_id} type="button" className={selectedId === item.draft_id ? "is-active" : ""} onClick={() => setSelectedId(item.draft_id)}>
+          <button key={item.draft_id} type="button" className={selectedId === item.draft_id ? "is-active" : ""} onClick={() => navigate("drafts", { draft: item.draft_id })}>
             <span><strong>{item.title}</strong><small>{formatDateTime(item.updated_at)}</small></span>
             <span><StatusTag value={item.state} /><ChevronRight size={16} /></span>
           </button>
         ))}
       </aside>
       <section className="draft-detail">
-        {detailLoading || !draft ? (
+        {detailError ? (
+          <div className="work-detail-state work-detail-state--error" role="alert">
+            <AlertTriangle size={20} aria-hidden="true" />
+            <strong>草稿详情读取失败</strong>
+            <span>{detailError.message}</span>
+            <Button icon={RefreshCw} onClick={() => setDetailRequestVersion((current) => current + 1)}>重新读取</Button>
+          </div>
+        ) : detailLoading || !draft ? (
           <div className="loading-line"><LoaderCircle className="spin" size={18} />加载草稿</div>
         ) : (
           <>
@@ -199,9 +242,9 @@ export default function DraftsView({ token, data, loading, refresh, notify }) {
               <div><span className="mono">{draft.draft_id.slice(0, 12)}</span><h2>{summaries.find((item) => item.draft_id === draft.draft_id)?.title || "未命名草稿"}</h2><small>版本 {draft.version} · 更新 {formatDateTime(draft.updated_at)}</small></div>
               <div className="draft-detail__commands">
                 <StatusTag value={draft.state} />
-                <Button icon={RefreshCw} variant="ghost" size="icon" onClick={() => loadDraft()} title="刷新草稿" aria-label="刷新草稿" />
+                <Button icon={RefreshCw} variant="ghost" size="icon" onClick={() => setDetailRequestVersion((current) => current + 1)} title="刷新草稿" aria-label="刷新草稿" />
                 {["extracted", "needs_review"].includes(draft.state) ? <Button icon={ClipboardCheck} variant="primary" disabled={actionBusy} onClick={() => transition("validate")}>校验</Button> : null}
-                {draft.state === "validated" ? <Button icon={CheckCircle2} variant="primary" disabled={actionBusy} onClick={() => transition("ready")}>标记就绪</Button> : null}
+                {draft.state === "validated" ? <Button icon={CheckCircle2} variant="primary" disabled={actionBusy} onClick={() => transition("ready")}>完成审阅</Button> : null}
               </div>
             </header>
             {draft.validation_issues.length ? (

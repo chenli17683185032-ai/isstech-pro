@@ -1,12 +1,19 @@
-import { CheckCircle2, X, XCircle } from "lucide-react";
+import { CheckCircle2, RefreshCw, X, XCircle } from "lucide-react";
 import Button from "./Button";
 
 export default function Toast({ toast, onClose }) {
   if (!toast) return null;
-  const Icon = toast.tone === "error" ? XCircle : CheckCircle2;
+  const Icon = toast.tone === "error"
+    ? XCircle
+    : (toast.tone === "pending" ? RefreshCw : CheckCircle2);
   return (
-    <div className={`toast toast--${toast.tone || "success"}`} role="status">
-      <Icon size={18} aria-hidden="true" />
+    <div
+      className={`toast toast--${toast.tone || "success"}`}
+      role="status"
+      aria-live="polite"
+      aria-busy={toast.tone === "pending" ? "true" : undefined}
+    >
+      <Icon className={toast.tone === "pending" ? "toast__spinner" : ""} size={18} aria-hidden="true" />
       <span>{toast.message}</span>
       <Button
         icon={X}

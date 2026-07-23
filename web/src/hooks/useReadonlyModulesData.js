@@ -77,6 +77,15 @@ const emptyReadonlyData = {
   runs: [],
 };
 
+const moduleEndpoints = {
+  payment: ["payment", "/v1/readonly-modules/payment"],
+  bizcase: ["bizcases", "/v1/readonly-modules/bizcases"],
+  travel_application: ["travelApplications", "/v1/readonly-modules/travel-applications"],
+  daily_expense: ["dailyExpenses", "/v1/readonly-modules/daily-expenses"],
+  travel_reimbursement: ["travelReimbursements", "/v1/readonly-modules/travel-reimbursements"],
+  travel_subsidy: ["travelSubsidies", "/v1/readonly-modules/travel-subsidies"],
+};
+
 export default function useReadonlyModulesData(token, onAuthExpired) {
   const [data, setData] = useState(emptyReadonlyData);
   const [loading, setLoading] = useState(Boolean(token));
@@ -128,9 +137,27 @@ export default function useReadonlyModulesData(token, onAuthExpired) {
     }
   }, [token, onAuthExpired]);
 
+  const refreshModule = useCallback(async (module) => {
+    const target = moduleEndpoints[module];
+    if (!token || !target) return;
+    setError(null);
+    const [key, endpoint] = target;
+    try {
+      const [records, runs] = await Promise.all([
+        apiRequest(endpoint, { token }),
+        apiRequest("/v1/readonly-modules/runs?limit=20", { token }),
+      ]);
+      setData((current) => ({ ...current, [key]: records, runs }));
+      loadedRef.current = true;
+    } catch (requestError) {
+      if (requestError.status === 401) onAuthExpired();
+      setError(requestError);
+    }
+  }, [token, onAuthExpired]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { data, loading, error, refresh };
+  return { data, loading, error, refresh, refreshModule };
 }

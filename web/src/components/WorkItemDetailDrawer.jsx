@@ -1,4 +1,4 @@
-import { AlertCircle, LoaderCircle, RotateCw, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, LoaderCircle, RotateCw, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import Button from "./Button";
 import StatusTag from "./StatusTag";
@@ -100,6 +100,15 @@ export default function WorkItemDetailDrawer({
       >
         <header className="work-detail-header">
           <div>
+            <Button
+              autoFocus
+              className="work-detail-back"
+              icon={ArrowLeft}
+              variant="ghost"
+              onClick={onClose}
+            >
+              返回列表
+            </Button>
             <span>{summary.workflow_label || "采购单据"}</span>
             <h2 id="work-detail-title">{summary.reference_no || summary.external_id}</h2>
             <small>{summary.title || "未命名单据"}</small>
@@ -114,7 +123,6 @@ export default function WorkItemDetailDrawer({
               label={summary.category === "approved" ? "已过审" : summary.status}
             />
             <Button
-              autoFocus
               icon={X}
               variant="ghost"
               size="icon"

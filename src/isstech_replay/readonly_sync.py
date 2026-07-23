@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -350,6 +351,7 @@ def sync_readonly_module(
     started_at: datetime | None = None,
     run_id: str | None = None,
     display_name: str | None = None,
+    display_name_resolver: Callable[[], str] | None = None,
     project_numbers: tuple[str, ...] = (),
 ) -> ReadonlySyncResult:
     if module not in READONLY_MODULES:
@@ -387,7 +389,14 @@ def sync_readonly_module(
             ReadonlyModuleKind.TRAVEL_REIMBURSEMENT,
             ReadonlyModuleKind.TRAVEL_SUBSIDY,
         }:
-            identity = (display_name or client.get_portal_display_name()).strip()
+            identity_source = (
+                display_name
+                if display_name is not None
+                else (display_name_resolver or client.get_portal_display_name)()
+            )
+            identity = identity_source.strip()
+            if not identity:
+                raise ValueError("portal display name is empty")
         if module is ReadonlyModuleKind.PAYMENT:
             result = client.list_personal_payment_records(
                 display_name=identity,
@@ -524,6 +533,22 @@ def sync_readonly_modules(
     summaries: list[ReadonlyStreamSummary] = []
     results: list[ReadonlySyncResult] = []
     project_numbers = _personal_project_numbers(scope_storage or storage)
+    identity_resolved = False
+    identity_value = ""
+    identity_error: Exception | None = None
+
+    def resolve_display_name() -> str:
+        nonlocal identity_error, identity_resolved, identity_value
+        if not identity_resolved:
+            try:
+                identity_value = client.get_portal_display_name()
+            except Exception as error:
+                identity_error = error
+            identity_resolved = True
+        if identity_error is not None:
+            raise identity_error
+        return identity_value
+
     for module in modules:
         stream_run_id = f"{batch_id}-{module.value}"
         try:
@@ -536,6 +561,7 @@ def sync_readonly_modules(
                 observed_at=measurement_time,
                 started_at=batch_started,
                 run_id=stream_run_id,
+                display_name_resolver=resolve_display_name,
                 project_numbers=project_numbers,
             )
         except Exception as error:

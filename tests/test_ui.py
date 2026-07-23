@@ -31,7 +31,8 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert js.status_code == 200
     assert "javascript" in js.headers["content-type"]
     assert "待处理" in js.text
-    assert "未审批流程" in js.text
+    assert "流转中单据" in js.text
+    assert "单据中心" in js.text
     assert "查看类目" in js.text
     assert "已完成" in js.text
     assert "范围：我申请、我的项目与我管理的" in js.text
@@ -79,6 +80,9 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert "/v1/readonly-modules/travel-reimbursements" in js.text
     assert "/v1/readonly-modules/travel-subsidies" in js.text
     assert "/v1/readonly-modules/sync" in js.text
+    assert "正在更新当前业务单据" in js.text
+    assert "module=" in js.text
+    assert "workflow=" in js.text
     assert "催办助手" in js.text
     assert "当前偏好" in js.text
     assert "模型失败，已本地排序" in js.text
@@ -89,6 +93,7 @@ def test_built_root_ui_and_hashed_assets_are_served() -> None:
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
     assert ".assistant-panel" in css.text
+    assert ".toast--pending" in css.text
     assert icon.status_code == 200
     assert icon.headers["content-type"].startswith("image/svg+xml")
     assert "http://" not in response.text

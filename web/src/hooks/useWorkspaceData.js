@@ -50,9 +50,24 @@ export default function useWorkspaceData(token, onAuthExpired) {
     }
   }, [token, onAuthExpired]);
 
+  const refreshWorkItems = useCallback(async () => {
+    if (!token) return;
+    setError(null);
+    try {
+      const [workItems, syncRuns] = await Promise.all([
+        apiRequest("/v1/work-items/current", { token }),
+        apiRequest("/v1/sync/runs?limit=10", { token }),
+      ]);
+      setData((current) => ({ ...current, workItems, syncRuns }));
+    } catch (requestError) {
+      if (requestError.status === 401) onAuthExpired();
+      setError(requestError);
+    }
+  }, [token, onAuthExpired]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  return { data, loading, error, refresh, setData };
+  return { data, loading, error, refresh, refreshWorkItems, setData };
 }

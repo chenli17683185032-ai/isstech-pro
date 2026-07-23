@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from isstech_replay.account_scope import account_database_path
 from isstech_replay.errors import local_storage_error, upstream_error
+from isstech_replay.models.work_items import WorkflowKind
 from isstech_replay.routes.deps import get_session
 from isstech_replay.routes.work_items import WorkItemOut
 from isstech_replay.session_store import SessionRecord
@@ -129,6 +130,7 @@ def sync_work_items(
     session: Annotated[SessionRecord, Depends(get_session)],
     max_pages: int = Query(default=20, ge=1, le=100),
     dry_run: bool = Query(default=False),
+    workflow: WorkflowKind | None = Query(default=None),
 ) -> SyncRunOut:
     storage = (
         None
@@ -141,6 +143,7 @@ def sync_work_items(
             storage=storage,
             max_pages=max_pages,
             dry_run=dry_run,
+            workflows=(workflow,) if workflow is not None else None,
         )
     except PermissionError as exc:
         raise upstream_error(str(exc), details={"code_hint": "AUTH_EXPIRED"}) from exc

@@ -13,7 +13,7 @@ import EmptyState from "../components/EmptyState";
 import StatusTag from "../components/StatusTag";
 import { formatDateTime } from "../lib/format";
 
-const APPROVED_STATUSES = new Set(["审批通过", "已通过", "已完成"]);
+const APPROVED_STATUSES = new Set(["审批通过", "已通过", "已完成", "已付"]);
 const READONLY_CATEGORIES = [
   { key: "payment", label: "付款申请" },
   { key: "bizcases", label: "BizCase查询" },
@@ -47,6 +47,7 @@ function statusTone(status) {
 }
 
 function readonlyRecord(item, label, target) {
+  const area = target === "payment" || target === "bizcases" ? target : "feeManagement";
   return {
     key: `${label}:${item.id}`,
     category: label,
@@ -55,8 +56,8 @@ function readonlyRecord(item, label, target) {
     project: item.project_no || "",
     approver: item.current_approver || "",
     status: item.status || "",
-    destination: "readonly-modules",
-    target,
+    destination: "records",
+    target: { area, module: target, item: item.id },
   };
 }
 
@@ -71,7 +72,12 @@ function unapprovedGroups(workItems, readonlyData) {
       project: item.project_no || "",
       approver: item.current_approver || "",
       status: item.status,
-      destination: "work-items",
+      destination: "records",
+      target: {
+        area: "procurement",
+        workflow: item.workflow,
+        item: item.external_id,
+      },
     }));
   READONLY_CATEGORIES.forEach(({ key, label }) => {
     readonlyData[key].items
@@ -89,7 +95,11 @@ function unapprovedGroups(workItems, readonlyData) {
       label,
       items,
       destination: items[0].destination,
-      target: items[0].target,
+      target: {
+        area: items[0].target.area,
+        module: items[0].target.module,
+        workflow: items[0].target.workflow,
+      },
     }))
     .sort((left, right) => {
       const leftIndex = CATEGORY_ORDER.indexOf(left.label);
@@ -118,7 +128,7 @@ function UnapprovedWorkflowGroups({ groups, navigate }) {
             </Button>
           </div>
           <div className="table-wrap">
-            <table className="data-table unapproved-table" aria-label={`${group.label}未审批流程`}>
+            <table className="data-table unapproved-table" aria-label={`${group.label}流转中单据`}>
               <thead><tr><th>编号</th><th>单据</th><th>审批人</th><th>状态</th><th aria-label="进入类目" /></tr></thead>
               <tbody>
                 {group.items.map((item) => (
@@ -179,7 +189,7 @@ export default function OverviewView({
     .at(-1);
   const metrics = [
     { label: "待审草稿", value: reviewDrafts.length, icon: ClipboardCheck, tone: "warning" },
-    { label: "未审批", value: unapprovedCount, icon: ListTodo, tone: "danger", needsReadonly: true },
+    { label: "流转中", value: unapprovedCount, icon: ListTodo, tone: "danger", needsReadonly: true },
     { label: "个人单据", value: personalCount, icon: CircleCheckBig, tone: "success", needsReadonly: true },
     { label: "材料", value: data.materials.length, icon: FileText, tone: "neutral" },
   ];
@@ -220,14 +230,14 @@ export default function OverviewView({
           <section className="content-section">
             <div className="section-heading">
               <div>
-                <h2>未审批流程</h2>
+                <h2>流转中单据</h2>
                 <span>{readonlyError ? "部分本地快照不可用" : `${groups.length} 个类目 · ${unapprovedCount} 条`}</span>
               </div>
             </div>
             {groups.length ? (
               <UnapprovedWorkflowGroups groups={groups} navigate={navigate} />
             ) : (
-              <EmptyState icon={ListTodo} title={isLoading ? "正在读取本地快照" : "暂无未审批流程"} />
+              <EmptyState icon={ListTodo} title={isLoading ? "正在读取本地快照" : "暂无流转中单据"} />
             )}
           </section>
 
@@ -239,7 +249,7 @@ export default function OverviewView({
             {data.materials.length ? (
               <div className="material-rail">
                 {data.materials.slice(0, 4).map((material) => (
-                  <button key={material.id} type="button" onClick={() => navigate("materials")}>
+                  <button key={material.id} type="button" onClick={() => navigate("materials", { material: material.id })}>
                     <FileText size={18} />
                     <span><strong>{material.original_name}</strong><small>{formatDateTime(material.created_at)}</small></span>
                     <StatusTag value={material.status} />
@@ -259,7 +269,7 @@ export default function OverviewView({
             {reviewDrafts.length ? (
               <div className="compact-list">
                 {reviewDrafts.slice(0, 5).map((draft) => (
-                  <button key={draft.draft_id} onClick={() => navigate("drafts")} type="button">
+                  <button key={draft.draft_id} onClick={() => navigate("drafts", { draft: draft.draft_id })} type="button">
                     <span className="compact-list__main"><strong>{draft.title}</strong><small>{formatDateTime(draft.updated_at)}</small></span>
                     <span className="compact-list__aside"><StatusTag value={draft.state} /><small>{draft.pending_count} 待处理</small></span>
                   </button>

@@ -755,6 +755,51 @@ def test_readonly_module_api_syncs_and_replays_cached_lists(
     assert storage.table_count("readonly_module_current") == 89
 
 
+def test_manual_sync_endpoints_accept_one_bounded_scope(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database = tmp_path / "workflow.sqlite3"
+    monkeypatch.setenv("ISSTECH_DATABASE_PATH", str(database))
+    client, token = _authed_client()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with client:
+        procurement = client.post(
+            "/v1/sync/work-items?workflow=procurement_order",
+            headers=headers,
+        )
+        daily_expense = client.post(
+            "/v1/readonly-modules/sync?module=daily_expense",
+            headers=headers,
+        )
+        invalid_workflow = client.post(
+            "/v1/sync/work-items?workflow=unknown",
+            headers=headers,
+        )
+        invalid_module = client.post(
+            "/v1/readonly-modules/sync?module=unknown",
+            headers=headers,
+        )
+
+    assert procurement.status_code == 200
+    assert [stream["workflow"] for stream in procurement.json()["streams"]] == [
+        "procurement_order"
+    ]
+    assert daily_expense.status_code == 200
+    assert [stream["module"] for stream in daily_expense.json()["streams"]] == [
+        "daily_expense"
+    ]
+    assert invalid_workflow.status_code == 422
+    assert invalid_module.status_code == 422
+
+    storage = WorkflowStorage(
+        account_database_path("alice", base_database_path=database)
+    )
+    assert storage.table_count("sync_runs") == 1
+    assert storage.table_count("readonly_module_runs") == 1
+
+
 def test_work_item_detail_is_limited_to_visible_current_account_snapshots(
     tmp_path: Path,
     monkeypatch,
